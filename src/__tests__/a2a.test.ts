@@ -10,8 +10,20 @@ import {
 } from "../a2a"
 import type { MailboxMessage, IncomingFile, IncomingMessage, SeenLedger } from "../a2a"
 import type { ProfileShareEnvelope } from "../share"
+import type { MissionShareEnvelope } from "../mission-share"
 
 const NOW = "2026-03-14T18:00:00.000Z"
+
+function missionEnvelope(overrides: Partial<MissionShareEnvelope> = {}): MissionShareEnvelope {
+  return {
+    subject: { missionKey: "PROJ-1234", title: "Ship it" },
+    fromAgentId: "agent-a",
+    scope: "mission",
+    learnings: [{ key: "gotcha", value: "rebase not merge" }],
+    issuedAt: NOW,
+    ...overrides,
+  }
+}
 
 function envelope(overrides: Partial<ProfileShareEnvelope> = {}): ProfileShareEnvelope {
   return {
@@ -92,6 +104,53 @@ describe("buildOutgoing", () => {
   })
 })
 
+describe("buildOutgoing — kind discriminant (brick 3)", () => {
+  it("defaults kind to profile_share when omitted (backward-compat)", () => {
+    const out = buildOutgoing({ envelope: envelope(), fromAgentId: "agent-a", toAgentId: "agent-b", now: NOW })
+    const parsed = JSON.parse(out.bytes) as MailboxMessage
+    expect(parsed.kind).toBe("profile_share")
+  })
+
+  it("stamps kind:mission_share on the wrapper when requested, carrying the mission envelope verbatim", () => {
+    const env = missionEnvelope()
+    const out = buildOutgoing({ envelope: env, fromAgentId: "agent-a", toAgentId: "agent-b", kind: "mission_share", now: NOW })
+    const parsed = JSON.parse(out.bytes) as MailboxMessage
+    expect(parsed.kind).toBe("mission_share")
+    expect(parsed.envelope).toEqual(env)
+  })
+
+  it("stamps kind:profile_share explicitly when requested", () => {
+    const out = buildOutgoing({ envelope: envelope(), fromAgentId: "agent-a", toAgentId: "agent-b", kind: "profile_share", now: NOW })
+    expect((JSON.parse(out.bytes) as MailboxMessage).kind).toBe("profile_share")
+  })
+})
+
+describe("readIncoming — kind propagation (brick 3)", () => {
+  it("accepts a mission_share wrapper and surfaces kind:mission_share on the IncomingMessage", () => {
+    const out = buildOutgoing({ envelope: missionEnvelope(), fromAgentId: "agent-a", toAgentId: "agent-b", kind: "mission_share", now: NOW })
+    const result = readIncoming({
+      files: [{ relativePath: out.relativePath, bytes: out.bytes }],
+      selfAgentId: "agent-b",
+      seen: emptyLedger,
+    })
+    expect(result.rejected).toEqual([])
+    expect(result.ready).toHaveLength(1)
+    expect(result.ready[0].kind).toBe("mission_share")
+    expect(result.ready[0].envelope).toEqual(missionEnvelope())
+  })
+
+  it("surfaces kind:profile_share for a profile_share wrapper", () => {
+    const out = buildOutgoing({ envelope: envelope(), fromAgentId: "agent-a", toAgentId: "agent-b", now: NOW })
+    const result = readIncoming({
+      files: [{ relativePath: out.relativePath, bytes: out.bytes }],
+      selfAgentId: "agent-b",
+      seen: emptyLedger,
+    })
+    expect(result.ready).toHaveLength(1)
+    expect(result.ready[0].kind).toBe("profile_share")
+  })
+})
+
 describe("readIncoming — happy path", () => {
   it("returns the message buildOutgoing produced when self is the recipient", () => {
     const out = buildOutgoing({ envelope: envelope(), fromAgentId: "agent-a", toAgentId: "agent-b", now: NOW })
@@ -108,6 +167,7 @@ describe("readIncoming — happy path", () => {
     expect(result.ready[0].toAgentId).toBe("agent-b")
     expect(result.ready[0].relativePath).toBe(out.relativePath)
     expect(result.ready[0].envelope).toEqual(envelope())
+    expect(result.ready[0].kind).toBe("profile_share")
   })
 
   it("accepts an injected now (covers the readIncoming now branch)", () => {
