@@ -11,6 +11,7 @@ import type { IdentityProvider, TrustLevel, NoteProvenance, AgentMeta, ShareScop
 import { isShareScope } from "../types"
 import { FriendResolver } from "../resolver"
 import { describeTrustContext } from "../trust-explanation"
+import { assessStanding, explainStanding } from "../standing"
 import { getChannelCapabilities } from "../channel"
 import { upsertGroupContextParticipants } from "../group-context"
 import type { GroupContextParticipant } from "../group-context"
@@ -118,6 +119,26 @@ export async function dispatchTool(
         isGroupChat: coerceBool(args.isGroupChat),
       })
       return { result: explanation, isError: false }
+    }
+
+    case "assess_standing": {
+      // Pure read mirroring describe_trust: resolve the record, run the store-free
+      // assessment, return the value. No rule injected at the boundary — the tool
+      // uses DEFAULT_STANDING_RULE via the fn's `rule ?? DEFAULT` fallback. Never
+      // writes trust; never produces a wire artifact.
+      const friend = await store.get(coerceString(args.friendId))
+      if (!friend) {
+        return { result: { ok: false, status: "not_found", message: "friend record not found" }, isError: true }
+      }
+      return { result: assessStanding(friend), isError: false }
+    }
+
+    case "explain_standing": {
+      const friend = await store.get(coerceString(args.friendId))
+      if (!friend) {
+        return { result: { ok: false, status: "not_found", message: "friend record not found" }, isError: true }
+      }
+      return { result: explainStanding(friend), isError: false }
     }
 
     case "get_friend": {
