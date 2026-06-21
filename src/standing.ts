@@ -119,7 +119,29 @@ export const DEFAULT_STANDING_RULE: StandingRule = {
  * never writes trust (firewall 2); never produces a wire artifact (firewall 3).
  */
 export function assessStanding(record: FriendRecord, now?: Date, rule?: StandingRule): Standing {
-  throw new Error("not implemented")
+  const outcomes = record.agentMeta?.outcomes ?? []
+  // FIREWALL 1: first-party only. An absent `origin` is treated as first-party
+  // (the safe-merge predicate); only an explicit "imported" is excluded.
+  const firstParty = outcomes.filter((outcome) => outcome.provenance?.origin !== "imported")
+
+  const tally: StandingTally = { success: 0, partial: 0, failed: 0 }
+  for (const outcome of firstParty) {
+    tally[outcome.result] += 1
+  }
+
+  const basisCount = firstParty.length
+  const familiarity = record.agentMeta?.familiarity ?? 0
+  const tier = (rule ?? DEFAULT_STANDING_RULE).tier({ tally, basisCount, familiarity })
+  const assessedAt = (now ?? new Date()).toISOString()
+
+  emitNervesEvent({
+    component: "friends",
+    event: "friends.standing_assessed",
+    message: "assessed earned standing",
+    meta: { tier, basisCount },
+  })
+
+  return { tier, basisCount, tally, familiarity, assessedAt }
 }
 
 /**
@@ -129,5 +151,46 @@ export function assessStanding(record: FriendRecord, now?: Date, rule?: Standing
  * Mirrors `describeTrustContext`'s shape.
  */
 export function explainStanding(record: FriendRecord, now?: Date, rule?: StandingRule): StandingExplanation {
-  throw new Error("not implemented")
+  const standing = assessStanding(record, now, rule)
+  const { tier, basisCount, tally } = standing
+
+  // FIREWALL 4: the guardrail. ALWAYS present — frames standing as input to a
+  // manual trust decision, never an instruction. It states, in plain words, that
+  // standing does not change the peer's trust level.
+  const guardrail =
+    "Standing is advisory only — it does not change this peer's trust level. Adjust trust deliberately with set_trust if warranted."
+
+  // Per-tier human gloss (count-based language; references the basis where it
+  // helps). Mirrors describeTrustContext's per-level branch. Every tier carries a
+  // tier-flavored `note`, paired with the always-present guardrail in `advisory`.
+  const gloss: Record<StandingTier, { summary: string; why: string; note: string }> = {
+    proven: {
+      summary: "proven on our shared work",
+      why: `every one of the ${basisCount} outcomes I personally recorded with this peer succeeded, across enough shared work to be confident.`,
+      note: "A strong track record — still your call whether it warrants more trust.",
+    },
+    reliable: {
+      summary: "reliable so far",
+      why: `the ${basisCount} first-party outcome${basisCount === 1 ? "" : "s"} I recorded with this peer succeeded, with no failures yet.`,
+      note: "Promising, but on a thin basis — weigh it as one input, not a verdict.",
+    },
+    mixed: {
+      summary: "a mixed track record",
+      why: `the outcomes I recorded with this peer are mixed (${tally.success} succeeded, ${tally.partial} partial, ${tally.failed} failed) — not yet a clear signal either way.`,
+      note: "Signals are mixed; lean on direct judgement here.",
+    },
+    untested: {
+      summary: "untested — no first-party basis",
+      why: "I have not recorded any first-party outcomes with this peer, so there is nothing earned to assess.",
+      note: "No basis yet — standing offers no guidance until you have shared outcomes.",
+    },
+    troubled: {
+      summary: "troubled — failures outweigh successes",
+      why: `the outcomes I recorded with this peer skew negative (${tally.failed} failed vs ${tally.success} succeeded).`,
+      note: "Recent results are poor; weigh carefully before granting more authority.",
+    },
+  }
+
+  const chosen = gloss[tier]
+  return { standing, summary: chosen.summary, why: chosen.why, advisory: [chosen.note, guardrail] }
 }

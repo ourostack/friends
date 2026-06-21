@@ -78,12 +78,15 @@ describe("assessStanding — tiers", () => {
     expect(s.familiarity).toBe(3)
   })
 
-  it("falls back to mixed when the proven success floor is met but familiarity is below threshold", () => {
+  it("falls back to reliable when the proven success floor is met but familiarity is below threshold", () => {
+    // 3 clean successes but familiarity < THRESHOLD: the proven gate fails on
+    // familiarity, and the next ladder rung (>=1 clean win) catches it as
+    // reliable — clean wins, just not enough lived history for proven.
     const s = assessStanding(
       agentFriend({ outcomes: [out("success", "m1"), out("success", "m2"), out("success", "m3")], familiarity: 2 }),
       NOW,
     )
-    expect(s.tier).toBe("mixed")
+    expect(s.tier).toBe("reliable")
     expect(s.basisCount).toBe(3)
   })
 
