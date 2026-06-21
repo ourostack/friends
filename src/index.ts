@@ -75,6 +75,8 @@ export {
 
 export { FileFriendStore } from "./store-file"
 export { FileGrantStore, grantsDirFor } from "./grant-store-file"
+export { openFileBundle } from "./file-bundle"
+export type { FileBundle } from "./file-bundle"
 
 export {
   FriendResolver,
