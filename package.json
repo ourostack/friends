@@ -33,6 +33,7 @@
   "type": "commonjs",
   "scripts": {
     "build": "tsc",
+    "postbuild": "node -e \"require('fs').chmodSync('dist/mcp/bin.js', 0o755)\"",
     "prepare": "npm run build",
     "pretest": "npm run build",
     "pretest:coverage": "npm run build",
