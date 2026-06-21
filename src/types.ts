@@ -58,6 +58,15 @@ export interface FriendConnection {
   relationship: string
 }
 
+// -- Note Provenance --
+// Optional attribution for a fact asserted about a friend: which agent claimed
+// it. Additive — records with no provenance remain valid. Attaches inline on a
+// note value and on a RelationshipOutcome so a cross-agent assertion can carry
+// who made it (the P2 `assertedBy` attribution slot).
+export interface NoteProvenance {
+  assertedBy?: { agentId?: string; agentName?: string }
+}
+
 // -- Relationship Outcome --
 // Records the result of a shared mission with an agent peer.
 export interface RelationshipOutcome {
@@ -65,6 +74,7 @@ export interface RelationshipOutcome {
   result: "success" | "partial" | "failed"
   timestamp: string
   note?: string
+  provenance?: NoteProvenance
 }
 
 // -- Agent Meta --
@@ -95,7 +105,7 @@ export interface FriendRecord {
   externalIds: ExternalId[]               // PII
   tenantMemberships: string[]             // PII
   toolPreferences: Record<string, string> // keyed by integration name
-  notes: Record<string, { value: string, savedAt: string }> // general friend knowledge (timestamped)
+  notes: Record<string, { value: string, savedAt: string, provenance?: NoteProvenance }> // general friend knowledge (timestamped)
   totalTokens: number                     // cumulative token usage across all turns
   createdAt: string                       // ISO date
   updatedAt: string

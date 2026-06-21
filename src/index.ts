@@ -16,6 +16,7 @@ export type {
   TrustLevel,
   AgentMeta,
   RelationshipOutcome,
+  NoteProvenance,
   ChannelCapabilities,
   ResolvedContext,
   SenseType,
