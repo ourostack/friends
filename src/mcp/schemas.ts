@@ -1,10 +1,12 @@
 // MCP tool schemas for the friends server.
 //
-// 24 tools — a thin 1:1 surface over the friends library (D7): the original 14,
+// 26 tools — a thin 1:1 surface over the friends library (D7): the original 14,
 // the cross-agent moat surface (resolve_room, import_profile, grant_share,
-// revoke_share, list_shares; share_profile is de-stubbed in place), and the
-// brick-3 mission ledger (record_mission, get_mission, list_missions,
-// share_mission, import_mission). Each schema follows JSON Schema for
+// revoke_share, list_shares; share_profile is de-stubbed in place), the brick-3
+// mission ledger (record_mission, get_mission, list_missions, share_mission,
+// import_mission), and the brick-4 earned-standing lenses (assess_standing,
+// explain_standing — read-only, advisory; never write trust, never on the wire).
+// Each schema follows JSON Schema for
 // `inputSchema` as required by MCP. The shape mirrors the harness's McpToolSchema
 // so the same client tooling consumes both.
 import { emitNervesEvent } from "../observability"
@@ -56,6 +58,28 @@ export function getToolSchemas(): McpToolSchema[] {
           isGroupChat: { type: "string", description: "set to 'true' when the conversation is a group chat" },
         },
         required: ["friendId", "channel"],
+      },
+    },
+    {
+      name: "assess_standing",
+      description: "Assess a peer's earned standing from your FIRST-PARTY outcomes with them: a tier (proven/reliable/mixed/untested/troubled), the basis count, and the tally. Advisory only — never changes trust, never shared. Returns a Standing, or { ok:false, status:'not_found' } when the friend is missing.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          friendId: { type: "string", description: "friend uuid or name" },
+        },
+        required: ["friendId"],
+      },
+    },
+    {
+      name: "explain_standing",
+      description: "Explain a peer's earned standing in words: the tier with a human summary, why, and advisory notes that frame it as input to a MANUAL trust decision (never an instruction to change trust). Returns a StandingExplanation, or { ok:false, status:'not_found' } when the friend is missing.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          friendId: { type: "string", description: "friend uuid or name" },
+        },
+        required: ["friendId"],
       },
     },
     {
