@@ -137,6 +137,19 @@ export { tofuVerifier, DEFAULT_AGENT_VERIFIER } from "./verifier"
 
 export { prepareProfileShare, importProfileShare } from "./share"
 
+export { prepareMissionShare, importMissionShare } from "./mission-share"
+export type {
+  MissionShareEnvelope,
+  SharedLearning,
+  PrepareMissionShareInput,
+  PrepareMissionShareResult,
+  PrepareMissionShareStatus,
+  ImportMissionShareInput,
+  ImportMissionShareOptions,
+  ImportMissionShareResult,
+  ImportMissionShareStatus,
+} from "./mission-share"
+
 export { grantShare, revokeShare, listShares, isGrantEffective } from "./grants"
 
 // -- Observability seam --

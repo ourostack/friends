@@ -447,13 +447,13 @@ describe("importMissionShare — consumer (the non-clobbering merge)", () => {
 
   // ── Outcome merge (the genuinely-new logic) ──
 
-  it("appends + stamps imported outcomes with origin:imported + assertedBy + importedAt", async () => {
+  it("appends + stamps imported outcomes with origin:imported + assertedBy + importedAt (and carries the note)", async () => {
     const missions = new MemoryMissionStore([mission({ outcomes: [] })])
     const result = await importMissionShare(missions, {
       envelope: envelope({
         scope: "outcomes",
         learnings: undefined,
-        outcomes: [{ missionId: "ext-1", result: "success", timestamp: "2026-05-01T00:00:00.000Z" }],
+        outcomes: [{ missionId: "ext-1", result: "success", timestamp: "2026-05-01T00:00:00.000Z", note: "shipped clean" }],
       }),
       fromAgentId: "agent-a",
       trustOfSource: "friend",
@@ -463,10 +463,26 @@ describe("importMissionShare — consumer (the non-clobbering merge)", () => {
       expect(result.record.outcomes).toHaveLength(1)
       const o = result.record.outcomes[0]
       expect(o.missionId).toBe("ext-1")
+      expect(o.note).toBe("shipped clean")
       expect(o.provenance?.origin).toBe("imported")
       expect(o.provenance?.assertedBy).toEqual({ agentId: "agent-a" })
       expect(o.provenance?.importedAt).toBeTruthy()
     }
+  })
+
+  it("an imported outcome without a note omits the note field", async () => {
+    const missions = new MemoryMissionStore([mission({ outcomes: [] })])
+    const result = await importMissionShare(missions, {
+      envelope: envelope({
+        scope: "outcomes",
+        learnings: undefined,
+        outcomes: [{ missionId: "ext-2", result: "partial", timestamp: "2026-05-02T00:00:00.000Z" }],
+      }),
+      fromAgentId: "agent-a",
+      trustOfSource: "friend",
+    })
+    expect(result.ok).toBe(true)
+    if (result.ok) expect("note" in result.record.outcomes[0]).toBe(false)
   })
 
   it("dedupe: a SAME-peer duplicate outcome row (missionId,timestamp,assertedBy.agentId) is idempotent", async () => {
