@@ -1,4 +1,10 @@
-// A2A git-mailbox transport — end-to-end proof (brick two's capstone).
+// Git-mailbox FALLBACK transport — end-to-end proof (the demoted no-endpoint path).
+//
+// Real A2A (`message/send` + the friends E2E sign-then-seal overlay, see
+// src/a2a-client/ and examples/cross-agent-a2a-relay.ts) is the PRIMARY transport.
+// This git-mailbox is the clearly-labelled offline/no-endpoint FALLBACK — a host
+// opts into it only when a peer has no reachable A2A endpoint and no relay. This
+// proof shows it still carries a consent-gated envelope safely.
 //
 // The cross-agent moat (see examples/cross-agent-moat.ts) proves two DIFFERENT
 // agents can agree a party is the same person and share — with consent, without
@@ -10,19 +16,19 @@
 // outbox dir (single-writer); addressing lives in the path; the consumer's
 // `readIncoming` binds the wrapper's claimed sender/recipient against the path
 // and rejects any mismatch — so a hostile mailbox can only DENY or REPLAY, never
-// escalate. The pure `@ouro.bot/friends/a2a` library does NO git itself; THIS
+// escalate. The pure `@ouro.bot/friends/mailbox` library does NO git itself; THIS
 // script is the host and does every "git" op (here: plain file writes/reads into
 // a tmp dir — no actual git binary needed, which keeps the proof hermetic).
 //
 // ZERO Ouroboros (or any harness) code is in the loop. The MCP side spawns the
 // package's own built `dist/mcp/bin.js` twice (exactly as the capstone does); the
-// transport side calls the pure a2a fns. We import those from `../src/a2a` (a
-// pure, tsx-compiled module with no build-state dependence) for readability — the
-// cross-agent MCP path still goes through the built bin, just like the capstone.
+// transport side calls the pure mailbox fns. We import those from `../src/mailbox`
+// (a pure, tsx-compiled module with no build-state dependence) for readability —
+// the cross-agent MCP path still goes through the built bin, just like the capstone.
 //
 // Every invariant is a HARD assert. Any violation throws → red banner, exit 1.
 //
-// Run it:  npm run example:a2a-git-mailbox
+// Run it:  npm run example:mailbox-fallback
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { strict as assert } from "node:assert"
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSync, existsSync } from "node:fs"
@@ -30,8 +36,8 @@ import { tmpdir } from "node:os"
 import { join, dirname } from "node:path"
 import { randomUUID } from "node:crypto"
 
-import { buildOutgoing, readIncoming, markSeen } from "../src/a2a"
-import type { SeenLedger } from "../src/a2a"
+import { buildOutgoing, readIncoming, markSeen } from "../src/mailbox"
+import type { SeenLedger } from "../src/mailbox"
 
 // The built MCP entrypoint. The npm script runs `npm run build` first so it
 // exists; fail fast with a clear message otherwise.
@@ -320,10 +326,10 @@ async function main(): Promise<void> {
     // by the a2a join-key id) and assert the mailbox coord survived the file
     // round-trip — i.e. it persisted to disk and reloaded losslessly (Unit 2).
     const bPeer = await agentA.tool("get_friend", { friendId: bAsPeerOfA.payload.id })
-    assert.deepEqual(bPeer.payload.agentMeta.a2a.mailbox, { repo: mailboxDir, selfOutboxAgentId: AGENT_A_ID }, "A's record for agent-b must round-trip its mailbox coord")
+    assert.deepEqual(bPeer.payload.agentMeta.mailbox, { repo: mailboxDir, selfOutboxAgentId: AGENT_A_ID }, "A's record for agent-b must round-trip its mailbox coord")
     const aPeer = await agentB.tool("get_friend", { friendId: aAsPeerOfB.payload.id })
-    assert.deepEqual(aPeer.payload.agentMeta.a2a.mailbox, { repo: mailboxDir, selfOutboxAgentId: AGENT_B_ID }, "B's record for agent-a must round-trip its mailbox coord")
-    ok("A↔B are friend peers; the a2a.mailbox coord round-trips through the live MCP/file path")
+    assert.deepEqual(aPeer.payload.agentMeta.mailbox, { repo: mailboxDir, selfOutboxAgentId: AGENT_B_ID }, "B's record for agent-a must round-trip its mailbox coord")
+    ok("A↔B are friend peers; the top-level mailbox coord round-trips through the live MCP/file path")
 
     // ════════════════════════════════════════════════════════════════════════
     // STEP 3 — Content-bleed guard (BEFORE the grant). A content share with no

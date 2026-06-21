@@ -183,36 +183,60 @@ export class FileFriendStore implements FriendStore {
     const meta = raw as Record<string, unknown>
     if (typeof meta.bundleName !== "string") return undefined
 
+    // Mailbox is top-level on AgentMeta since the phase-8 demote. Read the
+    // top-level `meta.mailbox` first; if absent, MIGRATE-ON-READ from a legacy
+    // alpha.4 record that nested it under `a2a.mailbox`. schemaVersion stays 1;
+    // every legacy record reads clean.
+    const a2aRaw = meta.a2a && typeof meta.a2a === "object" && !Array.isArray(meta.a2a)
+      ? (meta.a2a as Record<string, unknown>)
+      : undefined
+    const mailbox =
+      this.normalizeMailbox(meta.mailbox) ??
+      (a2aRaw ? this.normalizeMailbox(a2aRaw.mailbox) : undefined)
+
+    const a2a = this.normalizeA2AMeta(meta.a2a)
     return {
       bundleName: meta.bundleName,
       familiarity: typeof meta.familiarity === "number" ? meta.familiarity : 0,
       sharedMissions: Array.isArray(meta.sharedMissions) ? meta.sharedMissions : [],
       outcomes: Array.isArray(meta.outcomes) ? meta.outcomes : [],
-      ...(this.normalizeA2AMeta(meta.a2a) ? { a2a: this.normalizeA2AMeta(meta.a2a) } : {}),
+      ...(a2a ? { a2a } : {}),
+      ...(mailbox ? { mailbox } : {}),
     }
   }
 
   private normalizeA2AMeta(raw: unknown): AgentMeta["a2a"] | undefined {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined
     const meta = raw as Record<string, unknown>
-    const mailbox = this.normalizeMailbox(meta.mailbox)
+    const relay = this.normalizeRelay(meta.relay)
     const a2a = {
       ...(typeof meta.cardUrl === "string" ? { cardUrl: meta.cardUrl } : {}),
       ...(typeof meta.endpointUrl === "string" ? { endpointUrl: meta.endpointUrl } : {}),
       ...(typeof meta.agentId === "string" ? { agentId: meta.agentId } : {}),
       ...(typeof meta.protocolVersion === "string" ? { protocolVersion: meta.protocolVersion } : {}),
-      ...(mailbox ? { mailbox } : {}),
+      ...(relay ? { relay } : {}),
+      ...(typeof meta.did === "string" ? { did: meta.did } : {}),
     }
     return Object.keys(a2a).length > 0 ? a2a : undefined
   }
 
-  /** Preserve an additive a2a.mailbox coord only when both fields are strings;
-   * otherwise drop it (absent ⇒ unchanged — the additive guarantee). */
+  /** Preserve the top-level mailbox coord only when both fields are strings;
+   * otherwise drop it (absent ⇒ unchanged — the additive guarantee). Also used to
+   * migrate a legacy nested `a2a.mailbox`. */
   private normalizeMailbox(raw: unknown): { repo: string; selfOutboxAgentId: string } | undefined {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined
     const m = raw as Record<string, unknown>
     if (typeof m.repo !== "string" || typeof m.selfOutboxAgentId !== "string") return undefined
     return { repo: m.repo, selfOutboxAgentId: m.selfOutboxAgentId }
+  }
+
+  /** Preserve an additive a2a.relay coord only when both fields are strings;
+   * otherwise drop it (absent ⇒ unchanged — the additive guarantee). */
+  private normalizeRelay(raw: unknown): { url: string; handle: string } | undefined {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined
+    const r = raw as Record<string, unknown>
+    if (typeof r.url !== "string" || typeof r.handle !== "string") return undefined
+    return { url: r.url, handle: r.handle }
   }
 
   private async readJson(filePath: string): Promise<FriendRecord | null> {

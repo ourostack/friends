@@ -7,8 +7,8 @@ import {
   compareReady,
   isSeen,
   markSeen,
-} from "../a2a"
-import type { MailboxMessage, IncomingFile, IncomingMessage, SeenLedger } from "../a2a"
+} from "../mailbox"
+import type { MailboxMessage, IncomingFile, IncomingMessage, SeenLedger } from "../mailbox"
 import type { ProfileShareEnvelope } from "../share"
 import type { MissionShareEnvelope } from "../mission-share"
 import type { CoordinationEnvelope } from "../coordination"

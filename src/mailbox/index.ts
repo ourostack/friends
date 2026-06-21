@@ -1,4 +1,10 @@
-// src/a2a — the pure git-mailbox format/routing/dedup library (brick two).
+// src/mailbox — the pure git-mailbox format/routing/dedup library (the demoted
+// offline/no-endpoint FALLBACK transport, NOT the primary A2A path).
+//
+// Real A2A (`message/send` + the friends E2E sign-then-seal overlay — see
+// src/a2a-client/) is the PRIMARY cross-agent transport. This git-mailbox
+// survives only as a clearly-labelled fallback for peers with no reachable
+// endpoint and no relay; a host opts into it explicitly.
 //
 // A consumer agent and a producer agent that authenticate as two DISTINCT git
 // identities share a dedicated PRIVATE mailbox repo. This module computes the
@@ -9,8 +15,9 @@
 //   • NO fs / net / http / child_process / process.env / git anywhere — the wire
 //     (clone / pull / add / commit / push) is entirely the caller's job.
 // Type-only imports of `ProfileShareEnvelope` (../share) + `MissionShareEnvelope`
-// (../mission-share) carry no runtime edge. Both are CORE modules, so the a2a→core
-// import direction is eslint-legal (a2a may import core; the reverse is forbidden).
+// (../mission-share) carry no runtime edge. Both are CORE modules, so the
+// mailbox→core import direction is eslint-legal (mailbox may import core; the
+// reverse is forbidden).
 //
 // Security model (the git-native TOFU): addressing lives in the PATH, and a
 // single-writer-per-outbox-dir layout means a forged sender can't write into

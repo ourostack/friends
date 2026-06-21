@@ -242,7 +242,7 @@ describe("FileFriendStore", () => {
     })
   })
 
-  it("preserves a well-formed a2a.mailbox on round-trip (put → reload)", async () => {
+  it("preserves a well-formed TOP-LEVEL mailbox on round-trip (put → reload)", async () => {
     const { store: s } = store()
     await s.put(
       "rec-1",
@@ -255,18 +255,75 @@ describe("FileFriendStore", () => {
           familiarity: 0,
           sharedMissions: [],
           outcomes: [],
-          a2a: { agentId: "peer-mbx", mailbox: { repo: "/m/mailbox", selfOutboxAgentId: "agent-a" } },
+          a2a: { agentId: "peer-mbx" },
+          mailbox: { repo: "/m/mailbox", selfOutboxAgentId: "agent-a" },
         },
       }),
     )
     const reloaded = await s.findByExternalId("a2a-agent", "peer-mbx")
-    expect(reloaded?.agentMeta?.a2a?.mailbox).toEqual({ repo: "/m/mailbox", selfOutboxAgentId: "agent-a" })
+    expect(reloaded?.agentMeta?.mailbox).toEqual({ repo: "/m/mailbox", selfOutboxAgentId: "agent-a" })
     expect(reloaded?.agentMeta?.a2a?.agentId).toBe("peer-mbx")
   })
 
-  it("drops a malformed a2a.mailbox on round-trip but keeps the rest of a2a", async () => {
+  // ── NON-NEGOTIABLE backward-compat (phase 8 demote): an alpha.4-shaped record
+  // nested `mailbox` under `a2a`. After the un-nest, reading it MUST migrate the
+  // mailbox to the new top-level `agentMeta.mailbox`, keep the other a2a coords,
+  // hold schemaVersion === 1, and round-trip STABLY (put → reread persists at the
+  // top level, no data loss). This proves migrate-on-read. ──
+  it("migrates a legacy alpha.4 record (a2a.mailbox nested) to top-level mailbox, schemaVersion stays 1, round-trips", async () => {
     const { store: s, friendsPath } = store()
-    // mailbox.repo is a number → mailbox dropped; the other a2a fields survive.
+    // Write a legacy-shaped record DIRECTLY (the current type forbids nesting
+    // mailbox under a2a, so we bypass it with raw JSON — exactly an alpha.4 record).
+    writeFileSync(
+      join(friendsPath, "legacy.json"),
+      JSON.stringify({
+        id: "legacy",
+        name: "LegacyBot",
+        kind: "agent",
+        trustLevel: "friend",
+        externalIds: [{ provider: "a2a-agent", externalId: "peer-legacy", linkedAt: "2026-01-01T00:00:00.000Z" }],
+        tenantMemberships: [],
+        toolPreferences: {},
+        notes: {},
+        totalTokens: 0,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        schemaVersion: 1,
+        agentMeta: {
+          bundleName: "legacy-bundle",
+          familiarity: 2,
+          sharedMissions: [],
+          outcomes: [],
+          a2a: {
+            agentId: "peer-legacy",
+            cardUrl: "https://card.example/agent",
+            mailbox: { repo: "/legacy/mailbox", selfOutboxAgentId: "legacy-out" },
+          },
+        },
+      }),
+    )
+
+    const loaded = await s.get("legacy")
+    // mailbox migrated to the NEW top-level location with the SAME values …
+    expect(loaded?.agentMeta?.mailbox).toEqual({ repo: "/legacy/mailbox", selfOutboxAgentId: "legacy-out" })
+    // … the other a2a coords are retained …
+    expect(loaded?.agentMeta?.a2a?.agentId).toBe("peer-legacy")
+    expect(loaded?.agentMeta?.a2a?.cardUrl).toBe("https://card.example/agent")
+    // … the nested legacy mailbox is gone from a2a (un-nested) …
+    expect((loaded?.agentMeta?.a2a as Record<string, unknown> | undefined)?.mailbox).toBeUndefined()
+    // … schemaVersion stays 1.
+    expect(loaded?.schemaVersion).toBe(1)
+
+    // Round-trip is STABLE: put the loaded record back, reread → top-level mailbox persists.
+    await s.put("legacy", loaded!)
+    const again = await s.get("legacy")
+    expect(again?.agentMeta?.mailbox).toEqual({ repo: "/legacy/mailbox", selfOutboxAgentId: "legacy-out" })
+    expect((again?.agentMeta?.a2a as Record<string, unknown> | undefined)?.mailbox).toBeUndefined()
+    expect(again?.schemaVersion).toBe(1)
+  })
+
+  it("new shape: top-level mailbox + a2a.relay + a2a.did round-trip and normalize", async () => {
+    const { store: s, friendsPath } = store()
     writeFileSync(
       join(friendsPath, "agent.json"),
       JSON.stringify({
@@ -275,16 +332,43 @@ describe("FileFriendStore", () => {
         kind: "agent",
         agentMeta: {
           bundleName: "b",
-          a2a: { agentId: "a-9", mailbox: { repo: 123, selfOutboxAgentId: "agent-a" } },
+          a2a: {
+            agentId: "a-new",
+            did: "did:key:z6MkExample",
+            relay: { url: "https://relay.example", handle: "opaque-handle-123" },
+          },
+          mailbox: { repo: "/m/mailbox", selfOutboxAgentId: "agent-a" },
+        },
+      }),
+    )
+    const got = await s.get("agent")
+    expect(got?.agentMeta?.mailbox).toEqual({ repo: "/m/mailbox", selfOutboxAgentId: "agent-a" })
+    expect(got?.agentMeta?.a2a?.did).toBe("did:key:z6MkExample")
+    expect(got?.agentMeta?.a2a?.relay).toEqual({ url: "https://relay.example", handle: "opaque-handle-123" })
+    expect(got?.agentMeta?.a2a?.agentId).toBe("a-new")
+  })
+
+  it("drops a malformed TOP-LEVEL mailbox (repo non-string) but keeps a2a", async () => {
+    const { store: s, friendsPath } = store()
+    writeFileSync(
+      join(friendsPath, "agent.json"),
+      JSON.stringify({
+        id: "agent",
+        name: "Bot",
+        kind: "agent",
+        agentMeta: {
+          bundleName: "b",
+          a2a: { agentId: "a-9" },
+          mailbox: { repo: 123, selfOutboxAgentId: "agent-a" },
         },
       }),
     )
     const got = await s.get("agent")
     expect(got?.agentMeta?.a2a?.agentId).toBe("a-9")
-    expect(got?.agentMeta?.a2a?.mailbox).toBeUndefined()
+    expect(got?.agentMeta?.mailbox).toBeUndefined()
   })
 
-  it("drops an a2a.mailbox missing selfOutboxAgentId, and a non-object mailbox", async () => {
+  it("drops a top-level mailbox missing selfOutboxAgentId, and a non-object mailbox", async () => {
     const { store: s, friendsPath } = store()
     // repo present (string) but selfOutboxAgentId absent → the second guard fires.
     writeFileSync(
@@ -293,24 +377,67 @@ describe("FileFriendStore", () => {
         id: "agent",
         name: "Bot",
         kind: "agent",
-        agentMeta: { bundleName: "b", a2a: { agentId: "a-1", mailbox: { repo: "/m" } } },
+        agentMeta: { bundleName: "b", a2a: { agentId: "a-1" }, mailbox: { repo: "/m" } },
       }),
     )
-    expect((await s.get("agent"))?.agentMeta?.a2a?.mailbox).toBeUndefined()
+    expect((await s.get("agent"))?.agentMeta?.mailbox).toBeUndefined()
 
-    // mailbox is a non-object (string) → the type guard fires.
+    // mailbox is a non-object (string) → the type guard fires; a2a survives.
     writeFileSync(
       join(friendsPath, "agent2.json"),
       JSON.stringify({
         id: "agent2",
         name: "Bot2",
         kind: "agent",
-        agentMeta: { bundleName: "b", a2a: { agentId: "a-2", mailbox: "not-an-object" } },
+        agentMeta: { bundleName: "b", a2a: { agentId: "a-2" }, mailbox: "not-an-object" },
       }),
     )
     const got2 = await s.get("agent2")
     expect(got2?.agentMeta?.a2a?.agentId).toBe("a-2")
-    expect(got2?.agentMeta?.a2a?.mailbox).toBeUndefined()
+    expect(got2?.agentMeta?.mailbox).toBeUndefined()
+  })
+
+  it("drops a malformed a2a.relay (missing handle, url non-string, non-object) but keeps the rest of a2a", async () => {
+    const { store: s, friendsPath } = store()
+    // url present but handle absent → relay dropped; agentId survives.
+    writeFileSync(
+      join(friendsPath, "agent.json"),
+      JSON.stringify({
+        id: "agent",
+        name: "Bot",
+        kind: "agent",
+        agentMeta: { bundleName: "b", a2a: { agentId: "a-1", relay: { url: "https://r" } } },
+      }),
+    )
+    const got = await s.get("agent")
+    expect(got?.agentMeta?.a2a?.agentId).toBe("a-1")
+    expect(got?.agentMeta?.a2a?.relay).toBeUndefined()
+
+    // url non-string → relay dropped.
+    writeFileSync(
+      join(friendsPath, "agent2.json"),
+      JSON.stringify({
+        id: "agent2",
+        name: "Bot2",
+        kind: "agent",
+        agentMeta: { bundleName: "b", a2a: { agentId: "a-2", relay: { url: 5, handle: "h" } } },
+      }),
+    )
+    expect((await s.get("agent2"))?.agentMeta?.a2a?.relay).toBeUndefined()
+
+    // relay is a non-object (string) → the type guard fires.
+    writeFileSync(
+      join(friendsPath, "agent3.json"),
+      JSON.stringify({
+        id: "agent3",
+        name: "Bot3",
+        kind: "agent",
+        agentMeta: { bundleName: "b", a2a: { agentId: "a-3", relay: "not-an-object" } },
+      }),
+    )
+    const got3 = await s.get("agent3")
+    expect(got3?.agentMeta?.a2a?.agentId).toBe("a-3")
+    expect(got3?.agentMeta?.a2a?.relay).toBeUndefined()
   })
 
   it("normalizes a non-object agentMeta on an agent record to undefined", async () => {

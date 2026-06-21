@@ -54,9 +54,13 @@ export async function upsertAgentPeer(
     trustLevel,
     kind: "agent",
     agentMeta: {
+      // `...baseMeta` already carries any existing top-level `mailbox`; an explicit
+      // `input.mailbox` overrides it below. Mailbox is top-level on AgentMeta since
+      // the phase-8 demote (was nested under `a2a` in alpha.4).
       ...baseMeta,
       bundleName: baseMeta.bundleName || bundleName || name,
-      a2a: { ...(a2a ?? {}), agentId, ...(input.mailbox ? { mailbox: input.mailbox } : {}) },
+      a2a: { ...(a2a ?? {}), agentId },
+      ...(input.mailbox ? { mailbox: input.mailbox } : {}),
     },
     externalIds: [
       ...(existing?.externalIds.filter(

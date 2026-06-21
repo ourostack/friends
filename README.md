@@ -63,11 +63,13 @@ knowledge is **structurally inviolable** and trust is **non-transitive**: an imp
 attributed, quarantined note, but it can never change who you trust. (See
 [Trust & consent model](#trust--consent-model).)
 
-### 2. Connectivity — the git-backed A2A transport
+### 2. Connectivity — the git-backed mailbox fallback
 
-How two agents actually reach each other, without a server in the middle.
+How two agents actually reach each other, without a server in the middle. (This git-mailbox is the
+demoted **offline/no-endpoint fallback** — real A2A + the friends E2E overlay is the primary path;
+see `@ouro.bot/friends/a2a-client`.)
 
-The optional `@ouro.bot/friends/a2a` sub-export is a **pure git-mailbox transport**: zero runtime
+The optional `@ouro.bot/friends/mailbox` sub-export is a **pure git-mailbox transport**: zero runtime
 dependencies, and it does **no git or network itself**. The host does every git op (clone / pull /
 add / commit / push); the library only **computes a message file's path + bytes** and
 **parses / validates / orders / dedups** the files the host hands back. Two agents authenticate as
@@ -413,7 +415,7 @@ network.
 ```sh
 npm run example:cross-agent-moat            # identity join key + consent-gated profile share,
                                             #   first-party-inviolable, trust non-transitive
-npm run example:a2a-git-mailbox             # the git-mailbox transport: path-binding, replay-safety,
+npm run example:mailbox-fallback            # the git-mailbox FALLBACK: path-binding, replay-safety,
                                             #   spoof rejection, hostile-mailbox tamper
 npm run example:cross-agent-mission-memory  # the mission ledger: shareable vs private learnings,
                                             #   first-party-wins, status non-transitive
@@ -454,7 +456,7 @@ setNervesEmitter((event) => {
 
 - **Store-only, transport-agnostic, additive.** The five layers were each built as a minimal
   primitive that does not modify the layers beneath it. The cross-agent envelopes are plain data; the
-  wire is always the caller's job (the `./a2a` mailbox is one optional, host-driven choice). A
+  wire is always the caller's job (the `./mailbox` git-mailbox is one optional, host-driven fallback). A
   CI-enforced dependency rule keeps the core from ever importing the transport.
 - **One persisted schema, additively grown.** Records are `schemaVersion: 1`; every layer added
   optional fields and sibling collections rather than changing existing meaning, so older data reads
@@ -504,7 +506,7 @@ setNervesEmitter((event) => {
 **From `@ouro.bot/friends/mcp`:** `createFriendsMcpServer`, `getToolSchemas`, `runMain` (plus the
 `McpToolSchema`, `FriendsMcpServer`, and `RunMainIo` types).
 
-**From `@ouro.bot/friends/a2a`:** `buildOutgoing`, `readIncoming`, `markSeen`, `isSeen`,
+**From `@ouro.bot/friends/mailbox`:** `buildOutgoing`, `readIncoming`, `markSeen`, `isSeen`,
 `compareReady`, `MAILBOX_VERSION` (plus the `MailboxMessage`, `BuildOutgoingInput`,
 `BuildOutgoingResult`, `IncomingFile`, `IncomingMessage`, `ReadIncomingInput`, `ReadIncomingResult`,
 `RejectedMessage`, `SeenLedger` types).

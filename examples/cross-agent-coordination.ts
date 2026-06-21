@@ -46,8 +46,8 @@ import { tmpdir } from "node:os"
 import { join, dirname } from "node:path"
 import { randomUUID } from "node:crypto"
 
-import { buildOutgoing, readIncoming, markSeen } from "../src/a2a"
-import type { SeenLedger } from "../src/a2a"
+import { buildOutgoing, readIncoming, markSeen } from "../src/mailbox"
+import type { SeenLedger } from "../src/mailbox"
 
 // The built MCP entrypoint. The npm script runs `npm run build` first so it exists;
 // fail fast with a clear message otherwise.
