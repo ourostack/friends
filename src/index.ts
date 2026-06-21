@@ -32,6 +32,14 @@ export type {
 
 export type { Facing } from "./channel"
 export type { TrustExplanation, TrustBasis } from "./trust-explanation"
+export type {
+  Standing,
+  StandingTier,
+  StandingTally,
+  StandingExplanation,
+  StandingRule,
+  StandingRuleInput,
+} from "./standing"
 export type { FriendStore } from "./store"
 export type { GrantStore } from "./grant-store"
 export type { MissionStore } from "./mission-store"
@@ -99,6 +107,9 @@ export {
 } from "./channel"
 
 export { describeTrustContext } from "./trust-explanation"
+
+// -- Earned standing (brick four): advisory, first-party, derived; never writes trust --
+export { assessStanding, explainStanding, DEFAULT_STANDING_RULE } from "./standing"
 
 export { upsertGroupContextParticipants } from "./group-context"
 
