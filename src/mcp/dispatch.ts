@@ -6,7 +6,8 @@
 import { emitNervesEvent } from "../observability"
 import type { FriendStore } from "../store"
 import type { GrantStore } from "../grant-store"
-import type { IdentityProvider, TrustLevel, NoteProvenance, AgentMeta, ShareScope } from "../types"
+import type { MissionStore } from "../mission-store"
+import type { IdentityProvider, TrustLevel, NoteProvenance, AgentMeta, ShareScope, AgentAttribution } from "../types"
 import { isShareScope } from "../types"
 import { FriendResolver } from "../resolver"
 import { describeTrustContext } from "../trust-explanation"
@@ -25,6 +26,10 @@ import { resolveRoom } from "../room"
 import { prepareProfileShare, importProfileShare } from "../share"
 import type { ProfileShareEnvelope } from "../share"
 import { grantShare, revokeShare, listShares } from "../grants"
+import { recordMission } from "../missions"
+import type { RecordMissionInput } from "../missions"
+import { prepareMissionShare, importMissionShare } from "../mission-share"
+import type { MissionShareEnvelope } from "../mission-share"
 
 type Args = Record<string, unknown>
 
@@ -70,11 +75,17 @@ function parseMaybeJson<T>(v: unknown): T | undefined {
  * rather than guessing. */
 const NO_GRANT_STORE = { ok: false, status: "unsupported", message: "no grant store configured (consent/share tools require one)" } as const
 
+/** A mission-backed tool was called without a MissionStore wired (a store-only
+ * embedding). The mission ledger needs mission persistence, so report it cleanly
+ * rather than guessing. */
+const NO_MISSION_STORE = { ok: false, status: "unsupported", message: "no mission store configured (mission tools require one)" } as const
+
 export async function dispatchTool(
   store: FriendStore,
   name: string,
   args: Args,
   grants?: GrantStore,
+  missions?: MissionStore,
 ): Promise<DispatchResult> {
   emitNervesEvent({
     component: "clients",
@@ -314,6 +325,75 @@ export async function dispatchTool(
         effectiveOnly: coerceBool(args.effectiveOnly),
       })
       return { result, isError: false }
+    }
+
+    case "record_mission": {
+      if (!missions) return { result: NO_MISSION_STORE, isError: true }
+      const input: RecordMissionInput = {
+        missionKey: coerceString(args.missionKey),
+        title: coerceOptionalString(args.title),
+        status: coerceOptionalString(args.status) as RecordMissionInput["status"],
+        participants: parseMaybeJson<AgentAttribution[]>(args.participants),
+        learnings: parseMaybeJson<RecordMissionInput["learnings"]>(args.learnings),
+        outcomes: parseMaybeJson<RecordMissionInput["outcomes"]>(args.outcomes),
+      }
+      const record = await recordMission(missions, input)
+      return { result: record, isError: false }
+    }
+
+    case "get_mission": {
+      if (!missions) return { result: NO_MISSION_STORE, isError: true }
+      const record = await missions.get(coerceString(args.missionId))
+      if (!record) {
+        return { result: { ok: false, status: "not_found", message: "mission record not found" }, isError: true }
+      }
+      return { result: record, isError: false }
+    }
+
+    case "list_missions": {
+      if (!missions) return { result: NO_MISSION_STORE, isError: true }
+      const all = await missions.listAll()
+      const limit = coerceInt(args.limit)
+      const result = limit !== undefined ? all.slice(0, limit) : all
+      return { result, isError: false }
+    }
+
+    case "share_mission": {
+      // Producer. Self identity comes from whoami (the dispatch is store-only);
+      // the mission is named by its missionKey inside the library. Gated on BOTH a
+      // GrantStore (consent) and a MissionStore.
+      if (!missions || !grants) return { result: NO_MISSION_STORE, isError: true }
+      const scope = coerceString(args.scope)
+      if (scope !== "mission" && scope !== "outcomes") {
+        return {
+          result: { ok: false, status: "invalid", message: `unrecognized mission scope '${scope}' — use mission or outcomes` },
+          isError: true,
+        }
+      }
+      const self = await whoami(store)
+      const selfAgentId = self.selfFriendId ?? ""
+      const result = await prepareMissionShare(missions, store, grants, {
+        missionId: coerceString(args.missionId),
+        toAgentId: coerceString(args.toAgentId),
+        scope,
+        selfAgentId,
+        proof: coerceOptionalString(args.proof),
+      })
+      return { result, isError: result.ok === false }
+    }
+
+    case "import_mission": {
+      if (!missions) return { result: NO_MISSION_STORE, isError: true }
+      const envelope = parseMaybeJson<MissionShareEnvelope>(args.envelope)
+      if (!envelope || typeof envelope !== "object") {
+        return { result: { ok: false, status: "invalid", message: "an envelope object is required" }, isError: true }
+      }
+      const result = await importMissionShare(missions, {
+        envelope,
+        fromAgentId: coerceString(args.fromAgentId),
+        trustOfSource: coerceString(args.trustOfSource) as TrustLevel,
+      })
+      return { result, isError: result.ok === false }
     }
 
     default: {

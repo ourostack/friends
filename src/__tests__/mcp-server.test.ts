@@ -1221,6 +1221,31 @@ describe("mission tools/call dispatch", () => {
     expect((r.payload as { status: string }).status).toBe("no_consent")
   })
 
+  it("share_mission: self id is empty when whoami resolves no self (no owner/family)", async () => {
+    // No owner/family record → whoami returns no self → selfAgentId "".
+    const missions = makeMissionStore([missionOf({ learnings: { g: { value: "v", savedAt: NOW, shareable: true } } })])
+    const store = makeStore([
+      {
+        ...ownerRecord(),
+        id: "rec-1",
+        name: "Peer",
+        role: "agent-peer",
+        kind: "agent",
+        trustLevel: "friend",
+        externalIds: [{ provider: "a2a-agent", externalId: "agent-b", linkedAt: NOW }], // not a local owner
+      },
+    ])
+    const grants = makeGrantStore([
+      { id: "g-1", subjectKey: "PROJ-1234", recipientAgentId: "agent-b", scope: "mission", grantedAt: NOW },
+    ])
+    start(store, grants, missions)
+    const r = await h.tool("share_mission", { missionId: "m-1", toAgentId: "agent-b", scope: "mission" })
+    expect(r.isError).toBe(false)
+    const payload = r.payload as { ok: boolean; envelope: { fromAgentId: string } }
+    expect(payload.ok).toBe(true)
+    expect(payload.envelope.fromAgentId).toBe("")
+  })
+
   it("share_mission: produces an envelope when a mission grant is present (self from whoami)", async () => {
     const missions = makeMissionStore([missionOf({ learnings: { g: { value: "v", savedAt: NOW, shareable: true } } })])
     const store = makeStore([
