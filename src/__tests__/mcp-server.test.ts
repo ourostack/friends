@@ -21,7 +21,14 @@ interface JsonRpcResponse {
   error?: { code: number; message: string }
 }
 
-const flush = () => new Promise((r) => setImmediate(r))
+// Yield through a real timer tick (timers phase), not just setImmediate. The
+// server dispatches via `void handleRequest(...)`, which awaits the store; a
+// FileFriendStore resolves a name lookup with real fs/promises I/O. A tight
+// setImmediate-only poll loop runs in the check phase and can starve those
+// pending I/O callbacks on a loaded runner, so the response never lands within
+// the budget. A setTimeout(0) sequences after the poll phase and lets the
+// awaited fs chain settle deterministically.
+const flush = () => new Promise((r) => setTimeout(r, 0))
 
 class Harness {
   readonly stdin = new PassThrough()
