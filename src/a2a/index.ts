@@ -23,6 +23,7 @@ import { randomUUID } from "node:crypto"
 import { emitNervesEvent } from "../observability"
 import type { ProfileShareEnvelope } from "../share"
 import type { MissionShareEnvelope } from "../mission-share"
+import type { CoordinationEnvelope } from "../coordination"
 
 /** The mailbox wire-format version. Bumped only on a breaking message change. */
 export const MAILBOX_VERSION = 1
@@ -38,18 +39,20 @@ export interface MailboxMessage {
   toAgentId: string
   issuedAt: string
   /** The payload discriminant. The host branches on it to call importProfileShare
-   * vs importMissionShare. The mailbox itself is payload-agnostic. */
-  kind: "profile_share" | "mission_share"
-  envelope: ProfileShareEnvelope | MissionShareEnvelope
+   * vs importMissionShare vs importCoordination. The mailbox itself is
+   * payload-agnostic — this union grows by one leaf per brick (additive, backward-
+   * compatible); buildOutgoing/readIncoming carry any of them unchanged. */
+  kind: "profile_share" | "mission_share" | "coordination"
+  envelope: ProfileShareEnvelope | MissionShareEnvelope | CoordinationEnvelope
 }
 
 export interface BuildOutgoingInput {
-  envelope: ProfileShareEnvelope | MissionShareEnvelope
+  envelope: ProfileShareEnvelope | MissionShareEnvelope | CoordinationEnvelope
   fromAgentId: string
   toAgentId: string
   /** The payload discriminant. Defaults to "profile_share" for backward-compat;
-   * a mission share passes "mission_share". */
-  kind?: "profile_share" | "mission_share"
+   * a mission share passes "mission_share", a coordination message "coordination". */
+  kind?: "profile_share" | "mission_share" | "coordination"
   /** Injectable ISO clock for deterministic tests; defaults to now. */
   now?: string
 }
@@ -98,14 +101,14 @@ export interface IncomingFile {
 
 /** A validated, path-bound, self-addressed message ready to import. The `kind`
  * is the load-bearing routing primitive — the host branches on it to call
- * importProfileShare vs importMissionShare. */
+ * importProfileShare vs importMissionShare vs importCoordination. */
 export interface IncomingMessage {
   messageId: string
   fromAgentId: string
   toAgentId: string
   issuedAt: string
-  kind: "profile_share" | "mission_share"
-  envelope: ProfileShareEnvelope | MissionShareEnvelope
+  kind: "profile_share" | "mission_share" | "coordination"
+  envelope: ProfileShareEnvelope | MissionShareEnvelope | CoordinationEnvelope
   relativePath: string
 }
 
@@ -150,7 +153,7 @@ function isWellFormedWrapper(value: Record<string, unknown>): boolean {
     typeof value.fromAgentId === "string" &&
     typeof value.toAgentId === "string" &&
     typeof value.issuedAt === "string" &&
-    (value.kind === "profile_share" || value.kind === "mission_share") &&
+    (value.kind === "profile_share" || value.kind === "mission_share" || value.kind === "coordination") &&
     typeof value.envelope === "object" &&
     value.envelope !== null &&
     !Array.isArray(value.envelope)
@@ -239,7 +242,7 @@ export function readIncoming(input: ReadIncomingInput): ReadIncomingResult {
       toAgentId: message.toAgentId as string,
       issuedAt: message.issuedAt as string,
       kind: message.kind as IncomingMessage["kind"],
-      envelope: message.envelope as ProfileShareEnvelope | MissionShareEnvelope,
+      envelope: message.envelope as ProfileShareEnvelope | MissionShareEnvelope | CoordinationEnvelope,
       relativePath: file.relativePath,
     })
   }

@@ -1,12 +1,15 @@
 import { describe, it, expect } from "vitest"
 
-import { TRUSTED_LEVELS, IDENTITY_SCOPES, isTrustedLevel, isIdentityProvider, isIntegration, isShareScope } from "../index"
+import { TRUSTED_LEVELS, IDENTITY_SCOPES, isTrustedLevel, isIdentityProvider, isIntegration, isShareScope, isCoordinationIntent } from "../index"
 import type {
   ShareScope,
   MissionKey,
   MissionLearning,
   ImportedLearning,
   MissionRecord,
+  CoordinationIntent,
+  CoordinationLogEntry,
+  MissionCoordination,
 } from "../index"
 
 const NOW = "2026-03-14T18:00:00.000Z"
@@ -56,14 +59,17 @@ describe("isIntegration", () => {
 
 describe("isShareScope / IDENTITY_SCOPES", () => {
   it("accepts every known share scope", () => {
-    for (const s of ["name", "identity", "notes:safe", "notes:all", "outcomes", "mission"] as ShareScope[]) {
+    for (const s of ["name", "identity", "notes:safe", "notes:all", "outcomes", "mission", "coordinate"] as ShareScope[]) {
       expect(isShareScope(s)).toBe(true)
     }
   })
   it("accepts the new mission scope (brick 3)", () => {
     expect(isShareScope("mission")).toBe(true)
   })
-  it("still accepts outcomes (regression — mission is additive)", () => {
+  it("accepts the new coordinate scope (brick 5)", () => {
+    expect(isShareScope("coordinate")).toBe(true)
+  })
+  it("still accepts outcomes (regression — mission/coordinate are additive)", () => {
     expect(isShareScope("outcomes")).toBe(true)
   })
   it("rejects unknown strings and non-strings", () => {
@@ -73,9 +79,61 @@ describe("isShareScope / IDENTITY_SCOPES", () => {
     expect(isShareScope(7)).toBe(false)
     expect(isShareScope(undefined)).toBe(false)
   })
-  it("IDENTITY_SCOPES is exactly {name, identity} — mission is content, not identity", () => {
-    expect(Array.from(IDENTITY_SCOPES).sort()).toEqual(["identity", "name"])
+  it("IDENTITY_SCOPES is {name, identity, coordinate} — coordinate is join-key only (no note content), mission is content", () => {
+    expect(Array.from(IDENTITY_SCOPES).sort()).toEqual(["coordinate", "identity", "name"])
     expect(IDENTITY_SCOPES.has("mission" as ShareScope)).toBe(false)
+  })
+})
+
+describe("isCoordinationIntent (brick 5)", () => {
+  it("accepts every coordination verb", () => {
+    for (const i of ["request", "offer", "accept", "decline", "handoff"] as CoordinationIntent[]) {
+      expect(isCoordinationIntent(i)).toBe(true)
+    }
+  })
+  it("rejects unknown strings and non-strings", () => {
+    expect(isCoordinationIntent("cancel")).toBe(false)
+    expect(isCoordinationIntent("reassign")).toBe(false)
+    expect(isCoordinationIntent("start")).toBe(false)
+    expect(isCoordinationIntent(7)).toBe(false)
+    expect(isCoordinationIntent(undefined)).toBe(false)
+  })
+})
+
+describe("coordination types (brick 5) — shape fixtures load under the public API", () => {
+  it("constructs a CoordinationLogEntry with provenance", () => {
+    const entry: CoordinationLogEntry = {
+      intent: "request",
+      fromAgentId: "agent-a",
+      note: "can you take the API side?",
+      at: NOW,
+      provenance: { origin: "imported", assertedBy: { agentId: "agent-a" } },
+    }
+    expect(entry.intent).toBe("request")
+    expect(entry.provenance?.origin).toBe("imported")
+  })
+
+  it("constructs a MissionCoordination (assignee + append-only log) and a MissionRecord that carries it", () => {
+    const coordination: MissionCoordination = {
+      assignee: { agentId: "agent-b" },
+      assignedAt: NOW,
+      log: [{ intent: "accept", fromAgentId: "agent-b", at: NOW, provenance: { origin: "first_party" } }],
+    }
+    const record: MissionRecord = {
+      id: "m-uuid-1",
+      missionKey: "PROJ-1234",
+      title: "Ship it",
+      status: "active",
+      participants: [],
+      outcomes: [],
+      learnings: {},
+      coordination,
+      createdAt: NOW,
+      updatedAt: NOW,
+      schemaVersion: 1,
+    }
+    expect(record.coordination?.assignee?.agentId).toBe("agent-b")
+    expect(record.coordination?.log[0].intent).toBe("accept")
   })
 })
 

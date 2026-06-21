@@ -25,6 +25,9 @@ export type {
   MissionLearning,
   ImportedLearning,
   MissionRecord,
+  CoordinationIntent,
+  CoordinationLogEntry,
+  MissionCoordination,
   ChannelCapabilities,
   ResolvedContext,
   SenseType,
@@ -84,6 +87,7 @@ export {
   isIdentityProvider,
   isIntegration,
   isShareScope,
+  isCoordinationIntent,
 } from "./types"
 
 export { FileFriendStore } from "./store-file"
@@ -160,6 +164,23 @@ export type {
   ImportMissionShareResult,
   ImportMissionShareStatus,
 } from "./mission-share"
+
+// -- Coordination / delegation (brick five): negotiate WHO does a mission --
+// Five verbs (request/offer/accept/decline/handoff) over kind:"coordination";
+// the ONLY persisted effect is the mission's `coordination` sub-object (assignee +
+// an append-only log). Trust-gated + consent-gated (the "coordinate" scope),
+// first-party-inviolable, non-transitive (a handoff never forces an assignee).
+export { prepareCoordination, importCoordination } from "./coordination"
+export type {
+  CoordinationEnvelope,
+  PrepareCoordinationInput,
+  PrepareCoordinationResult,
+  PrepareCoordinationStatus,
+  ImportCoordinationInput,
+  ImportCoordinationOptions,
+  ImportCoordinationResult,
+  ImportCoordinationStatus,
+} from "./coordination"
 
 export { grantShare, revokeShare, listShares, isGrantEffective } from "./grants"
 

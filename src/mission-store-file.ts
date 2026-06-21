@@ -103,6 +103,10 @@ export class FileMissionStore implements MissionStore {
       outcomes: Array.isArray(raw.outcomes) ? raw.outcomes : [],
       learnings: raw.learnings && typeof raw.learnings === "object" ? raw.learnings : {},
       ...(raw.importedLearnings && typeof raw.importedLearnings === "object" ? { importedLearnings: raw.importedLearnings } : {}),
+      // The coordination sub-object (brick 5) passes through like importedLearnings:
+      // present iff the record carries one, so a legacy mission with no coordination
+      // round-trips unchanged (absent ⇒ unclaimed).
+      ...(raw.coordination && typeof raw.coordination === "object" ? { coordination: raw.coordination } : {}),
       createdAt: typeof raw.createdAt === "string" ? raw.createdAt : new Date().toISOString(),
       updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : new Date().toISOString(),
       schemaVersion: typeof raw.schemaVersion === "number" ? raw.schemaVersion : 1,

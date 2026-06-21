@@ -158,18 +158,21 @@ function seedOwner(store: FriendStore): FriendRecord {
 }
 
 describe("getToolSchemas", () => {
-  it("returns exactly the 26 tools with object input schemas", () => {
+  it("returns exactly the 29 tools with object input schemas", () => {
     const schemas = getToolSchemas()
     const names = schemas.map((s) => s.name).sort()
     expect(names).toEqual(
       [
         "assess_standing",
         "channel_caps",
+        "coordinate",
         "describe_trust",
         "explain_standing",
+        "get_coordination",
         "get_friend",
         "get_mission",
         "grant_share",
+        "import_coordination",
         "import_mission",
         "import_profile",
         "link_identity",
@@ -191,7 +194,7 @@ describe("getToolSchemas", () => {
         "whoami",
       ].sort(),
     )
-    expect(schemas).toHaveLength(26)
+    expect(schemas).toHaveLength(29)
     for (const s of schemas) {
       expect(s.inputSchema.type).toBe("object")
       expect(typeof s.description).toBe("string")
@@ -233,7 +236,7 @@ describe("protocol layer", () => {
     const server = createFriendsMcpServer({ store: makeStore(), stdin: h.stdin, stdout: h.stdout })
     server.start()
     const res = await h.call({ jsonrpc: "2.0", id: 2, method: "tools/list" })
-    expect((res.result as { tools: unknown[] }).tools).toHaveLength(26)
+    expect((res.result as { tools: unknown[] }).tools).toHaveLength(29)
     server.stop()
   })
 
@@ -1371,5 +1374,211 @@ describe("mission tools/call dispatch", () => {
     const r = await h.tool("import_mission", { envelope, fromAgentId: "agent-a", trustOfSource: "stranger" })
     expect(r.isError).toBe(true)
     expect((r.payload as { status: string }).status).toBe("untrusted_source")
+  })
+})
+
+describe("coordination tools/call dispatch (brick 5)", () => {
+  let h: Harness
+  beforeEach(() => {
+    h = new Harness()
+  })
+  afterEach(() => {
+    h.stdin.destroy()
+    h.stdout.destroy()
+  })
+
+  function start(store: FriendStore, grants?: GrantStore, missions?: MissionStore) {
+    const server = createFriendsMcpServer({ store, grants, missions, stdin: h.stdin, stdout: h.stdout })
+    server.start()
+    return server
+  }
+
+  /** Owner (so whoami resolves self) + a FRIEND a2a-peer for `agent-b` (so the
+   * identity-tier "coordinate" scope consents under the tiered default). */
+  function ownerAndFriendPeer(): FriendStore {
+    return makeStore([
+      ownerRecord(),
+      {
+        ...ownerRecord(),
+        id: "rec-b",
+        name: "Peer B",
+        role: "agent-peer",
+        kind: "agent",
+        trustLevel: "friend",
+        externalIds: [{ provider: "a2a-agent", externalId: "agent-b", linkedAt: NOW }],
+      },
+    ])
+  }
+
+  // ── coordinate (producer) ──
+
+  it("coordinate: reports unsupported when no mission store is wired", async () => {
+    start(ownerAndFriendPeer(), makeGrantStore()) // grants but no missions
+    const r = await h.tool("coordinate", { missionId: "m-1", toAgentId: "agent-b", intent: "request" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("unsupported")
+  })
+
+  it("coordinate: reports unsupported when no grant store is wired", async () => {
+    const missions = makeMissionStore([missionOf()])
+    start(ownerAndFriendPeer(), undefined, missions) // missions but no grants
+    const r = await h.tool("coordinate", { missionId: "m-1", toAgentId: "agent-b", intent: "request" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("unsupported")
+  })
+
+  it("coordinate: rejects an unrecognized intent", async () => {
+    const missions = makeMissionStore([missionOf()])
+    start(ownerAndFriendPeer(), makeGrantStore(), missions)
+    const r = await h.tool("coordinate", { missionId: "m-1", toAgentId: "agent-b", intent: "cancel" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("invalid")
+  })
+
+  it("coordinate: no_consent for an unknown (stranger) recipient", async () => {
+    const missions = makeMissionStore([missionOf()])
+    // owner resolves self; recipient agent-z is unknown → stranger → no_consent.
+    start(ownerAndFriendPeer(), makeGrantStore(), missions)
+    const r = await h.tool("coordinate", { missionId: "m-1", toAgentId: "agent-z", intent: "request" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("no_consent")
+  })
+
+  it("coordinate: produces a request envelope for a friend peer (self from whoami)", async () => {
+    const missions = makeMissionStore([missionOf()])
+    start(ownerAndFriendPeer(), makeGrantStore(), missions)
+    const r = await h.tool("coordinate", { missionId: "m-1", toAgentId: "agent-b", intent: "request", note: "take the API side?" })
+    expect(r.isError).toBe(false)
+    const payload = r.payload as { ok: boolean; envelope: { intent: string; subject: { missionKey: string }; fromAgentId: string; note: string } }
+    expect(payload.ok).toBe(true)
+    expect(payload.envelope.intent).toBe("request")
+    expect(payload.envelope.subject.missionKey).toBe("PROJ-1234")
+    expect(payload.envelope.fromAgentId).toBe("owner-1")
+    expect(payload.envelope.note).toBe("take the API side?")
+  })
+
+  it("coordinate: self id is empty when whoami resolves no self (no owner/family)", async () => {
+    // No owner/family record → whoami returns no self → selfAgentId "" (the ?? "" arm).
+    // The recipient peer is still a friend, so the identity-tier scope consents.
+    const missions = makeMissionStore([missionOf()])
+    const store = makeStore([
+      {
+        ...ownerRecord(),
+        id: "rec-b",
+        name: "Peer B",
+        role: "agent-peer",
+        kind: "agent",
+        trustLevel: "friend",
+        externalIds: [{ provider: "a2a-agent", externalId: "agent-b", linkedAt: NOW }], // not a local owner
+      },
+    ])
+    start(store, makeGrantStore(), missions)
+    const r = await h.tool("coordinate", { missionId: "m-1", toAgentId: "agent-b", intent: "request" })
+    expect(r.isError).toBe(false)
+    const payload = r.payload as { ok: boolean; envelope: { fromAgentId: string } }
+    expect(payload.ok).toBe(true)
+    expect(payload.envelope.fromAgentId).toBe("")
+  })
+
+  it("coordinate: a handoff by a non-assignee surfaces not_assignee (the one precondition)", async () => {
+    const missions = makeMissionStore([missionOf()]) // no assignee
+    start(ownerAndFriendPeer(), makeGrantStore(), missions)
+    const r = await h.tool("coordinate", { missionId: "m-1", toAgentId: "agent-b", intent: "handoff", proposedAssignee: JSON.stringify({ agentId: "agent-b" }) })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("not_assignee")
+  })
+
+  it("coordinate: an accept claims the assignment (assignee=self) — readable via get_coordination", async () => {
+    const missions = makeMissionStore([missionOf()])
+    start(ownerAndFriendPeer(), makeGrantStore(), missions)
+    const acc = await h.tool("coordinate", { missionId: "m-1", toAgentId: "agent-b", intent: "accept" })
+    expect(acc.isError).toBe(false)
+    const read = await h.tool("get_coordination", { missionId: "m-1" })
+    expect((read.payload as { assignee: { agentId: string } }).assignee.agentId).toBe("owner-1")
+  })
+
+  // ── import_coordination (consumer) ──
+
+  it("import_coordination: reports unsupported with no mission store", async () => {
+    start(ownerAndFriendPeer())
+    const envelope = { subject: { missionKey: "PROJ-1234", title: "T" }, fromAgentId: "agent-a", intent: "request", issuedAt: NOW }
+    const r = await h.tool("import_coordination", { envelope, fromAgentId: "agent-a", trustOfSource: "friend" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("unsupported")
+  })
+
+  it("import_coordination: rejects a missing/malformed envelope", async () => {
+    const missions = makeMissionStore()
+    start(ownerAndFriendPeer(), undefined, missions)
+    const missing = await h.tool("import_coordination", { fromAgentId: "agent-a", trustOfSource: "friend" })
+    expect(missing.isError).toBe(true)
+    expect((missing.payload as { status: string }).status).toBe("invalid")
+    const malformed = await h.tool("import_coordination", { envelope: "{bad json", fromAgentId: "agent-a", trustOfSource: "friend" })
+    expect(malformed.isError).toBe(true)
+    expect((malformed.payload as { status: string }).status).toBe("invalid")
+  })
+
+  it("import_coordination: an accept assigns the sender (status assigned, string-encoded)", async () => {
+    const missions = makeMissionStore([missionOf()])
+    start(ownerAndFriendPeer(), undefined, missions)
+    const envelope = JSON.stringify({
+      subject: { missionKey: "PROJ-1234", title: "Ship it" },
+      fromAgentId: "agent-a",
+      intent: "accept",
+      issuedAt: NOW,
+    })
+    const r = await h.tool("import_coordination", { envelope, fromAgentId: "agent-a", trustOfSource: "friend" })
+    expect(r.isError).toBe(false)
+    const payload = r.payload as { ok: boolean; status: string; record: MissionRecord }
+    expect(payload.status).toBe("assigned")
+    expect(payload.record.coordination?.assignee?.agentId).toBe("agent-a")
+  })
+
+  it("import_coordination: surfaces an untrusted_source refusal as isError", async () => {
+    const missions = makeMissionStore([missionOf()])
+    start(ownerAndFriendPeer(), undefined, missions)
+    const envelope = { subject: { missionKey: "PROJ-1234", title: "Ship it" }, fromAgentId: "agent-a", intent: "request", issuedAt: NOW }
+    const r = await h.tool("import_coordination", { envelope, fromAgentId: "agent-a", trustOfSource: "stranger" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("untrusted_source")
+  })
+
+  // ── get_coordination (read lens) ──
+
+  it("get_coordination: reports unsupported with no mission store", async () => {
+    start(ownerAndFriendPeer())
+    const r = await h.tool("get_coordination", { missionId: "m-1" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("unsupported")
+  })
+
+  it("get_coordination: returns the empty default for a mission that was never coordinated", async () => {
+    const missions = makeMissionStore([missionOf()]) // no coordination sub-object
+    start(ownerAndFriendPeer(), undefined, missions)
+    const r = await h.tool("get_coordination", { missionId: "m-1" })
+    expect(r.isError).toBe(false)
+    const payload = r.payload as { assignee: undefined; log: unknown[] }
+    expect(payload.assignee).toBeUndefined()
+    expect(payload.log).toEqual([])
+  })
+
+  it("get_coordination: returns the populated coordination sub-object when present", async () => {
+    const missions = makeMissionStore([
+      missionOf({ coordination: { assignee: { agentId: "agent-b" }, assignedAt: NOW, log: [{ intent: "accept", fromAgentId: "agent-b", at: NOW }] } }),
+    ])
+    start(ownerAndFriendPeer(), undefined, missions)
+    const r = await h.tool("get_coordination", { missionId: "m-1" })
+    expect(r.isError).toBe(false)
+    const payload = r.payload as { assignee: { agentId: string }; log: unknown[] }
+    expect(payload.assignee.agentId).toBe("agent-b")
+    expect(payload.log).toHaveLength(1)
+  })
+
+  it("get_coordination: not-found surfaces as isError", async () => {
+    const missions = makeMissionStore()
+    start(ownerAndFriendPeer(), undefined, missions)
+    const r = await h.tool("get_coordination", { missionId: "ghost" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("not_found")
   })
 })

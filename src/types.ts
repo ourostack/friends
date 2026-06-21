@@ -103,19 +103,25 @@ export interface ImportedNote {
 // `shareable`, `notes:all` shares every note, `outcomes` shares relationship
 // outcomes. `mission` (brick 3) shares a whole mission artifact (title/status +
 // its outcomes + its *shareable* learnings) — like the note scopes it carries
-// content, so under the tiered default it always needs an explicit grant. The
-// scope is the unit a `ShareGrant` consents to.
-export type ShareScope = "name" | "identity" | "notes:safe" | "notes:all" | "outcomes" | "mission"
+// content, so under the tiered default it always needs an explicit grant.
+// `coordinate` (brick 5) consents to a coordination message about a mission —
+// just "will you take mission X", named by its join key, carrying no note
+// content, so it gates at the IDENTITY tier (trust ≥ friend suffices). The scope
+// is the unit a `ShareGrant` consents to.
+export type ShareScope = "name" | "identity" | "notes:safe" | "notes:all" | "outcomes" | "mission" | "coordinate"
 
-const SHARE_SCOPES: ReadonlySet<string> = new Set<ShareScope>(["name", "identity", "notes:safe", "notes:all", "outcomes", "mission"])
+const SHARE_SCOPES: ReadonlySet<string> = new Set<ShareScope>(["name", "identity", "notes:safe", "notes:all", "outcomes", "mission", "coordinate"])
 
 export function isShareScope(value: unknown): value is ShareScope {
   return typeof value === "string" && SHARE_SCOPES.has(value)
 }
 
 /** Identity-only scopes expose the join key (externalIds + name), never note
- * content. The tiered consent policy gates these on trust alone. */
-export const IDENTITY_SCOPES: ReadonlySet<ShareScope> = new Set(["name", "identity"])
+ * content. The tiered consent policy gates these on trust alone. `coordinate`
+ * (brick 5) joins them: a coordination message names a mission by its join key
+ * and carries no note content, so trust ≥ friend consents to it — a friend peer
+ * may be asked to take a mission without a per-mission content grant. */
+export const IDENTITY_SCOPES: ReadonlySet<ShareScope> = new Set(["name", "identity", "coordinate"])
 
 // -- Share Grant --
 // An explicit, auditable, revocable consent record: "agent <recipientAgentId>
@@ -188,6 +194,57 @@ export interface ImportedLearning {
   originallyAssertedBy?: AgentAttribution
 }
 
+// -- Coordination Intent --
+// The coordination verb set (brick 5) — five leaves of one closed union, mirroring
+// how `ShareScope` and the transport `kind` are closed unions with a guard. A
+// coordination message negotiates exactly one thing: WHO is doing a mission.
+//   request  — "will you take this?"  (ask; no assignment effect)
+//   offer    — "I'll take this."      (bid; no assignment effect)
+//   accept   — "yes, I'm on it."      (answers request|offer; sets assignee = self)
+//   decline  — "no / not me."         (answers request|offer; no effect)
+//   handoff  — "it's yours now."      (passes a held assignment; proposes assignee,
+//                                      the receiver's own accept confirms — non-transitive)
+export type CoordinationIntent = "request" | "offer" | "accept" | "decline" | "handoff"
+
+const COORDINATION_INTENTS: ReadonlySet<string> = new Set<CoordinationIntent>([
+  "request",
+  "offer",
+  "accept",
+  "decline",
+  "handoff",
+])
+
+export function isCoordinationIntent(value: unknown): value is CoordinationIntent {
+  return typeof value === "string" && COORDINATION_INTENTS.has(value)
+}
+
+// -- Coordination Log Entry --
+// One logged negotiation step on a mission (brick 5) — attributed, immutable,
+// append-only. Mirrors how an imported learning/outcome carries `provenance` so an
+// IMPORTED coordination claim is structurally distinguishable from a first-party
+// one (the same laundering firewall, re-aimed from a fact at a negotiation step).
+export interface CoordinationLogEntry {
+  intent: CoordinationIntent
+  fromAgentId: string
+  note?: string
+  at: string                  // ISO
+  provenance?: NoteProvenance // first_party | imported — the firewall, re-aimed
+}
+
+// -- Mission Coordination --
+// The mission's coordinated state (brick 5): who holds it now + the append-only
+// negotiation trail. The ONLY persisted coordination effect — an additive
+// sub-object on the EXISTING MissionRecord (never a new store). `assignee` is set
+// by exactly one transition (`accept`) and replaced by exactly one (`accept` of a
+// handoff); `log` only ever grows. A claimed mission has an `assignee`; an
+// unclaimed one doesn't. That is the bounded state model in full — one nullable
+// field + an append-only log, no state machine, no scheduler.
+export interface MissionCoordination {
+  assignee?: AgentAttribution // WHO currently holds the mission (claimed). Absent ⇒ unclaimed.
+  assignedAt?: string         // ISO; when the current assignee was set
+  log: CoordinationLogEntry[] // append-only; every request/offer/accept/decline/handoff that flowed
+}
+
 // -- Mission Record --
 // A first-class shared MISSION (brick 3): the facts two agents collectively
 // learned doing work together. Where a `FriendRecord` answers "who is this person
@@ -211,6 +268,12 @@ export interface MissionRecord {
   // agentId then by learning key — kept structurally apart from first-party
   // `learnings`. Additive — absent on missions that have never imported anything.
   importedLearnings?: Record<string, Record<string, ImportedLearning>>
+  // the mission's coordinated state (brick 5): who holds it now + the append-only
+  // negotiation trail. Additive — absent on missions that have never been
+  // coordinated (so schemaVersion stays 1 and every legacy mission reads clean:
+  // absent ⇒ unclaimed). The ONLY persisted coordination effect; never load-bearing
+  // under status/learnings/trust.
+  coordination?: MissionCoordination
   createdAt: string                                // ISO date
   updatedAt: string
   schemaVersion: number

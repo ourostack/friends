@@ -1,6 +1,6 @@
 {
   "name": "@ouro.bot/friends",
-  "version": "0.1.0-alpha.2",
+  "version": "0.1.0-alpha.3",
   "description": "The who's-who / identity / relationship substrate for agents — trust ladder (family/friend/acquaintance/stranger), multi-party and multi-agent, consumed via the FriendStore interface + FriendResolver.",
   "license": "Apache-2.0",
   "main": "dist/index.js",
@@ -40,6 +40,7 @@
     "example:a2a-git-mailbox": "npm run build && tsx examples/a2a-git-mailbox.ts",
     "example:cross-agent-mission-memory": "npm run build && tsx examples/cross-agent-mission-memory.ts",
     "example:cross-agent-standing": "npm run build && tsx examples/cross-agent-standing.ts",
+    "example:cross-agent-coordination": "npm run build && tsx examples/cross-agent-coordination.ts",
     "release:bump": "node scripts/release-bump.cjs",
     "release:preflight": "node scripts/release-preflight.cjs",
     "release:trust:check": "node scripts/npm-trusted-publishers.cjs check",
