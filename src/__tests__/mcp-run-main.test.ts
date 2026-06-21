@@ -45,13 +45,16 @@ describe("runMain", () => {
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
   })
 
-  it("constructs a FileFriendStore from --dir and serves requests", async () => {
+  it("constructs a FileFriendStore from --dir and serves requests, wiring the sibling _grants/ + _missions/", async () => {
     const { stdin, stdout, cap } = harness()
     const dir = tmpDir("flag")
     const server = runMain(["node", "bin.js", "--dir", dir], {}, { stdin, stdout, onError })
     expect(server).not.toBeNull()
     expect(onError).not.toHaveBeenCalled()
     expect(existsSync(dir)).toBe(true) // FileFriendStore mkdirs the path
+    // openFileBundle wires the sibling collections — proving missions is threaded.
+    expect(existsSync(join(dir, "_grants"))).toBe(true)
+    expect(existsSync(join(dir, "_missions"))).toBe(true)
 
     stdin.write(frame({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }))
     for (let i = 0; i < 50 && !cap.out.includes("protocolVersion"); i++) await flush()

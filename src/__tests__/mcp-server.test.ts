@@ -7,7 +7,7 @@ import { join } from "path"
 import { createFriendsMcpServer, getToolSchemas } from "../mcp"
 import { coerceBool, coerceInt, coerceString, coerceOptionalString } from "../mcp/dispatch"
 import { FileFriendStore } from "../index"
-import type { FriendStore, FriendRecord, IdentityProvider, GrantStore, ShareGrant } from "../index"
+import type { FriendStore, FriendRecord, IdentityProvider, GrantStore, ShareGrant, MissionStore, MissionRecord } from "../index"
 
 // ── In-memory JSON-RPC/stdio harness ──
 // The server processes `data` synchronously in its listener, so after writing a
@@ -158,7 +158,7 @@ function seedOwner(store: FriendStore): FriendRecord {
 }
 
 describe("getToolSchemas", () => {
-  it("returns exactly the 19 tools with object input schemas", () => {
+  it("returns exactly the 24 tools with object input schemas", () => {
     const schemas = getToolSchemas()
     const names = schemas.map((s) => s.name).sort()
     expect(names).toEqual(
@@ -166,25 +166,30 @@ describe("getToolSchemas", () => {
         "channel_caps",
         "describe_trust",
         "get_friend",
+        "get_mission",
         "grant_share",
+        "import_mission",
         "import_profile",
         "link_identity",
         "list_friends",
+        "list_missions",
         "list_shares",
         "onboard_agent",
         "record_interaction",
+        "record_mission",
         "resolve_party",
         "resolve_room",
         "revoke_share",
         "save_note",
         "set_trust",
+        "share_mission",
         "share_profile",
         "unlink_identity",
         "upsert_group",
         "whoami",
       ].sort(),
     )
-    expect(schemas).toHaveLength(19)
+    expect(schemas).toHaveLength(24)
     for (const s of schemas) {
       expect(s.inputSchema.type).toBe("object")
       expect(typeof s.description).toBe("string")
@@ -226,7 +231,7 @@ describe("protocol layer", () => {
     const server = createFriendsMcpServer({ store: makeStore(), stdin: h.stdin, stdout: h.stdout })
     server.start()
     const res = await h.call({ jsonrpc: "2.0", id: 2, method: "tools/list" })
-    expect((res.result as { tools: unknown[] }).tools).toHaveLength(19)
+    expect((res.result as { tools: unknown[] }).tools).toHaveLength(24)
     server.stop()
   })
 
@@ -1030,5 +1035,264 @@ describe("moat tools/call dispatch", () => {
       expect(r.isError).toBe(true)
       expect((r.payload as { status: string }).status).toBe("unsupported")
     }
+  })
+})
+
+// ── Mission ledger tools/call dispatch (brick 3) ──
+
+function makeMissionStore(initial: MissionRecord[] = []): MissionStore {
+  const missions = new Map<string, MissionRecord>()
+  for (const m of initial) missions.set(m.id, m)
+  return {
+    async get(id) {
+      return missions.get(id) ?? null
+    },
+    async put(id, mission) {
+      missions.set(id, mission)
+    },
+    async delete(id) {
+      missions.delete(id)
+    },
+    async findByMissionKey(missionKey) {
+      for (const m of missions.values()) {
+        if (m.missionKey === missionKey) return m
+      }
+      return null
+    },
+    async listAll() {
+      return Array.from(missions.values())
+    },
+  }
+}
+
+function missionOf(overrides: Partial<MissionRecord> = {}): MissionRecord {
+  return {
+    id: "m-1",
+    missionKey: "PROJ-1234",
+    title: "Ship it",
+    status: "active",
+    participants: [],
+    outcomes: [],
+    learnings: {},
+    createdAt: NOW,
+    updatedAt: NOW,
+    schemaVersion: 1,
+    ...overrides,
+  }
+}
+
+describe("mission tools/call dispatch", () => {
+  let h: Harness
+  beforeEach(() => {
+    h = new Harness()
+  })
+  afterEach(() => {
+    h.stdin.destroy()
+    h.stdout.destroy()
+  })
+
+  function start(store: FriendStore, grants?: GrantStore, missions?: MissionStore) {
+    const server = createFriendsMcpServer({ store, grants, missions, stdin: h.stdin, stdout: h.stdout })
+    server.start()
+    return server
+  }
+
+  function ownerStore(): FriendStore {
+    return makeStore([ownerRecord()])
+  }
+
+  // ── record_mission ──
+
+  it("record_mission: reports unsupported with no mission store", async () => {
+    start(ownerStore())
+    const r = await h.tool("record_mission", { missionKey: "PROJ-1234" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("unsupported")
+  })
+
+  it("record_mission: creates a mission via recordMission (learnings string-encoded)", async () => {
+    const missions = makeMissionStore()
+    start(ownerStore(), undefined, missions)
+    const r = await h.tool("record_mission", {
+      missionKey: "PROJ-1234",
+      title: "Ship it",
+      learnings: JSON.stringify([{ key: "gotcha", value: "rebase", shareable: true }]),
+    })
+    expect(r.isError).toBe(false)
+    const rec = r.payload as MissionRecord
+    expect(rec.missionKey).toBe("PROJ-1234")
+    expect(rec.learnings.gotcha.value).toBe("rebase")
+    expect(rec.learnings.gotcha.shareable).toBe(true)
+  })
+
+  it("record_mission: upserts an existing mission and threads participants/outcomes/status", async () => {
+    const missions = makeMissionStore([missionOf()])
+    start(ownerStore(), undefined, missions)
+    const r = await h.tool("record_mission", {
+      missionKey: "PROJ-1234",
+      status: "succeeded",
+      participants: JSON.stringify([{ agentId: "agent-b" }]),
+      outcomes: JSON.stringify([{ missionId: "ext-1", result: "success" }]),
+    })
+    const rec = r.payload as MissionRecord
+    expect(rec.id).toBe("m-1")
+    expect(rec.status).toBe("succeeded")
+    expect(rec.participants.map((p) => p.agentId)).toEqual(["agent-b"])
+    expect(rec.outcomes).toHaveLength(1)
+  })
+
+  // ── get_mission ──
+
+  it("get_mission: reports unsupported with no mission store", async () => {
+    start(ownerStore())
+    const r = await h.tool("get_mission", { missionId: "m-1" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("unsupported")
+  })
+
+  it("get_mission: returns the record by local UUID id", async () => {
+    const missions = makeMissionStore([missionOf()])
+    start(ownerStore(), undefined, missions)
+    const r = await h.tool("get_mission", { missionId: "m-1" })
+    expect(r.isError).toBe(false)
+    expect((r.payload as MissionRecord).missionKey).toBe("PROJ-1234")
+  })
+
+  it("get_mission: not-found surfaces as isError", async () => {
+    const missions = makeMissionStore()
+    start(ownerStore(), undefined, missions)
+    const r = await h.tool("get_mission", { missionId: "ghost" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("not_found")
+  })
+
+  // ── list_missions ──
+
+  it("list_missions: reports unsupported with no mission store", async () => {
+    start(ownerStore())
+    const r = await h.tool("list_missions", {})
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("unsupported")
+  })
+
+  it("list_missions: lists all, optionally limited", async () => {
+    const missions = makeMissionStore([
+      missionOf({ id: "m-1", missionKey: "K1" }),
+      missionOf({ id: "m-2", missionKey: "K2" }),
+    ])
+    start(ownerStore(), undefined, missions)
+    const all = await h.tool("list_missions", {})
+    expect((all.payload as MissionRecord[]).length).toBe(2)
+    const limited = await h.tool("list_missions", { limit: "1" })
+    expect((limited.payload as MissionRecord[]).length).toBe(1)
+  })
+
+  // ── share_mission ──
+
+  it("share_mission: reports unsupported when no mission store is wired", async () => {
+    start(ownerStore(), makeGrantStore()) // grants but no missions
+    const r = await h.tool("share_mission", { missionId: "m-1", toAgentId: "agent-b", scope: "mission" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("unsupported")
+  })
+
+  it("share_mission: reports unsupported when no grant store is wired", async () => {
+    const missions = makeMissionStore([missionOf()])
+    start(ownerStore(), undefined, missions) // missions but no grants
+    const r = await h.tool("share_mission", { missionId: "m-1", toAgentId: "agent-b", scope: "mission" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("unsupported")
+  })
+
+  it("share_mission: rejects an unrecognized scope", async () => {
+    const missions = makeMissionStore([missionOf()])
+    start(ownerStore(), makeGrantStore(), missions)
+    const r = await h.tool("share_mission", { missionId: "m-1", toAgentId: "agent-b", scope: "everything" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("invalid")
+  })
+
+  it("share_mission: no_consent for a mission scope with no grant (self from whoami)", async () => {
+    const missions = makeMissionStore([missionOf()])
+    // owner is family → whoami resolves self; recipient unknown → stranger; mission needs a grant.
+    start(ownerStore(), makeGrantStore(), missions)
+    const r = await h.tool("share_mission", { missionId: "m-1", toAgentId: "agent-b", scope: "mission" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("no_consent")
+  })
+
+  it("share_mission: produces an envelope when a mission grant is present (self from whoami)", async () => {
+    const missions = makeMissionStore([missionOf({ learnings: { g: { value: "v", savedAt: NOW, shareable: true } } })])
+    const store = makeStore([
+      ownerRecord(),
+      {
+        ...ownerRecord(),
+        id: "rec-1",
+        name: "Peer",
+        role: "agent-peer",
+        kind: "agent",
+        trustLevel: "friend",
+        externalIds: [{ provider: "a2a-agent", externalId: "agent-b", linkedAt: NOW }],
+      },
+    ])
+    const grants = makeGrantStore([
+      { id: "g-1", subjectKey: "PROJ-1234", recipientAgentId: "agent-b", scope: "mission", grantedAt: NOW },
+    ])
+    start(store, grants, missions)
+    const r = await h.tool("share_mission", { missionId: "m-1", toAgentId: "agent-b", scope: "mission" })
+    expect(r.isError).toBe(false)
+    const payload = r.payload as { ok: boolean; envelope: { subject: { missionKey: string }; fromAgentId: string; learnings: unknown[] } }
+    expect(payload.ok).toBe(true)
+    expect(payload.envelope.subject.missionKey).toBe("PROJ-1234")
+    // self id came from whoami → the owner's friend id.
+    expect(payload.envelope.fromAgentId).toBe("owner-1")
+    expect(payload.envelope.learnings).toHaveLength(1)
+  })
+
+  // ── import_mission ──
+
+  it("import_mission: reports unsupported with no mission store", async () => {
+    start(ownerStore())
+    const envelope = { subject: { missionKey: "PROJ-1234", title: "T" }, fromAgentId: "agent-a", scope: "mission", learnings: [], issuedAt: NOW }
+    const r = await h.tool("import_mission", { envelope, fromAgentId: "agent-a", trustOfSource: "friend" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("unsupported")
+  })
+
+  it("import_mission: rejects a missing/malformed envelope", async () => {
+    const missions = makeMissionStore()
+    start(ownerStore(), undefined, missions)
+    const missing = await h.tool("import_mission", { fromAgentId: "agent-a", trustOfSource: "friend" })
+    expect(missing.isError).toBe(true)
+    expect((missing.payload as { status: string }).status).toBe("invalid")
+    const malformed = await h.tool("import_mission", { envelope: "{bad json", fromAgentId: "agent-a", trustOfSource: "friend" })
+    expect(malformed.isError).toBe(true)
+    expect((malformed.payload as { status: string }).status).toBe("invalid")
+  })
+
+  it("import_mission: imports an envelope into an existing mission (string-encoded)", async () => {
+    const missions = makeMissionStore([missionOf()])
+    start(ownerStore(), undefined, missions)
+    const envelope = JSON.stringify({
+      subject: { missionKey: "PROJ-1234", title: "Ship it" },
+      fromAgentId: "agent-a",
+      scope: "mission",
+      learnings: [{ key: "gotcha", value: "from-a" }],
+      issuedAt: NOW,
+    })
+    const r = await h.tool("import_mission", { envelope, fromAgentId: "agent-a", trustOfSource: "friend" })
+    expect(r.isError).toBe(false)
+    const payload = r.payload as { ok: boolean; status: string; record: MissionRecord }
+    expect(payload.status).toBe("imported")
+    expect(payload.record.importedLearnings?.["agent-a"].gotcha.value).toBe("from-a")
+  })
+
+  it("import_mission: surfaces an untrusted_source refusal as isError", async () => {
+    const missions = makeMissionStore([missionOf()])
+    start(ownerStore(), undefined, missions)
+    const envelope = { subject: { missionKey: "PROJ-1234", title: "Ship it" }, fromAgentId: "agent-a", scope: "mission", learnings: [], issuedAt: NOW }
+    const r = await h.tool("import_mission", { envelope, fromAgentId: "agent-a", trustOfSource: "stranger" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("untrusted_source")
   })
 })
