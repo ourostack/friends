@@ -114,6 +114,9 @@ export { upsertAgentPeer } from "./agent-peer"
 
 export { recordRelationshipOutcome } from "./outcomes"
 
+export { recordMission } from "./missions"
+export type { RecordMissionInput } from "./missions"
+
 export { whoami } from "./whoami"
 export type { WhoamiResult } from "./whoami"
 
