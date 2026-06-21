@@ -1,8 +1,10 @@
 // MCP tool schemas for the friends server.
 //
-// 14 tools — a thin 1:1 surface over the friends library (D7). Each schema
-// follows JSON Schema for `inputSchema` as required by MCP. The shape mirrors
-// the harness's McpToolSchema so the same client tooling consumes both.
+// 19 tools — a thin 1:1 surface over the friends library (D7): the original 14
+// plus the cross-agent moat surface (resolve_room, import_profile, grant_share,
+// revoke_share, list_shares; share_profile is de-stubbed in place). Each schema
+// follows JSON Schema for `inputSchema` as required by MCP. The shape mirrors the
+// harness's McpToolSchema so the same client tooling consumes both.
 import { emitNervesEvent } from "../observability"
 
 export interface McpToolSchema {
@@ -194,14 +196,78 @@ export function getToolSchemas(): McpToolSchema[] {
       },
     },
     {
-      name: "share_profile",
-      description: "Reserved (P1): share a friend's profile with another agent. Returns { supported: false } until federation lands.",
+      name: "resolve_room",
+      description: "Resolve a room (a group's external id) into its members, each with their trust context and how they're known (direct/group_only). Pure read.",
       inputSchema: {
         type: "object",
         properties: {
-          friendId: { type: "string", description: "friend uuid or name" },
-          toAgentId: { type: "string", description: "the agent to share with" },
-          scope: { type: "string", description: "the sharing scope" },
+          groupExternalId: { type: "string", description: "the group's external id (e.g. group:project;+;g1)" },
+          channel: { type: "string", description: "channel lens for the trust explanation (default mcp)" },
+        },
+        required: ["groupExternalId"],
+      },
+    },
+    {
+      name: "share_profile",
+      description: "Producer: prepare a consent-gated, scope-filtered, provenance-preserving profile-share envelope for another agent (names the party by join key, never the local uuid). Self identity comes from whoami. Returns { ok, envelope } or { ok:false, status }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          friendId: { type: "string", description: "the local friend to share (uuid or name)" },
+          toAgentId: { type: "string", description: "the recipient agent's join-key agentId" },
+          scope: { type: "string", enum: ["name", "identity", "notes:safe", "notes:all", "outcomes"], description: "what to share: identity scopes carry only the join key; notes:* / outcomes require an explicit grant under the default tiered policy" },
+          proof: { type: "string", description: "optional opaque proof to stamp on the envelope (for a non-TOFU recipient verifier)" },
+        },
+        required: ["friendId", "toAgentId", "scope"],
+      },
+    },
+    {
+      name: "import_profile",
+      description: "Consumer (non-clobbering merge): import a profile-share envelope. Resolves the party by join key; lands facts in the imported namespace WITHOUT touching first-party notes; source trust caps acceptance; never changes the party's trust. Returns { ok, status, record }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          envelope: { type: "object", description: "the ProfileShareEnvelope to import" },
+          fromAgentId: { type: "string", description: "the agent the envelope arrived from (join-key agentId)" },
+          trustOfSource: { type: "string", enum: ["family", "friend", "acquaintance", "stranger"], description: "this agent's resolved trust in the source agent — the acceptance cap" },
+        },
+        required: ["envelope", "fromAgentId", "trustOfSource"],
+      },
+    },
+    {
+      name: "grant_share",
+      description: "Mint an explicit, revocable consent grant: an agent may receive a scope of a friend's profile. The consent half of the moat.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          subjectFriendId: { type: "string", description: "whose profile may be shared (local friend uuid)" },
+          recipientAgentId: { type: "string", description: "the agent that may receive it (join-key agentId)" },
+          scope: { type: "string", enum: ["name", "identity", "notes:safe", "notes:all", "outcomes"], description: "the scope consented to" },
+          expiresAt: { type: "string", description: "optional ISO expiry; absent ⇒ never expires" },
+        },
+        required: ["subjectFriendId", "recipientAgentId", "scope"],
+      },
+    },
+    {
+      name: "revoke_share",
+      description: "Revoke a consent grant by id (tombstones it; the audit trail survives). The right-to-be-forgotten lever.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          grantId: { type: "string", description: "the grant id to revoke" },
+        },
+        required: ["grantId"],
+      },
+    },
+    {
+      name: "list_shares",
+      description: "List consent grants with their effective state, optionally filtered by subject / recipient / effectiveness. The audit + revoke surface.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          subjectFriendId: { type: "string", description: "filter to one subject friend" },
+          recipientAgentId: { type: "string", description: "filter to one recipient agent" },
+          effectiveOnly: { type: "string", enum: ["true", "false"], description: "set to 'true' to return only grants that currently consent" },
         },
       },
     },

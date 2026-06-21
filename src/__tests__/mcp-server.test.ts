@@ -7,7 +7,7 @@ import { join } from "path"
 import { createFriendsMcpServer, getToolSchemas } from "../mcp"
 import { coerceBool, coerceInt, coerceString, coerceOptionalString } from "../mcp/dispatch"
 import { FileFriendStore } from "../index"
-import type { FriendStore, FriendRecord, IdentityProvider } from "../index"
+import type { FriendStore, FriendRecord, IdentityProvider, GrantStore, ShareGrant } from "../index"
 
 // ── In-memory JSON-RPC/stdio harness ──
 // The server processes `data` synchronously in its listener, so after writing a
@@ -158,7 +158,7 @@ function seedOwner(store: FriendStore): FriendRecord {
 }
 
 describe("getToolSchemas", () => {
-  it("returns exactly the 14 tools with object input schemas", () => {
+  it("returns exactly the 19 tools with object input schemas", () => {
     const schemas = getToolSchemas()
     const names = schemas.map((s) => s.name).sort()
     expect(names).toEqual(
@@ -166,11 +166,16 @@ describe("getToolSchemas", () => {
         "channel_caps",
         "describe_trust",
         "get_friend",
+        "grant_share",
+        "import_profile",
         "link_identity",
         "list_friends",
+        "list_shares",
         "onboard_agent",
         "record_interaction",
         "resolve_party",
+        "resolve_room",
+        "revoke_share",
         "save_note",
         "set_trust",
         "share_profile",
@@ -179,7 +184,7 @@ describe("getToolSchemas", () => {
         "whoami",
       ].sort(),
     )
-    expect(schemas).toHaveLength(14)
+    expect(schemas).toHaveLength(19)
     for (const s of schemas) {
       expect(s.inputSchema.type).toBe("object")
       expect(typeof s.description).toBe("string")
@@ -221,7 +226,7 @@ describe("protocol layer", () => {
     const server = createFriendsMcpServer({ store: makeStore(), stdin: h.stdin, stdout: h.stdout })
     server.start()
     const res = await h.call({ jsonrpc: "2.0", id: 2, method: "tools/list" })
-    expect((res.result as { tools: unknown[] }).tools).toHaveLength(14)
+    expect((res.result as { tools: unknown[] }).tools).toHaveLength(19)
     server.stop()
   })
 
@@ -542,13 +547,13 @@ describe("tools/call dispatch", () => {
     expect((r.payload as { supportsMarkdown: boolean }).supportsMarkdown).toBe(true)
   })
 
-  it("share_profile: returns the reserved { supported:false } stub", async () => {
+  it("share_profile: reports unsupported when no grant store is wired", async () => {
     const store = makeStore()
     seedOwner(store)
-    start(store)
-    const r = await h.tool("share_profile", { friendId: "x", toAgentId: "y", scope: "z" })
-    expect(r.payload).toEqual({ supported: false })
-    expect(r.isError).toBe(false)
+    start(store) // server started WITHOUT a grants store
+    const r = await h.tool("share_profile", { friendId: "x", toAgentId: "y", scope: "identity" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("unsupported")
   })
 
   it("unknown tool name: isError with an Unknown tool message", async () => {
@@ -708,5 +713,275 @@ describe("dispatch + server defensive branches", () => {
     const result = res.result as { content: Array<{ text: string }>; isError: boolean }
     expect(result.isError).toBe(true)
     server.stop()
+  })
+})
+
+// ── Cross-agent moat dispatch (N11 + N12) ──
+
+function makeGrantStore(initial: ShareGrant[] = []): GrantStore {
+  const grants = new Map<string, ShareGrant>()
+  for (const g of initial) grants.set(g.id, g)
+  return {
+    async get(id) {
+      return grants.get(id) ?? null
+    },
+    async put(id, grant) {
+      grants.set(id, grant)
+    },
+    async delete(id) {
+      grants.delete(id)
+    },
+    async listAll() {
+      return Array.from(grants.values())
+    },
+  }
+}
+
+describe("moat tools/call dispatch", () => {
+  let h: Harness
+  beforeEach(() => {
+    h = new Harness()
+  })
+  afterEach(() => {
+    h.stdin.destroy()
+    h.stdout.destroy()
+  })
+
+  function start(store: FriendStore, grants?: GrantStore) {
+    const server = createFriendsMcpServer({ store, grants, stdin: h.stdin, stdout: h.stdout })
+    server.start()
+    return server
+  }
+
+  function friendOf(overrides: Partial<FriendRecord> = {}): FriendRecord {
+    return {
+      id: "subj-1",
+      name: "Jordan",
+      role: "friend",
+      trustLevel: "friend",
+      connections: [],
+      externalIds: [{ provider: "aad" as IdentityProvider, externalId: "jordan-aad", linkedAt: NOW }],
+      tenantMemberships: [],
+      toolPreferences: {},
+      notes: {},
+      totalTokens: 0,
+      createdAt: NOW,
+      updatedAt: NOW,
+      schemaVersion: 1,
+      ...overrides,
+    }
+  }
+
+  it("resolve_room: returns members carrying the group id with trust + knownVia", async () => {
+    const store = makeStore([
+      friendOf({
+        id: "m-1",
+        name: "Alice",
+        trustLevel: "acquaintance",
+        externalIds: [
+          { provider: "aad", externalId: "alice", linkedAt: NOW },
+          { provider: "aad", externalId: "group:proj;+;g1", linkedAt: NOW },
+        ],
+      }),
+    ])
+    start(store)
+    const r = await h.tool("resolve_room", { groupExternalId: "group:proj;+;g1" })
+    const view = r.payload as { groupExternalId: string; members: Array<{ friend: { name: string }; knownVia: string }> }
+    expect(view.members).toHaveLength(1)
+    expect(view.members[0].friend.name).toBe("Alice")
+    expect(view.members[0].knownVia).toBe("direct")
+  })
+
+  it("share_profile: reports unsupported with no grant store", async () => {
+    const store = makeStore([friendOf()])
+    start(store) // no grants
+    const r = await h.tool("share_profile", { friendId: "subj-1", toAgentId: "agent-2", scope: "identity" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("unsupported")
+  })
+
+  it("share_profile: rejects an unrecognized scope", async () => {
+    const store = makeStore([friendOf()])
+    start(store, makeGrantStore())
+    const r = await h.tool("share_profile", { friendId: "subj-1", toAgentId: "agent-2", scope: "everything" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("invalid")
+  })
+
+  it("share_profile: produces an envelope when consent is satisfied (identity via trust)", async () => {
+    // The self (owner) is family; the recipient agent is a friend so tiered consents on identity.
+    const store = makeStore([
+      ownerRecord(),
+      friendOf(),
+      {
+        ...friendOf(),
+        id: "rec-1",
+        name: "Peer",
+        role: "agent-peer",
+        kind: "agent",
+        externalIds: [{ provider: "a2a-agent", externalId: "agent-2", linkedAt: NOW }],
+      },
+    ])
+    start(store, makeGrantStore())
+    const r = await h.tool("share_profile", { friendId: "subj-1", toAgentId: "agent-2", scope: "identity" })
+    expect(r.isError).toBe(false)
+    const payload = r.payload as { ok: boolean; envelope: { subject: { displayName: string }; fromAgentId: string } }
+    expect(payload.ok).toBe(true)
+    expect(payload.envelope.subject.displayName).toBe("Jordan")
+    // self identity came from whoami → the owner's friend id.
+    expect(payload.envelope.fromAgentId).toBe("owner-1")
+  })
+
+  it("share_profile: returns ok:false no_consent when the policy refuses", async () => {
+    const store = makeStore([ownerRecord(), friendOf()]) // recipient unknown → stranger
+    start(store, makeGrantStore())
+    const r = await h.tool("share_profile", { friendId: "subj-1", toAgentId: "unknown", scope: "identity" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("no_consent")
+  })
+
+  it("share_profile: self id is empty when whoami resolves no self (no owner/family)", async () => {
+    // No owner record and no family friend → whoami returns no self → selfAgentId "".
+    const store = makeStore([
+      friendOf(), // subject at friend trust (not family, externalId not local)
+      {
+        ...friendOf(),
+        id: "rec-1",
+        name: "Peer",
+        role: "agent-peer",
+        kind: "agent",
+        externalIds: [{ provider: "a2a-agent", externalId: "agent-2", linkedAt: NOW }],
+      },
+    ])
+    start(store, makeGrantStore())
+    const r = await h.tool("share_profile", { friendId: "subj-1", toAgentId: "agent-2", scope: "identity" })
+    expect(r.isError).toBe(false)
+    const payload = r.payload as { ok: boolean; envelope: { fromAgentId: string } }
+    expect(payload.ok).toBe(true)
+    expect(payload.envelope.fromAgentId).toBe("")
+  })
+
+  it("import_profile: imports an envelope into an existing party", async () => {
+    const store = makeStore([friendOf({ trustLevel: "acquaintance" })])
+    start(store)
+    const envelope = {
+      subject: { externalIds: [{ provider: "aad", externalId: "jordan-aad", linkedAt: NOW }], displayName: "Jordan" },
+      fromAgentId: "source",
+      scope: "notes:safe",
+      notes: [{ key: "role", value: "PM" }],
+      issuedAt: NOW,
+    }
+    const r = await h.tool("import_profile", { envelope, fromAgentId: "source", trustOfSource: "friend" })
+    expect(r.isError).toBe(false)
+    const payload = r.payload as { ok: boolean; status: string; record: FriendRecord }
+    expect(payload.status).toBe("imported")
+    expect(payload.record.importedNotes?.source.role.value).toBe("PM")
+  })
+
+  it("import_profile: accepts a string-encoded envelope", async () => {
+    const store = makeStore([friendOf({ trustLevel: "acquaintance" })])
+    start(store)
+    const envelope = JSON.stringify({
+      subject: { externalIds: [{ provider: "aad", externalId: "jordan-aad", linkedAt: NOW }], displayName: "Jordan" },
+      fromAgentId: "source",
+      scope: "identity",
+      issuedAt: NOW,
+    })
+    const r = await h.tool("import_profile", { envelope, fromAgentId: "source", trustOfSource: "friend" })
+    expect(r.isError).toBe(false)
+    expect((r.payload as { status: string }).status).toBe("imported")
+  })
+
+  it("import_profile: rejects a missing/malformed envelope", async () => {
+    const store = makeStore()
+    start(store)
+    const missing = await h.tool("import_profile", { fromAgentId: "source", trustOfSource: "friend" })
+    expect(missing.isError).toBe(true)
+    expect((missing.payload as { status: string }).status).toBe("invalid")
+    const malformed = await h.tool("import_profile", { envelope: "{bad json", fromAgentId: "source", trustOfSource: "friend" })
+    expect(malformed.isError).toBe(true)
+    expect((malformed.payload as { status: string }).status).toBe("invalid")
+  })
+
+  it("import_profile: surfaces an untrusted_source refusal as isError", async () => {
+    const store = makeStore([friendOf()])
+    start(store)
+    const envelope = {
+      subject: { externalIds: [{ provider: "aad", externalId: "jordan-aad", linkedAt: NOW }], displayName: "Jordan" },
+      fromAgentId: "source",
+      scope: "identity",
+      issuedAt: NOW,
+    }
+    const r = await h.tool("import_profile", { envelope, fromAgentId: "source", trustOfSource: "stranger" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("untrusted_source")
+  })
+
+  it("grant_share / list_shares / revoke_share: full consent lifecycle", async () => {
+    const store = makeStore([friendOf()])
+    const grants = makeGrantStore()
+    start(store, grants)
+
+    const granted = await h.tool("grant_share", { subjectFriendId: "subj-1", recipientAgentId: "agent-2", scope: "notes:safe" })
+    expect(granted.isError).toBe(false)
+    const grantId = (granted.payload as ShareGrant).id
+    expect(grantId).toBeTruthy()
+
+    const listed = await h.tool("list_shares", { subjectFriendId: "subj-1" })
+    const all = listed.payload as Array<{ id: string; effective: boolean }>
+    expect(all).toHaveLength(1)
+    expect(all[0].effective).toBe(true)
+
+    const effectiveOnly = await h.tool("list_shares", { effectiveOnly: "true" })
+    expect((effectiveOnly.payload as unknown[]).length).toBe(1)
+
+    const revoked = await h.tool("revoke_share", { grantId })
+    expect(revoked.isError).toBe(false)
+    expect((revoked.payload as { status: string }).status).toBe("revoked")
+
+    const afterRevoke = await h.tool("list_shares", { effectiveOnly: "true" })
+    expect((afterRevoke.payload as unknown[]).length).toBe(0)
+  })
+
+  it("grant_share: rejects an unrecognized scope", async () => {
+    const store = makeStore([friendOf()])
+    start(store, makeGrantStore())
+    const r = await h.tool("grant_share", { subjectFriendId: "subj-1", recipientAgentId: "agent-2", scope: "bogus" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("invalid")
+  })
+
+  it("grant_share: carries an explicit expiresAt", async () => {
+    const store = makeStore([friendOf()])
+    start(store, makeGrantStore())
+    const r = await h.tool("grant_share", {
+      subjectFriendId: "subj-1",
+      recipientAgentId: "agent-2",
+      scope: "notes:all",
+      expiresAt: "2999-01-01T00:00:00.000Z",
+    })
+    expect((r.payload as ShareGrant).expiresAt).toBe("2999-01-01T00:00:00.000Z")
+  })
+
+  it("revoke_share: not_found surfaces as isError", async () => {
+    const store = makeStore()
+    start(store, makeGrantStore())
+    const r = await h.tool("revoke_share", { grantId: "ghost" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("not_found")
+  })
+
+  it("grant_share / revoke_share / list_shares: all report unsupported with no grant store", async () => {
+    const store = makeStore([friendOf()])
+    start(store) // no grants
+    for (const [tool, args] of [
+      ["grant_share", { subjectFriendId: "subj-1", recipientAgentId: "agent-2", scope: "identity" }],
+      ["revoke_share", { grantId: "g-1" }],
+      ["list_shares", {}],
+    ] as Array<[string, Record<string, unknown>]>) {
+      const r = await h.tool(tool, args)
+      expect(r.isError).toBe(true)
+      expect((r.payload as { status: string }).status).toBe("unsupported")
+    }
   })
 })

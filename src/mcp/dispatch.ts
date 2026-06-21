@@ -5,7 +5,9 @@
 // NO domain logic of its own — every behavior lives in the friends library.
 import { emitNervesEvent } from "../observability"
 import type { FriendStore } from "../store"
-import type { IdentityProvider, TrustLevel, NoteProvenance, AgentMeta } from "../types"
+import type { GrantStore } from "../grant-store"
+import type { IdentityProvider, TrustLevel, NoteProvenance, AgentMeta, ShareScope } from "../types"
+import { isShareScope } from "../types"
 import { FriendResolver } from "../resolver"
 import { describeTrustContext } from "../trust-explanation"
 import { getChannelCapabilities } from "../channel"
@@ -19,6 +21,10 @@ import { linkExternalId, unlinkExternalId } from "../link-identity"
 import { upsertAgentPeer } from "../agent-peer"
 import { recordRelationshipOutcome } from "../outcomes"
 import { whoami } from "../whoami"
+import { resolveRoom } from "../room"
+import { prepareProfileShare, importProfileShare } from "../share"
+import type { ProfileShareEnvelope } from "../share"
+import { grantShare, revokeShare, listShares } from "../grants"
 
 type Args = Record<string, unknown>
 
@@ -59,7 +65,17 @@ function parseMaybeJson<T>(v: unknown): T | undefined {
   return v as T
 }
 
-export async function dispatchTool(store: FriendStore, name: string, args: Args): Promise<DispatchResult> {
+/** A grant-backed tool was called without a GrantStore wired (a store-only
+ * embedding). The consent surface needs grant persistence, so report it cleanly
+ * rather than guessing. */
+const NO_GRANT_STORE = { ok: false, status: "unsupported", message: "no grant store configured (consent/share tools require one)" } as const
+
+export async function dispatchTool(
+  store: FriendStore,
+  name: string,
+  args: Args,
+  grants?: GrantStore,
+): Promise<DispatchResult> {
   emitNervesEvent({
     component: "clients",
     event: "clients.mcp_dispatch",
@@ -212,8 +228,85 @@ export async function dispatchTool(store: FriendStore, name: string, args: Args)
       return { result: getChannelCapabilities(coerceString(args.channel)), isError: false }
     }
 
+    case "resolve_room": {
+      const view = await resolveRoom(
+        store,
+        coerceString(args.groupExternalId),
+        (coerceOptionalString(args.channel) ?? "mcp") as Parameters<typeof resolveRoom>[2],
+      )
+      return { result: view, isError: false }
+    }
+
     case "share_profile": {
-      return { result: { supported: false }, isError: false }
+      // De-stubbed producer. Self identity comes from whoami (the dispatch is
+      // store-only); the subject is named by join key inside the library.
+      if (!grants) return { result: NO_GRANT_STORE, isError: true }
+      const scope = coerceString(args.scope)
+      if (!isShareScope(scope)) {
+        return {
+          result: { ok: false, status: "invalid", message: `unrecognized scope '${scope}' — use name, identity, notes:safe, notes:all, or outcomes` },
+          isError: true,
+        }
+      }
+      const self = await whoami(store)
+      // whoami sets selfFriendId + selfAgentName together or neither; the local
+      // self id (selfFriendId) is the asserter tag. "" when there is no self yet.
+      const selfAgentId = self.selfFriendId ?? ""
+      const result = await prepareProfileShare(store, grants, {
+        friendId: coerceString(args.friendId),
+        toAgentId: coerceString(args.toAgentId),
+        scope: scope as ShareScope,
+        selfAgentId,
+        proof: coerceOptionalString(args.proof),
+      })
+      return { result, isError: result.ok === false }
+    }
+
+    case "import_profile": {
+      const envelope = parseMaybeJson<ProfileShareEnvelope>(args.envelope)
+      if (!envelope || typeof envelope !== "object") {
+        return { result: { ok: false, status: "invalid", message: "an envelope object is required" }, isError: true }
+      }
+      const result = await importProfileShare(store, {
+        envelope,
+        fromAgentId: coerceString(args.fromAgentId),
+        trustOfSource: coerceString(args.trustOfSource) as TrustLevel,
+      })
+      return { result, isError: result.ok === false }
+    }
+
+    case "grant_share": {
+      if (!grants) return { result: NO_GRANT_STORE, isError: true }
+      const scope = coerceString(args.scope)
+      if (!isShareScope(scope)) {
+        return {
+          result: { ok: false, status: "invalid", message: `unrecognized scope '${scope}' — use name, identity, notes:safe, notes:all, or outcomes` },
+          isError: true,
+        }
+      }
+      const grant = await grantShare(grants, {
+        subjectFriendId: coerceString(args.subjectFriendId),
+        recipientAgentId: coerceString(args.recipientAgentId),
+        scope: scope as ShareScope,
+        expiresAt: coerceOptionalString(args.expiresAt),
+      })
+      return { result: grant, isError: false }
+    }
+
+    case "revoke_share": {
+      if (!grants) return { result: NO_GRANT_STORE, isError: true }
+      const result = await revokeShare(grants, coerceString(args.grantId))
+      return { result, isError: result.ok === false }
+    }
+
+    case "list_shares": {
+      if (!grants) return { result: NO_GRANT_STORE, isError: true }
+      const result = await listShares(grants, {
+        subjectFriendId: coerceOptionalString(args.subjectFriendId),
+        recipientAgentId: coerceOptionalString(args.recipientAgentId),
+        effectiveOnly: coerceBool(args.effectiveOnly),
+      })
+      return { result, isError: false }
     }
 
     default: {

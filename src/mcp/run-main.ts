@@ -6,6 +6,7 @@
 // directory, it reports via `onError` and constructs nothing (returns null).
 import { emitNervesEvent } from "../observability"
 import { FileFriendStore } from "../store-file"
+import { FileGrantStore, grantsDirFor } from "../grant-store-file"
 import { createFriendsMcpServer } from "./server"
 import type { FriendsMcpServer } from "./server"
 
@@ -47,7 +48,10 @@ export function runMain(
   })
 
   const store = new FileFriendStore(dir)
-  const server = createFriendsMcpServer({ store, stdin: io.stdin, stdout: io.stdout })
+  // The consent-grant collection is a sibling `_grants/` dir under the friends
+  // dir, so the single `--dir` wires the whole substrate (friends + consent).
+  const grants = new FileGrantStore(grantsDirFor(dir))
+  const server = createFriendsMcpServer({ store, grants, stdin: io.stdin, stdout: io.stdout })
   server.start()
   return server
 }

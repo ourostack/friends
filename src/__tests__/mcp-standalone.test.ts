@@ -229,4 +229,76 @@ describe("standalone harness-agnosticism proof (spawned child)", () => {
     const rosterCL = await child2.tool("list_friends", {}, "content-length")
     expect((rosterCL.payload as unknown[]).length).toBeGreaterThanOrEqual(3)
   })
+
+  it("drives the cross-agent moat end-to-end over the spawned bin (room + grant + share + import)", async () => {
+    dir = mkdtempSync(join(tmpdir(), "friends-moat-"))
+    child = new McpChild(dir)
+    await child.request("initialize", {})
+
+    // Seed an owner so the bundle is non-empty (the resolver imprint trap), then
+    // imprint the owner as the self for whoami → share_profile's fromAgentId.
+    const owner = await child.tool("resolve_party", { provider: "local", externalId: "operator", displayName: "operator", channel: "cli" })
+    const ownerId = owner.payload.friend.id as string
+
+    // A subject friend the owner knows, and an agent peer to share with.
+    const jordan = await child.tool("resolve_party", { provider: "aad", externalId: "jordan-aad", displayName: "Jordan", channel: "teams" })
+    const jordanId = jordan.payload.friend.id as string
+    await child.tool("save_note", { friendId: jordanId, type: "note", key: "role", content: "PM" })
+    await child.tool("onboard_agent", { name: "PeerBot", agentId: "peer-9" })
+
+    // ── resolve_room: put both the owner and Jordan in a group, then resolve it. ──
+    await child.tool("upsert_group", {
+      groupExternalId: "group:proj;+;room1",
+      participants: [
+        { provider: "aad", externalId: "jordan-aad", displayName: "Jordan" },
+        { provider: "local", externalId: "operator", displayName: "operator" },
+      ],
+    })
+    const room = await child.tool("resolve_room", { groupExternalId: "group:proj;+;room1" })
+    const roomNames = (room.payload.members as Array<{ friend: { name: string } }>).map((m) => m.friend.name).sort()
+    expect(roomNames).toContain("Jordan")
+
+    // ── Consent lifecycle: grant notes:safe of Jordan to peer-9, persisted to _grants/. ──
+    const granted = await child.tool("grant_share", { subjectFriendId: jordanId, recipientAgentId: "peer-9", scope: "notes:safe" })
+    const grantId = granted.payload.id as string
+    expect(existsSync(join(dir, "_grants"))).toBe(true) // sibling grant collection wired via --dir
+    const shares = await child.tool("list_shares", { subjectFriendId: jordanId })
+    expect((shares.payload as Array<{ effective: boolean }>)[0].effective).toBe(true)
+
+    // ── Producer: a notes:safe share of Jordan to peer-9. The "role" note was not
+    // marked shareable, so notes:safe carries nothing — but the envelope is still
+    // consented + names Jordan by join key. ──
+    const share = await child.tool("share_profile", { friendId: jordanId, toAgentId: "peer-9", scope: "notes:safe" })
+    expect(share.payload.ok).toBe(true)
+    expect(share.payload.envelope.subject.displayName).toBe("Jordan")
+    expect(share.payload.envelope.fromAgentId).toBe(ownerId) // self from whoami
+    // The local UUID must never appear on the wire.
+    expect(JSON.stringify(share.payload.envelope)).not.toContain(jordanId)
+
+    // ── Consumer: hand-craft an envelope from a FRIEND source and import it. The
+    // imported fact lands in importedNotes; first-party notes/trust are untouched. ──
+    const envelope = {
+      subject: { externalIds: [{ provider: "aad", externalId: "jordan-aad", linkedAt: new Date().toISOString() }], displayName: "Jordan" },
+      fromAgentId: "peer-9",
+      scope: "notes:all",
+      notes: [{ key: "city", value: "Seattle", originallyAssertedBy: { agentId: "peer-9" } }],
+      issuedAt: new Date().toISOString(),
+    }
+    // Capture trust immediately BEFORE the import (Jordan was promoted to
+    // acquaintance by upsert_group earlier) so we prove the IMPORT leaves it be.
+    const before = await child.tool("get_friend", { friendId: jordanId })
+    const trustBeforeImport = before.payload.trustLevel as string
+    const imported = await child.tool("import_profile", { envelope, fromAgentId: "peer-9", trustOfSource: "friend" })
+    expect(imported.payload.status).toBe("imported")
+    const after = await child.tool("get_friend", { friendId: jordanId })
+    expect(after.payload.importedNotes["peer-9"].city.value).toBe("Seattle")
+    expect(after.payload.notes.role.value).toBe("PM") // first-party untouched
+    expect(after.payload.trustLevel).toBe(trustBeforeImport) // trust unchanged by import
+
+    // ── Revoke: the grant is tombstoned and no longer effective. ──
+    const revoked = await child.tool("revoke_share", { grantId })
+    expect(revoked.payload.status).toBe("revoked")
+    const afterRevoke = await child.tool("list_shares", { effectiveOnly: "true" })
+    expect((afterRevoke.payload as unknown[]).length).toBe(0)
+  })
 })

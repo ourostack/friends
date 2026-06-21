@@ -15,8 +15,12 @@ export type {
   Channel,
   TrustLevel,
   AgentMeta,
+  AgentAttribution,
   RelationshipOutcome,
   NoteProvenance,
+  ImportedNote,
+  ShareScope,
+  ShareGrant,
   ChannelCapabilities,
   ResolvedContext,
   SenseType,
@@ -25,6 +29,7 @@ export type {
 export type { Facing } from "./channel"
 export type { TrustExplanation, TrustBasis } from "./trust-explanation"
 export type { FriendStore } from "./store"
+export type { GrantStore } from "./grant-store"
 export type { FriendResolverParams } from "./resolver"
 export type {
   GroupContextParticipant,
@@ -33,16 +38,43 @@ export type {
 export type { UsageData } from "./tokens"
 export type { FriendOpResult, FriendOpStatus } from "./results"
 export type { ApplyFriendNoteInput } from "./notes"
+export type { RoomView, RoomMember, RoomKnownVia } from "./room"
+export type {
+  ConsentPolicy,
+  ConsentRecipient,
+  ConsentDecisionInput,
+} from "./consent"
+export type { AgentVerifier } from "./verifier"
+export type {
+  ProfileShareEnvelope,
+  SharedNote,
+  PrepareProfileShareInput,
+  PrepareProfileShareResult,
+  PrepareProfileShareStatus,
+  ImportProfileShareInput,
+  ImportProfileShareOptions,
+  ImportProfileShareResult,
+  ImportProfileShareStatus,
+} from "./share"
+export type {
+  GrantShareInput,
+  RevokeShareResult,
+  ListSharesFilter,
+  ListedShare,
+} from "./grants"
 
 // -- Values --
 export {
   TRUSTED_LEVELS,
+  IDENTITY_SCOPES,
   isTrustedLevel,
   isIdentityProvider,
   isIntegration,
+  isShareScope,
 } from "./types"
 
 export { FileFriendStore } from "./store-file"
+export { FileGrantStore, grantsDirFor } from "./grant-store-file"
 
 export {
   FriendResolver,
@@ -76,6 +108,25 @@ export { recordRelationshipOutcome } from "./outcomes"
 
 export { whoami } from "./whoami"
 export type { WhoamiResult } from "./whoami"
+
+export { resolveRoom } from "./room"
+
+// -- Cross-agent moat (N12): consent · share · import --
+// The consent posture is a one-line swap: DEFAULT_CONSENT_POLICY in consent.ts
+// (the SWAP POINT). strictPolicy / trustImpliedPolicy / tieredPolicy are the
+// three selectable postures; tieredPolicy is the default.
+export {
+  strictPolicy,
+  trustImpliedPolicy,
+  tieredPolicy,
+  DEFAULT_CONSENT_POLICY,
+} from "./consent"
+
+export { tofuVerifier, DEFAULT_AGENT_VERIFIER } from "./verifier"
+
+export { prepareProfileShare, importProfileShare } from "./share"
+
+export { grantShare, revokeShare, listShares, isGrantEffective } from "./grants"
 
 // -- Observability seam --
 // The package emits structured events through a no-op `emitNervesEvent` by

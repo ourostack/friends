@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 
-import { TRUSTED_LEVELS, isTrustedLevel, isIdentityProvider, isIntegration } from "../index"
+import { TRUSTED_LEVELS, IDENTITY_SCOPES, isTrustedLevel, isIdentityProvider, isIntegration, isShareScope } from "../index"
+import type { ShareScope } from "../index"
 
 describe("TRUSTED_LEVELS / isTrustedLevel", () => {
   it("TRUSTED_LEVELS is exactly {family, friend}", () => {
@@ -42,5 +43,22 @@ describe("isIntegration", () => {
   it("rejects unknown values", () => {
     expect(isIntegration("jira")).toBe(false)
     expect(isIntegration(123)).toBe(false)
+  })
+})
+
+describe("isShareScope / IDENTITY_SCOPES", () => {
+  it("accepts every known share scope", () => {
+    for (const s of ["name", "identity", "notes:safe", "notes:all", "outcomes"] as ShareScope[]) {
+      expect(isShareScope(s)).toBe(true)
+    }
+  })
+  it("rejects unknown strings and non-strings", () => {
+    expect(isShareScope("notes")).toBe(false)
+    expect(isShareScope("everything")).toBe(false)
+    expect(isShareScope(7)).toBe(false)
+    expect(isShareScope(undefined)).toBe(false)
+  })
+  it("IDENTITY_SCOPES is exactly {name, identity}", () => {
+    expect(Array.from(IDENTITY_SCOPES).sort()).toEqual(["identity", "name"])
   })
 })

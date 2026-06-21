@@ -164,6 +164,11 @@ export class FileFriendStore implements FriendStore {
         ? raw.toolPreferences
         : {},
       notes: raw.notes && typeof raw.notes === "object" ? raw.notes : {},
+      // Imported facts (the cross-agent share namespace) are preserved verbatim
+      // when present. Absent on records that have never imported anything.
+      ...(raw.importedNotes && typeof raw.importedNotes === "object" && !Array.isArray(raw.importedNotes)
+        ? { importedNotes: raw.importedNotes }
+        : {}),
       totalTokens: typeof raw.totalTokens === "number" ? raw.totalTokens : 0,
       createdAt: typeof raw.createdAt === "string" ? raw.createdAt : new Date().toISOString(),
       updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : new Date().toISOString(),
