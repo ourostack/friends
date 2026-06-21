@@ -12,7 +12,7 @@ const NOW = "2026-03-14T18:00:00.000Z"
 function grant(overrides: Partial<ShareGrant> = {}): ShareGrant {
   return {
     id: "g-1",
-    subjectFriendId: "f-1",
+    subjectKey: "f-1",
     recipientAgentId: "agent-2",
     scope: "notes:safe",
     grantedAt: NOW,
@@ -104,6 +104,56 @@ describe("FileGrantStore", () => {
     const loaded = await store.get("g-x")
     expect(loaded?.scope).toBe("identity")
     expect(typeof loaded?.grantedAt).toBe("string")
+  })
+
+  it("Fork D: loads an OLD-format on-disk grant (subjectFriendId, no subjectKey) as subjectKey", async () => {
+    dir = mkdtempSync(join(tmpdir(), "friends-grants-"))
+    const grantsPath = grantsDirFor(dir)
+    new FileGrantStore(grantsPath)
+    // Hand-write a schemaVersion-1 grant carrying the OLD field name only.
+    await fsPromises.writeFile(
+      join(grantsPath, "g-old.json"),
+      JSON.stringify({ id: "g-old", subjectFriendId: "f-legacy", recipientAgentId: "a", scope: "notes:safe", grantedAt: NOW }),
+      "utf-8",
+    )
+    const store = new FileGrantStore(grantsPath)
+    const loaded = await store.get("g-old")
+    // normalize reads `subjectKey ?? subjectFriendId` → the legacy value surfaces under subjectKey.
+    expect(loaded?.subjectKey).toBe("f-legacy")
+    // listAll reads the same normalize path.
+    const all = await store.listAll()
+    expect(all.find((g) => g.id === "g-old")?.subjectKey).toBe("f-legacy")
+  })
+
+  it("Fork D: a NEW-format grant (subjectKey) round-trips and persists as subjectKey", async () => {
+    dir = mkdtempSync(join(tmpdir(), "friends-grants-"))
+    const grantsPath = grantsDirFor(dir)
+    const store = new FileGrantStore(grantsPath)
+    await store.put("g-1", grant({ subjectKey: "f-new" }))
+    const loaded = await store.get("g-1")
+    expect(loaded?.subjectKey).toBe("f-new")
+    // Read the raw file back: it must persist as `subjectKey`, never `subjectFriendId`.
+    const raw = JSON.parse(await fsPromises.readFile(join(grantsPath, "g-1.json"), "utf-8"))
+    expect(raw.subjectKey).toBe("f-new")
+    expect("subjectFriendId" in raw).toBe(false)
+  })
+
+  it("Fork D: re-persisting an OLD-format grant rewrites it forward as subjectKey", async () => {
+    dir = mkdtempSync(join(tmpdir(), "friends-grants-"))
+    const grantsPath = grantsDirFor(dir)
+    new FileGrantStore(grantsPath)
+    await fsPromises.writeFile(
+      join(grantsPath, "g-mig.json"),
+      JSON.stringify({ id: "g-mig", subjectFriendId: "f-legacy", recipientAgentId: "a", scope: "identity", grantedAt: NOW }),
+      "utf-8",
+    )
+    const store = new FileGrantStore(grantsPath)
+    const loaded = await store.get("g-mig")
+    // Round-trip it through put → it now persists with the new field name only.
+    await store.put(loaded!.id, loaded!)
+    const raw = JSON.parse(await fsPromises.readFile(join(grantsPath, "g-mig.json"), "utf-8"))
+    expect(raw.subjectKey).toBe("f-legacy")
+    expect("subjectFriendId" in raw).toBe(false)
   })
 
   it("preserves a revokedAt tombstone through a round-trip", async () => {

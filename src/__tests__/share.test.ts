@@ -107,7 +107,7 @@ function recipientAgent(trustLevel: FriendRecord["trustLevel"], agentId = "agent
 function grant(scope: ShareGrant["scope"], overrides: Partial<ShareGrant> = {}): ShareGrant {
   return {
     id: "g-1",
-    subjectFriendId: "subj-1",
+    subjectKey: "subj-1",
     recipientAgentId: "agent-2",
     scope,
     grantedAt: NOW,

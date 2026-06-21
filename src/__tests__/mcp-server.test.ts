@@ -964,6 +964,40 @@ describe("moat tools/call dispatch", () => {
     expect((r.payload as { status: string }).status).toBe("invalid")
   })
 
+  it("Fork D: grant_share mints via the NEW arg name subjectKey", async () => {
+    const store = makeStore([friendOf()])
+    start(store, makeGrantStore())
+    const r = await h.tool("grant_share", { subjectKey: "subj-1", recipientAgentId: "agent-2", scope: "notes:safe" })
+    expect(r.isError).toBe(false)
+    const grant = r.payload as ShareGrant
+    expect(grant.id).toBeTruthy()
+    expect(grant.subjectKey).toBe("subj-1")
+  })
+
+  it("Fork D: grant_share STILL mints via the OLD arg name subjectFriendId (seam b)", async () => {
+    const store = makeStore([friendOf()])
+    start(store, makeGrantStore())
+    const r = await h.tool("grant_share", { subjectFriendId: "subj-1", recipientAgentId: "agent-2", scope: "notes:safe" })
+    expect(r.isError).toBe(false)
+    const grant = r.payload as ShareGrant
+    expect(grant.id).toBeTruthy()
+    // The persisted grant carries the new field name regardless of which arg minted it.
+    expect(grant.subjectKey).toBe("subj-1")
+  })
+
+  it("Fork D: grant_share with a mission scope keyed by missionKey", async () => {
+    const store = makeStore([friendOf()])
+    const grants = makeGrantStore()
+    start(store, grants)
+    const r = await h.tool("grant_share", { subjectKey: "PROJ-1234", recipientAgentId: "agent-2", scope: "mission" })
+    expect(r.isError).toBe(false)
+    expect((r.payload as ShareGrant).subjectKey).toBe("PROJ-1234")
+    expect((r.payload as ShareGrant).scope).toBe("mission")
+    // list_shares filters by the new subjectKey arg too.
+    const listed = await h.tool("list_shares", { subjectKey: "PROJ-1234" })
+    expect((listed.payload as ShareGrant[]).map((g) => g.id)).toEqual([(r.payload as ShareGrant).id])
+  })
+
   it("grant_share: carries an explicit expiresAt", async () => {
     const store = makeStore([friendOf()])
     start(store, makeGrantStore())

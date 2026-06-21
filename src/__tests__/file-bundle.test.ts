@@ -30,7 +30,7 @@ function friend(): FriendRecord {
 function grant(): ShareGrant {
   return {
     id: "g-1",
-    subjectFriendId: "f-1",
+    subjectKey: "f-1",
     recipientAgentId: "agent-b",
     scope: "notes:safe",
     grantedAt: NOW,
