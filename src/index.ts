@@ -31,6 +31,8 @@ export type {
   GroupContextUpsertResult,
 } from "./group-context"
 export type { UsageData } from "./tokens"
+export type { FriendOpResult, FriendOpStatus } from "./results"
+export type { ApplyFriendNoteInput } from "./notes"
 
 // -- Values --
 export {
@@ -61,6 +63,8 @@ export { describeTrustContext } from "./trust-explanation"
 export { upsertGroupContextParticipants } from "./group-context"
 
 export { accumulateFriendTokens } from "./tokens"
+
+export { applyFriendNote } from "./notes"
 
 // -- Observability seam --
 // The package emits structured events through a no-op `emitNervesEvent` by
