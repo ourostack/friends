@@ -1,6 +1,12 @@
 {
   "versions": [
     {
+      "version": "0.1.0-alpha.2",
+      "changes": [
+        "Add earned standing (brick four): a first-party, advisory, derived `standing` (assessStanding/explainStanding) read from agentMeta.outcomes — filtered to first-party, never writes trustLevel, never on the wire; an injectable StandingRule + DEFAULT_STANDING_RULE tier ladder; 2 read-only MCP tools (assess_standing, explain_standing); and a git-free cross-agent proof."
+      ]
+    },
+    {
       "version": "0.1.0-alpha.1",
       "changes": [
         "Add the cross-agent mission ledger (shared work memory): a first-class mission record with first-party/imported learnings, a mission share producer/consumer mirroring the profile moat, a kind:\"mission_share\" mailbox transport, 5 MCP mission tools, and a git-free cross-agent proof. Widen grant subjects (subjectFriendId → subjectKey), backward-compatibly."

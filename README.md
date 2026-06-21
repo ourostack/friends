@@ -231,7 +231,7 @@ directory — the same directory a `FileFriendStore` persists to.
 
 ### Tool surface
 
-24 tools, a thin 1:1 mapping over the library (no domain logic in the server):
+26 tools, a thin 1:1 mapping over the library (no domain logic in the server):
 
 | Tool | What it does |
 |---|---|
@@ -259,6 +259,8 @@ directory — the same directory a `FileFriendStore` persists to.
 | `list_missions` | List mission records, optionally limited. |
 | `share_mission` | **Producer** — prepare a consent-gated, scope-filtered mission-share envelope (`mission` = shareable learnings; `outcomes` = the result rows). |
 | `import_mission` | **Consumer** — import a mission-share envelope (non-clobbering merge into the imported namespace; never touches first-party learnings or status). |
+| `assess_standing` | Assess a peer's **earned standing** from your first-party outcomes — a tier (proven/reliable/mixed/untested/troubled) + basis count + tally. Advisory; never writes trust, never shared. |
+| `explain_standing` | Explain a peer's earned standing in words (tier, why, advisory notes that frame it as input to a *manual* trust decision — never an instruction to change trust). |
 
 The `share_profile` / `import_profile` / `grant_share` / `revoke_share` / `list_shares` tools
 need a **grant store** (consent persistence). The bin wires one automatically at a sibling
@@ -460,12 +462,65 @@ seen-ledger dedup, ordering) is payload-agnostic, so it carries it with no trans
 holds verbatim: a forged mission envelope is an attributed, quarantined, status-non-transitive claim —
 it escalates nothing.
 
+## Earned standing (first-party reputation)
+
+The agent already records a `RelationshipOutcome[]` per agent peer (via `record_interaction`) — but
+never read it back. **Earned standing** is that read: a derived, advisory assessment of how a peer has
+actually performed on work *you personally did with it*. It is a lens, like `describeTrustContext` —
+computed on read, persisted nowhere, and removable tomorrow without changing any other behavior.
+
+The mental model is a bright line: **trust decides, standing informs.** `trustLevel` answers "how much
+authority do I grant" (manual, deliberate — the gate). Standing answers "how has this peer actually
+done on our shared work" (derived, advisory — never the gate). `assessStanding` returns a value; it
+never calls `setFriendTrust`.
+
+```ts
+import { assessStanding, explainStanding } from "@ouro.bot/friends"
+
+const standing = assessStanding(peerRecord)
+// → { tier: "proven", basisCount: 3, tally: { success: 3, partial: 0, failed: 0 }, familiarity: 3, assessedAt }
+
+const explained = explainStanding(peerRecord)
+// → { standing, summary, why, advisory: [ "...", "Standing is advisory only - it does not change this
+//     peer's trust level. Adjust trust deliberately with set_trust if warranted." ] }
+```
+
+Four firewalls keep standing on the right side of the non-transitivity invariant the whole package
+guards — each mirrors a proven guarantee:
+
+1. **First-party only.** `assessStanding` filters `agentMeta.outcomes` to `provenance.origin !==
+   "imported"`. A peer's claim about a third agent (the imported namespace a mission/profile share lands
+   in) **never feeds your standing** — reputation can't be laundered across a hop.
+2. **Never writes `trustLevel`.** A pure function returning a value; no store-write path; it cannot
+   reach `setFriendTrust`. Standing is an input to a *manual* trust decision, never an automatic one.
+3. **Never on the wire.** There is no `standing` envelope field and no `kind:"standing_share"` — no way
+   for A to tell B "C is great." The type to express standing on the wire does not exist (the anti-Sybil
+   core: a collusion ring can't vouch each other into your standing).
+4. **Advisory, never a gate.** No consent / share / trust path reads standing; `explainStanding`'s
+   `advisory` says so in plain words. Removing standing changes zero behavior of the rest of the package.
+
+The tier ladder is a fixed, transparent, **count-based** rule (not ML, no time-decay yet):
+
+| Tier | Rule |
+|---|---|
+| `untested` | no first-party outcomes recorded yet |
+| `troubled` | failures outnumber successes |
+| `proven` | ≥3 clean successes, no failures, and enough familiarity |
+| `reliable` | ≥1 clean success, no failures (but not yet proven) |
+| `mixed` | any other signal (partials, or wins alongside a non-dominant failure) |
+
+The rule is injectable: `DEFAULT_STANDING_RULE` is the active `StandingRule`, the single swap point
+(mirroring `DEFAULT_CONSENT_POLICY`). Pass a custom `rule` to `assessStanding` / `explainStanding`, or
+swap the default, to change the ladder — e.g. a later recency/decay rule is an additive swap here, not a
+rebuild. The two MCP tools (`assess_standing`, `explain_standing`) use the default.
+
 ## Public API
 
 **Types:** `FriendRecord`, `FriendConnection`, `ExternalId`, `IdentityProvider`, `Channel`,
 `TrustLevel`, `AgentMeta`, `AgentAttribution`, `RelationshipOutcome`, `NoteProvenance`,
 `ImportedNote`, `ShareScope`, `ShareGrant`, `ChannelCapabilities`, `ResolvedContext`, `SenseType`,
-`Facing`, `TrustExplanation`, `TrustBasis`, `FriendStore`, `GrantStore`, `FriendResolverParams`,
+`Facing`, `TrustExplanation`, `TrustBasis`, `Standing`, `StandingTier`, `StandingTally`,
+`StandingExplanation`, `StandingRule`, `StandingRuleInput`, `FriendStore`, `GrantStore`, `FriendResolverParams`,
 `GroupContextParticipant`, `GroupContextUpsertResult`, `UsageData`, `FriendOpResult`,
 `FriendOpStatus`, `ApplyFriendNoteInput`, `WhoamiResult`, `RoomView`, `RoomMember`, `RoomKnownVia`,
 `ConsentPolicy`, `ConsentRecipient`, `ConsentDecisionInput`, `AgentVerifier`,
@@ -481,8 +536,9 @@ it escalates nothing.
 **Values:** `TRUSTED_LEVELS`, `IDENTITY_SCOPES`, `isTrustedLevel`, `isIdentityProvider`,
 `isShareScope`, `FileFriendStore`, `FileGrantStore`, `grantsDirFor`, `FriendResolver`,
 `machineOwnerUsername`, `isLocalMachineOwnerIdentity`, `getChannelCapabilities`, `channelToFacing`,
-`isRemoteChannel`, `getAlwaysOnSenseNames`, `describeTrustContext`,
-`upsertGroupContextParticipants`, `accumulateFriendTokens`, `applyFriendNote`, `setFriendTrust`,
+`isRemoteChannel`, `getAlwaysOnSenseNames`, `describeTrustContext`, `assessStanding`,
+`explainStanding`, `DEFAULT_STANDING_RULE`, `upsertGroupContextParticipants`, `accumulateFriendTokens`,
+`applyFriendNote`, `setFriendTrust`,
 `linkExternalId`, `unlinkExternalId`, `upsertAgentPeer`, `recordRelationshipOutcome`, `whoami`,
 `resolveRoom`, `strictPolicy`, `trustImpliedPolicy`, `tieredPolicy`, `DEFAULT_CONSENT_POLICY`,
 `tofuVerifier`, `DEFAULT_AGENT_VERIFIER`, `prepareProfileShare`, `importProfileShare`, `grantShare`,

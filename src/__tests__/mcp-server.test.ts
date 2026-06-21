@@ -158,13 +158,15 @@ function seedOwner(store: FriendStore): FriendRecord {
 }
 
 describe("getToolSchemas", () => {
-  it("returns exactly the 24 tools with object input schemas", () => {
+  it("returns exactly the 26 tools with object input schemas", () => {
     const schemas = getToolSchemas()
     const names = schemas.map((s) => s.name).sort()
     expect(names).toEqual(
       [
+        "assess_standing",
         "channel_caps",
         "describe_trust",
+        "explain_standing",
         "get_friend",
         "get_mission",
         "grant_share",
@@ -189,7 +191,7 @@ describe("getToolSchemas", () => {
         "whoami",
       ].sort(),
     )
-    expect(schemas).toHaveLength(24)
+    expect(schemas).toHaveLength(26)
     for (const s of schemas) {
       expect(s.inputSchema.type).toBe("object")
       expect(typeof s.description).toBe("string")
@@ -231,7 +233,7 @@ describe("protocol layer", () => {
     const server = createFriendsMcpServer({ store: makeStore(), stdin: h.stdin, stdout: h.stdout })
     server.start()
     const res = await h.call({ jsonrpc: "2.0", id: 2, method: "tools/list" })
-    expect((res.result as { tools: unknown[] }).tools).toHaveLength(24)
+    expect((res.result as { tools: unknown[] }).tools).toHaveLength(26)
     server.stop()
   })
 
@@ -340,6 +342,56 @@ describe("tools/call dispatch", () => {
     const ok = await h.tool("describe_trust", { friendId: owner.id, channel: "teams" })
     expect((ok.payload as { level: string }).level).toBe("family")
     const missing = await h.tool("describe_trust", { friendId: "nope", channel: "teams" })
+    expect(missing.isError).toBe(true)
+    expect((missing.payload as { status: string }).status).toBe("not_found")
+  })
+
+  // An agent-peer record with 3 first-party successes + familiarity 3 ⇒ "proven".
+  function provenPeer(): FriendRecord {
+    return {
+      ...ownerRecord(),
+      id: "peer-1",
+      name: "PeerBot",
+      role: "agent-peer",
+      kind: "agent",
+      externalIds: [{ provider: "a2a-agent" as IdentityProvider, externalId: "peer-1", linkedAt: NOW }],
+      agentMeta: {
+        bundleName: "peerbot",
+        familiarity: 3,
+        sharedMissions: [],
+        outcomes: [
+          { missionId: "m1", result: "success", timestamp: NOW },
+          { missionId: "m2", result: "success", timestamp: NOW },
+          { missionId: "m3", result: "success", timestamp: NOW },
+        ],
+      },
+    }
+  }
+
+  it("assess_standing: success returns a Standing; not-found is isError", async () => {
+    const store = makeStore([provenPeer()])
+    start(store)
+    const ok = await h.tool("assess_standing", { friendId: "peer-1" })
+    expect(ok.isError).toBe(false)
+    const standing = ok.payload as { tier: string; basisCount: number }
+    expect(standing.tier).toBe("proven")
+    expect(standing.basisCount).toBe(3)
+    const missing = await h.tool("assess_standing", { friendId: "ghost" })
+    expect(missing.isError).toBe(true)
+    expect((missing.payload as { status: string }).status).toBe("not_found")
+  })
+
+  it("explain_standing: success returns a StandingExplanation with the trust guardrail; not-found is isError", async () => {
+    const store = makeStore([provenPeer()])
+    start(store)
+    const ok = await h.tool("explain_standing", { friendId: "peer-1" })
+    expect(ok.isError).toBe(false)
+    const explanation = ok.payload as { standing: { tier: string }; advisory: string[] }
+    expect(explanation.standing.tier).toBe("proven")
+    expect(Array.isArray(explanation.advisory)).toBe(true)
+    expect(explanation.advisory.length).toBeGreaterThan(0)
+    expect(explanation.advisory.some((a) => a.includes("does not change") && a.includes("trust level"))).toBe(true)
+    const missing = await h.tool("explain_standing", { friendId: "ghost" })
     expect(missing.isError).toBe(true)
     expect((missing.payload as { status: string }).status).toBe("not_found")
   })
