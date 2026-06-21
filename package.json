@@ -30,7 +30,8 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint src/",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "example:cross-agent-moat": "npm run build && tsx examples/cross-agent-moat.ts"
   },
   "repository": {
     "type": "git",
@@ -44,6 +45,7 @@
     "@types/node": "^22.0.0",
     "@vitest/coverage-v8": "^4.1.8",
     "eslint": "^10.0.2",
+    "tsx": "^4.22.4",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.56.1",
     "vitest": "^4.1.8"
