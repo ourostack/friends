@@ -1,0 +1,323 @@
+#!/usr/bin/env node
+
+const { execSync } = require("child_process")
+const path = require("path")
+const fs = require("fs")
+
+const { validateChangelog } = require("./changelog-gate.cjs")
+const { validateTrustedPublisherLocalContract } = require("./npm-trusted-publishers.cjs")
+
+const PACKAGE_NAME = "@ouro.bot/friends"
+
+function splitLines(output) {
+  return output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+}
+
+function parseArgs(argv) {
+  const options = { baseRef: "origin/main" }
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index]
+    if (arg === "--base-ref") {
+      const next = argv[index + 1]
+      if (!next) {
+        throw new Error("--base-ref requires a value")
+      }
+      options.baseRef = next
+      index += 1
+      continue
+    }
+    throw new Error(`unknown argument: ${arg}`)
+  }
+  return options
+}
+
+function versionBumpRequired(changedFiles) {
+  return changedFiles.some(
+    (file) => file === "package.json" ||
+      file.startsWith("scripts/") ||
+      (file.startsWith("src/") && !file.startsWith("src/__tests__/")),
+  )
+}
+
+function pathRequiresChangelogFreshness(file) {
+  return file.startsWith("scripts/") ||
+    (file.startsWith("src/") && !file.startsWith("src/__tests__/"))
+}
+
+function shellQuote(value) {
+  return `'${value.replace(/'/g, "'\\''")}'`
+}
+
+function latestCommitForPath(baseRef, file, execSyncImpl) {
+  try {
+    return execSyncImpl(
+      `git log --format=%H --max-count=1 ${shellQuote(`${baseRef}..HEAD`)} -- ${shellQuote(file)}`,
+      { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] },
+    ).trim()
+  } catch {
+    return ""
+  }
+}
+
+function isAncestorCommit(ancestor, descendant, execSyncImpl) {
+  try {
+    execSyncImpl(`git merge-base --is-ancestor ${shellQuote(ancestor)} ${shellQuote(descendant)}`, {
+      stdio: ["ignore", "ignore", "ignore"],
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
+function collectUncommittedFiles(execSyncImpl) {
+  const workingTreeFiles = splitLines(
+    execSyncImpl("git diff --name-only HEAD", { encoding: "utf-8" }),
+  )
+  const untrackedFiles = splitLines(
+    execSyncImpl("git ls-files --others --exclude-standard", { encoding: "utf-8" }),
+  )
+
+  return new Set([...workingTreeFiles, ...untrackedFiles])
+}
+
+function formatPathList(files) {
+  const shown = files.slice(0, 8).join(", ")
+  return files.length > 8 ? `${shown}, and ${files.length - 8} more` : shown
+}
+
+function assessChangelogFreshness(input) {
+  const freshnessFiles = input.changedFiles.filter(pathRequiresChangelogFreshness)
+  if (freshnessFiles.length === 0) {
+    return { ok: true, message: "changelog freshness: skipped (no releasable implementation paths)" }
+  }
+
+  const topEntry = Array.isArray(input.changelog?.versions) ? input.changelog.versions[0] : undefined
+  if (!topEntry || topEntry.version !== input.currentVersion) {
+    return {
+      ok: false,
+      message:
+        `changelog entry for version ${input.currentVersion} must be the top changelog entry when releasable implementation paths change.`,
+    }
+  }
+
+  if (!input.changedFiles.includes("changelog.json")) {
+    return {
+      ok: false,
+      message:
+        `changelog.json must be updated alongside releasable implementation changes: ${formatPathList(freshnessFiles)}`,
+    }
+  }
+
+  const uncommittedFiles = collectUncommittedFiles(input.execSyncImpl)
+  const uncommittedFreshnessFiles = freshnessFiles.filter((file) => uncommittedFiles.has(file))
+  const changelogUncommitted = uncommittedFiles.has("changelog.json")
+  if (uncommittedFreshnessFiles.length > 0 && !changelogUncommitted) {
+    return {
+      ok: false,
+      message:
+        `changelog.json must be updated in the working tree after uncommitted releasable changes: ${formatPathList(uncommittedFreshnessFiles)}`,
+    }
+  }
+
+  if (changelogUncommitted) {
+    return { ok: true, message: "changelog freshness: pass" }
+  }
+
+  const changelogCommit = latestCommitForPath(input.baseRef, "changelog.json", input.execSyncImpl)
+  if (!changelogCommit) {
+    return {
+      ok: false,
+      message:
+        `changelog.json must be committed on this branch alongside releasable implementation changes: ${formatPathList(freshnessFiles)}`,
+    }
+  }
+
+  const staleFiles = freshnessFiles.filter((file) => {
+    if (uncommittedFiles.has(file)) {
+      return false
+    }
+    const fileCommit = latestCommitForPath(input.baseRef, file, input.execSyncImpl)
+    return fileCommit && !isAncestorCommit(fileCommit, changelogCommit, input.execSyncImpl)
+  })
+
+  if (staleFiles.length > 0) {
+    return {
+      ok: false,
+      message:
+        `changelog.json is older than releasable implementation changes; update it after touching: ${formatPathList(staleFiles)}`,
+    }
+  }
+
+  return { ok: true, message: "changelog freshness: pass" }
+}
+
+function collectChangedFiles(baseRef, execSyncImpl) {
+  const committedFiles = splitLines(
+    execSyncImpl(`git diff --name-only "${baseRef}...HEAD"`, { encoding: "utf-8" }),
+  )
+  const workingTreeFiles = splitLines(
+    execSyncImpl("git diff --name-only HEAD", { encoding: "utf-8" }),
+  )
+  const untrackedFiles = splitLines(
+    execSyncImpl("git ls-files --others --exclude-standard", { encoding: "utf-8" }),
+  )
+
+  return Array.from(new Set([...committedFiles, ...workingTreeFiles, ...untrackedFiles])).sort()
+}
+
+function readJson(filePath, readFileSyncImpl) {
+  return JSON.parse(readFileSyncImpl(filePath, "utf8"))
+}
+
+function publishedVersionFor(packageName, version, execSyncImpl) {
+  try {
+    return execSyncImpl(`npm view "${packageName}@${version}" version`, {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim()
+  } catch {
+    return ""
+  }
+}
+
+function runRootDependencyAudit(packageRoot, execSyncImpl) {
+  try {
+    const output = execSyncImpl("npm audit --audit-level=moderate", {
+      cwd: packageRoot,
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "pipe"],
+    })
+    const summary = splitLines(String(output)).find((line) => /^found \d+ vulnerabilities$/.test(line)) ??
+      "no moderate-or-higher vulnerabilities"
+    return { ok: true, message: `root npm audit: pass (${summary})` }
+  } catch (error) {
+    const stdout = typeof error?.stdout?.toString === "function" ? error.stdout.toString() : ""
+    const stderr = typeof error?.stderr?.toString === "function" ? error.stderr.toString() : ""
+    const details = splitLines(`${stdout}\n${stderr}`).slice(-10).join("\n")
+    return {
+      ok: false,
+      message:
+        `root npm audit failed: npm audit --audit-level=moderate reported vulnerable dependencies` +
+        (details ? `\n${details}` : ""),
+    }
+  }
+}
+
+function runReleasePreflight(options = {}, deps = {}) {
+  const baseRef = options.baseRef ?? "origin/main"
+  const execSyncImpl = deps.execSyncImpl ?? execSync
+  const readFileSyncImpl = deps.readFileSyncImpl ?? fs.readFileSync
+  const packageJsonPath = deps.packageJsonPath ?? path.resolve(__dirname, "../package.json")
+  const packageRoot = deps.packageRoot ?? path.resolve(__dirname, "..")
+  const changelogPath = deps.changelogPath ?? path.resolve(__dirname, "../changelog.json")
+
+  const changedFiles = collectChangedFiles(baseRef, execSyncImpl)
+  const releasableChanged = versionBumpRequired(changedFiles)
+  const packageJson = readJson(packageJsonPath, readFileSyncImpl)
+  const changelog = readJson(changelogPath, readFileSyncImpl)
+
+  const messages = []
+  const errors = []
+
+  if (releasableChanged) {
+    const publishedVersion = publishedVersionFor(PACKAGE_NAME, packageJson.version, execSyncImpl)
+    if (publishedVersion === packageJson.version) {
+      errors.push(
+        `${PACKAGE_NAME}@${packageJson.version} is already published on npm.\n\n` +
+          `Bump the version before merging:\n` +
+          `  npm run release:bump -- --version <next-version> --change "Describe this release."\n` +
+          `  git push`,
+      )
+    } else {
+      messages.push(`${PACKAGE_NAME}@${packageJson.version} is not yet published — ready to merge and publish`)
+    }
+  } else {
+    messages.push("No releasable src/ or scripts/ changes detected — version bump not required")
+  }
+
+  const changelogResult = validateChangelog(packageJson.version, changelog)
+  if (!changelogResult.ok) {
+    errors.push(changelogResult.error)
+  } else {
+    messages.push(`changelog gate: pass (${packageJson.version})`)
+    const changelogFreshnessResult = assessChangelogFreshness({
+      baseRef,
+      changedFiles,
+      currentVersion: packageJson.version,
+      changelog,
+      execSyncImpl,
+    })
+    if (!changelogFreshnessResult.ok) {
+      errors.push(changelogFreshnessResult.message)
+    } else {
+      messages.push(changelogFreshnessResult.message)
+    }
+  }
+
+  const auditResult = runRootDependencyAudit(packageRoot, execSyncImpl)
+  if (!auditResult.ok) {
+    errors.push(auditResult.message)
+  } else {
+    messages.push(auditResult.message)
+  }
+
+  const trustedPublisherResult = validateTrustedPublisherLocalContract({
+    repoRoot: packageRoot,
+    readFileSyncImpl,
+  })
+  if (!trustedPublisherResult.ok) {
+    errors.push(...trustedPublisherResult.errors)
+  } else {
+    messages.push(...trustedPublisherResult.messages)
+  }
+
+  return {
+    ok: errors.length === 0,
+    baseRef,
+    changedFiles,
+    releasableChanged,
+    messages,
+    errors,
+  }
+}
+
+if (require.main === module) {
+  let options
+  try {
+    options = parseArgs(process.argv.slice(2))
+  } catch (error) {
+    console.error(`release preflight: FAIL`)
+    console.error(error instanceof Error ? error.message : String(error))
+    process.exit(1)
+  }
+
+  const result = runReleasePreflight(options)
+  for (const message of result.messages) {
+    console.log(message)
+  }
+
+  if (!result.ok) {
+    console.error("release preflight: FAIL")
+    for (const error of result.errors) {
+      console.error(error)
+    }
+    process.exit(1)
+  }
+
+  console.log("release preflight: pass")
+}
+
+module.exports = {
+  assessChangelogFreshness,
+  collectChangedFiles,
+  parseArgs,
+  pathRequiresChangelogFreshness,
+  runReleasePreflight,
+  runRootDependencyAudit,
+  splitLines,
+  versionBumpRequired,
+}

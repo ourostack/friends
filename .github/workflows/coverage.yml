@@ -25,6 +25,13 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
+      # Fast-fail release metadata preflight runs BEFORE the coverage gate so
+      # missing version bumps, changelog misses, and trusted-publisher drift
+      # surface locally and in CI before the full test suite starts.
+      - name: Release preflight (PRs only)
+        if: github.event_name == 'pull_request'
+        run: npm run release:preflight -- --base-ref "origin/${{ github.base_ref }}"
+
       - name: Typecheck
         run: npm run typecheck
 
@@ -33,3 +40,70 @@ jobs:
 
       - name: Run Coverage Gate
         run: npm run test:coverage
+
+  publish:
+    needs:
+      - coverage-gate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Install latest npm (trusted publishing requires npm >=11.5.1 on Node >=22.14)
+        run: npm install -g npm@latest
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Resolve @ouro.bot/friends publish tag
+        id: publish-tag
+        run: |
+          TAG=$(node scripts/npm-dist-tag-policy.cjs publish-tag "@ouro.bot/friends" "$(node -p "require('./package.json').version")")
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "publishing @ouro.bot/friends with dist-tag ${TAG}"
+
+      - name: Publish @ouro.bot/friends
+        run: |
+          LOCAL=$(node -p "require('./package.json').version")
+          TAG="${{ steps.publish-tag.outputs.tag }}"
+          PUBLISHED=$(npm view "@ouro.bot/friends@${LOCAL}" version 2>/dev/null || echo "")
+          if [ "$LOCAL" = "$PUBLISHED" ]; then
+            echo "@ouro.bot/friends@${LOCAL} already published — skipping"
+          else
+            npm publish --access public --tag "$TAG"
+          fi
+
+      - name: Verify supported npm dist-tag
+        run: |
+          LOCAL=$(node -p "require('./package.json').version")
+          TAG="${{ steps.publish-tag.outputs.tag }}"
+
+          for attempt in 1 2 3 4 5 6; do
+            ACTUAL=$(npm view "@ouro.bot/friends@${TAG}" version 2>/dev/null || echo "")
+            if [ "$ACTUAL" = "$LOCAL" ]; then
+              echo "@ouro.bot/friends@${TAG} verified at ${LOCAL}"
+              exit 0
+            fi
+
+            if [ "$attempt" != "6" ]; then
+              echo "@ouro.bot/friends@${TAG} points at ${ACTUAL:-missing}, expected ${LOCAL}; retrying after npm propagation delay"
+              sleep 10
+            fi
+          done
+
+          echo "::error::@ouro.bot/friends@${TAG} points at ${ACTUAL:-missing}, expected ${LOCAL}"
+          exit 1

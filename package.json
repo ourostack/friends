@@ -1,6 +1,6 @@
 {
   "name": "@ouro.bot/friends",
-  "version": "0.0.1",
+  "version": "0.1.0-alpha.0",
   "description": "The who's-who / identity / relationship substrate for agents — trust ladder (family/friend/acquaintance/stranger), multi-party and multi-agent, consumed via the FriendStore interface + FriendResolver.",
   "license": "Apache-2.0",
   "main": "dist/index.js",
@@ -23,7 +23,8 @@
     "friends-mcp": "./dist/mcp/bin.js"
   },
   "files": [
-    "dist/"
+    "dist/",
+    "changelog.json"
   ],
   "type": "commonjs",
   "scripts": {
@@ -36,7 +37,12 @@
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
     "example:cross-agent-moat": "npm run build && tsx examples/cross-agent-moat.ts",
-    "example:a2a-git-mailbox": "npm run build && tsx examples/a2a-git-mailbox.ts"
+    "example:a2a-git-mailbox": "npm run build && tsx examples/a2a-git-mailbox.ts",
+    "release:bump": "node scripts/release-bump.cjs",
+    "release:preflight": "node scripts/release-preflight.cjs",
+    "release:trust:check": "node scripts/npm-trusted-publishers.cjs check",
+    "release:trust:repair-plan": "node scripts/npm-trusted-publishers.cjs repair-plan",
+    "release:trust:repair": "node scripts/npm-trusted-publishers.cjs repair"
   },
   "repository": {
     "type": "git",
@@ -50,6 +56,7 @@
     "@types/node": "^22.0.0",
     "@vitest/coverage-v8": "^4.1.8",
     "eslint": "^10.0.2",
+    "semver": "^7.6.0",
     "tsx": "^4.22.4",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.56.1",
