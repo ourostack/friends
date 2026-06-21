@@ -1,11 +1,13 @@
 // MCP tool schemas for the friends server.
 //
-// 26 tools — a thin 1:1 surface over the friends library (D7): the original 14,
+// 29 tools — a thin 1:1 surface over the friends library (D7): the original 14,
 // the cross-agent moat surface (resolve_room, import_profile, grant_share,
 // revoke_share, list_shares; share_profile is de-stubbed in place), the brick-3
 // mission ledger (record_mission, get_mission, list_missions, share_mission,
-// import_mission), and the brick-4 earned-standing lenses (assess_standing,
-// explain_standing — read-only, advisory; never write trust, never on the wire).
+// import_mission), the brick-4 earned-standing lenses (assess_standing,
+// explain_standing — read-only, advisory; never write trust, never on the wire),
+// and the brick-5 coordination verbs (coordinate, import_coordination,
+// get_coordination — negotiate WHO does a mission; advisory assignment metadata).
 // Each schema follows JSON Schema for
 // `inputSchema` as required by MCP. The shape mirrors the harness's McpToolSchema
 // so the same client tooling consumes both.
@@ -360,6 +362,46 @@ export function getToolSchemas(): McpToolSchema[] {
           trustOfSource: { type: "string", enum: ["family", "friend", "acquaintance", "stranger"], description: "this agent's resolved trust in the source agent — the acceptance cap" },
         },
         required: ["envelope", "fromAgentId", "trustOfSource"],
+      },
+    },
+    {
+      name: "coordinate",
+      description: "Producer (brick 5): prepare a coordination message that negotiates WHO does a mission — one of request/offer/accept/decline/handoff, named by the mission's missionKey (never the local uuid). Consent-gated via the identity-tier 'coordinate' scope (trust ≥ friend suffices). 'accept' claims the assignment for self; 'handoff' (you must hold the assignment) proposes a new assignee whose own accept confirms it (non-transitive). Self identity comes from whoami. Returns { ok, envelope } or { ok:false, status: not_found|no_consent|not_assignee }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          missionId: { type: "string", description: "the local mission to coordinate (its local uuid id)" },
+          toAgentId: { type: "string", description: "the recipient agent's join-key agentId" },
+          intent: { type: "string", enum: ["request", "offer", "accept", "decline", "handoff"], description: "the coordination verb: request (will you take this?) / offer (I'll take this) / accept (yes, I'm on it — sets assignee=self) / decline (no) / handoff (it's yours now — you must hold the assignment; proposes a new assignee)" },
+          note: { type: "string", description: "optional free text carried on the message + logged" },
+          proposedAssignee: { type: "object", description: "the proposed new assignee { agentId?, agentName? } — meaningful ONLY on intent=handoff" },
+          proof: { type: "string", description: "optional opaque proof to stamp on the envelope (for a non-TOFU recipient verifier)" },
+        },
+        required: ["missionId", "toAgentId", "intent"],
+      },
+    },
+    {
+      name: "import_coordination",
+      description: "Consumer (brick 5, non-clobbering merge): import a coordination message. Resolves the mission by missionKey; appends the intent to coordination.log stamped origin:imported WITHOUT touching first-party learnings/notes/status; only an 'accept' sets the assignee (last-writer-wins by issuedAt); a 'handoff' never forces an assignee onto you (only your own accept does); never recomputes status/trust/standing; source trust caps acceptance; a friend/family peer may seed an unknown mission. Returns { ok, status: logged|assigned|seeded, record } or { ok:false, status }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          envelope: { type: "object", description: "the CoordinationEnvelope to import" },
+          fromAgentId: { type: "string", description: "the agent the envelope arrived from (join-key agentId)" },
+          trustOfSource: { type: "string", enum: ["family", "friend", "acquaintance", "stranger"], description: "this agent's resolved trust in the source agent — the acceptance cap" },
+        },
+        required: ["envelope", "fromAgentId", "trustOfSource"],
+      },
+    },
+    {
+      name: "get_coordination",
+      description: "Read lens (brick 5): return a mission's coordination state — its current assignee (who holds it; absent ⇒ unclaimed) + the append-only log of every request/offer/accept/decline/handoff that flowed. Returns { assignee, assignedAt?, log } (the empty default { assignee: undefined, log: [] } when never coordinated), or { ok:false, status:'not_found' } when the mission is missing.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          missionId: { type: "string", description: "the mission's local uuid id" },
+        },
+        required: ["missionId"],
       },
     },
   ]

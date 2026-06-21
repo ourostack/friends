@@ -175,6 +175,7 @@ describe("FileMissionStore", () => {
     expect(loaded?.outcomes).toEqual([])
     expect(loaded?.learnings).toEqual({})
     expect(loaded?.importedLearnings).toBeUndefined()
+    expect(loaded?.coordination).toBeUndefined()
     // Missing timestamps are filled with valid ISO strings (the `: new Date()` arm).
     expect(() => new Date(loaded!.createdAt).toISOString()).not.toThrow()
     expect(loaded?.createdAt).not.toBe("")
@@ -191,5 +192,24 @@ describe("FileMissionStore", () => {
     )
     const loaded = await store.get("m-1")
     expect(loaded?.importedLearnings?.["agent-b"].fact.value).toBe("theirs")
+  })
+
+  it("normalize: preserves the coordination sub-object through a round-trip (brick 5)", async () => {
+    dir = mkdtempSync(join(tmpdir(), "friends-missions-"))
+    const store = new FileMissionStore(missionsDirFor(dir))
+    await store.put(
+      "m-1",
+      mission({
+        coordination: {
+          assignee: { agentId: "agent-b" },
+          assignedAt: NOW,
+          log: [{ intent: "accept", fromAgentId: "agent-b", at: NOW, provenance: { origin: "imported", assertedBy: { agentId: "agent-b" } } }],
+        },
+      }),
+    )
+    const loaded = await store.get("m-1")
+    expect(loaded?.coordination?.assignee?.agentId).toBe("agent-b")
+    expect(loaded?.coordination?.assignedAt).toBe(NOW)
+    expect(loaded?.coordination?.log[0].intent).toBe("accept")
   })
 })

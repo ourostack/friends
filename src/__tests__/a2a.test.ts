@@ -11,6 +11,7 @@ import {
 import type { MailboxMessage, IncomingFile, IncomingMessage, SeenLedger } from "../a2a"
 import type { ProfileShareEnvelope } from "../share"
 import type { MissionShareEnvelope } from "../mission-share"
+import type { CoordinationEnvelope } from "../coordination"
 
 const NOW = "2026-03-14T18:00:00.000Z"
 
@@ -20,6 +21,16 @@ function missionEnvelope(overrides: Partial<MissionShareEnvelope> = {}): Mission
     fromAgentId: "agent-a",
     scope: "mission",
     learnings: [{ key: "gotcha", value: "rebase not merge" }],
+    issuedAt: NOW,
+    ...overrides,
+  }
+}
+
+function coordinationEnvelope(overrides: Partial<CoordinationEnvelope> = {}): CoordinationEnvelope {
+  return {
+    subject: { missionKey: "PROJ-1234", title: "Ship it" },
+    fromAgentId: "agent-a",
+    intent: "request",
     issuedAt: NOW,
     ...overrides,
   }
@@ -123,6 +134,14 @@ describe("buildOutgoing — kind discriminant (brick 3)", () => {
     const out = buildOutgoing({ envelope: envelope(), fromAgentId: "agent-a", toAgentId: "agent-b", kind: "profile_share", now: NOW })
     expect((JSON.parse(out.bytes) as MailboxMessage).kind).toBe("profile_share")
   })
+
+  it("stamps kind:coordination on the wrapper when requested, carrying the coordination envelope verbatim (brick 5)", () => {
+    const env = coordinationEnvelope({ intent: "handoff", proposedAssignee: { agentId: "agent-c" } })
+    const out = buildOutgoing({ envelope: env, fromAgentId: "agent-a", toAgentId: "agent-c", kind: "coordination", now: NOW })
+    const parsed = JSON.parse(out.bytes) as MailboxMessage
+    expect(parsed.kind).toBe("coordination")
+    expect(parsed.envelope).toEqual(env)
+  })
 })
 
 describe("readIncoming — kind propagation (brick 3)", () => {
@@ -148,6 +167,19 @@ describe("readIncoming — kind propagation (brick 3)", () => {
     })
     expect(result.ready).toHaveLength(1)
     expect(result.ready[0].kind).toBe("profile_share")
+  })
+
+  it("accepts a coordination wrapper and surfaces kind:coordination on the IncomingMessage (brick 5)", () => {
+    const out = buildOutgoing({ envelope: coordinationEnvelope(), fromAgentId: "agent-a", toAgentId: "agent-b", kind: "coordination", now: NOW })
+    const result = readIncoming({
+      files: [{ relativePath: out.relativePath, bytes: out.bytes }],
+      selfAgentId: "agent-b",
+      seen: emptyLedger,
+    })
+    expect(result.rejected).toEqual([])
+    expect(result.ready).toHaveLength(1)
+    expect(result.ready[0].kind).toBe("coordination")
+    expect(result.ready[0].envelope).toEqual(coordinationEnvelope())
   })
 })
 

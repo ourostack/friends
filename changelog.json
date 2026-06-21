@@ -1,6 +1,12 @@
 {
   "versions": [
     {
+      "version": "0.1.0-alpha.3",
+      "changes": [
+        "Add coordination / delegation (brick five): five coordination verbs (request/offer/accept/decline/handoff) over a new kind:\"coordination\" mailbox transport that negotiate WHO does a mission; an additive coordination sub-object on MissionRecord (assignee + append-only log) as the only persisted effect; a prepareCoordination/importCoordination producer/consumer pair mirroring the mission share (trust-gated, consent-gated via a new identity-tier \"coordinate\" scope, first-party-inviolable, non-transitive — a handoff never forces an assignee, the receiver's own accept confirms); last-writer-wins assignee-conflict resolution by issuedAt; 3 MCP tools (coordinate, import_coordination, get_coordination); and a git-free three-agent cross-agent proof. The moat, A2A transport (buildOutgoing/readIncoming unchanged), consent stack, mission ledger, and standing are untouched."
+      ]
+    },
+    {
       "version": "0.1.0-alpha.2",
       "changes": [
         "Add earned standing (brick four): a first-party, advisory, derived `standing` (assessStanding/explainStanding) read from agentMeta.outcomes — filtered to first-party, never writes trustLevel, never on the wire; an injectable StandingRule + DEFAULT_STANDING_RULE tier ladder; 2 read-only MCP tools (assess_standing, explain_standing); and a git-free cross-agent proof."
