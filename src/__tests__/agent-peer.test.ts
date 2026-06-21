@@ -121,35 +121,64 @@ describe("upsertAgentPeer — new peer", () => {
     expect(record.agentMeta?.bundleName).toBe("OnlyName")
   })
 
-  it("threads an explicit top-level mailbox into agentMeta.a2a.mailbox", async () => {
+  it("threads an explicit top-level mailbox onto agentMeta.mailbox (top-level since the demote), NOT into a2a", async () => {
     const store = new MemoryStore()
     const record = await upsertAgentPeer(store, {
       name: "PeerBot",
       agentId: "peer-1",
       mailbox: { repo: "/m/mailbox", selfOutboxAgentId: "agent-a" },
     })
-    expect(record.agentMeta?.a2a).toEqual({
-      agentId: "peer-1",
-      mailbox: { repo: "/m/mailbox", selfOutboxAgentId: "agent-a" },
-    })
+    // mailbox lands top-level …
+    expect(record.agentMeta?.mailbox).toEqual({ repo: "/m/mailbox", selfOutboxAgentId: "agent-a" })
+    // … and a2a carries only its own coords + the folded agentId (no mailbox key).
+    expect(record.agentMeta?.a2a).toEqual({ agentId: "peer-1" })
+    expect(record.agentMeta?.a2a && "mailbox" in record.agentMeta.a2a).toBe(false)
   })
 
   it("omits the mailbox key entirely when no mailbox is passed (schemaVersion-1 unchanged)", async () => {
     const store = new MemoryStore()
     const record = await upsertAgentPeer(store, { name: "PeerBot", agentId: "peer-1" })
     expect(record.agentMeta?.a2a).toEqual({ agentId: "peer-1" })
-    expect(record.agentMeta?.a2a && "mailbox" in record.agentMeta.a2a).toBe(false)
+    expect(record.agentMeta && "mailbox" in record.agentMeta).toBe(false)
   })
 
-  it("lets an explicit top-level mailbox win over one nested in a2a", async () => {
-    const store = new MemoryStore()
+  it("lets an explicit top-level mailbox override the existing record's top-level mailbox", async () => {
+    const store = new MemoryStore([
+      agentRecord({
+        agentMeta: {
+          bundleName: "ExistingBundle",
+          familiarity: 5,
+          sharedMissions: ["m1"],
+          outcomes: [],
+          a2a: { agentId: "peer-1" },
+          mailbox: { repo: "/existing", selfOutboxAgentId: "existing-out" },
+        },
+      }),
+    ])
     const record = await upsertAgentPeer(store, {
       name: "PeerBot",
       agentId: "peer-1",
-      a2a: { mailbox: { repo: "/nested", selfOutboxAgentId: "nested" } },
       mailbox: { repo: "/explicit", selfOutboxAgentId: "agent-a" },
     })
-    expect(record.agentMeta?.a2a?.mailbox).toEqual({ repo: "/explicit", selfOutboxAgentId: "agent-a" })
+    expect(record.agentMeta?.mailbox).toEqual({ repo: "/explicit", selfOutboxAgentId: "agent-a" })
+  })
+
+  it("carries the existing record's top-level mailbox forward when no mailbox is passed", async () => {
+    const store = new MemoryStore([
+      agentRecord({
+        agentMeta: {
+          bundleName: "ExistingBundle",
+          familiarity: 5,
+          sharedMissions: ["m1"],
+          outcomes: [],
+          a2a: { agentId: "peer-1" },
+          mailbox: { repo: "/existing", selfOutboxAgentId: "existing-out" },
+        },
+      }),
+    ])
+    const record = await upsertAgentPeer(store, { name: "PeerBot", agentId: "peer-1" })
+    // baseMeta spread carries the existing top-level mailbox; no input override.
+    expect(record.agentMeta?.mailbox).toEqual({ repo: "/existing", selfOutboxAgentId: "existing-out" })
   })
 })
 
@@ -180,18 +209,17 @@ describe("upsertAgentPeer — existing peer", () => {
     expect(record.externalIds.filter((e) => e.provider === "a2a-agent" && e.externalId === "peer-1")).toHaveLength(1)
   })
 
-  it("folds a new mailbox into the wholesale-rebuilt a2a on update", async () => {
+  it("lands a new mailbox top-level on update; a2a is rebuilt wholesale without it", async () => {
     const store = new MemoryStore([agentRecord()])
     const record = await upsertAgentPeer(store, {
       name: "NewName",
       agentId: "peer-1",
       mailbox: { repo: "/m/mailbox", selfOutboxAgentId: "agent-b" },
     })
-    // a2a is rebuilt wholesale (prior cardUrl dropped), with the mailbox folded in.
-    expect(record.agentMeta?.a2a).toEqual({
-      agentId: "peer-1",
-      mailbox: { repo: "/m/mailbox", selfOutboxAgentId: "agent-b" },
-    })
+    // mailbox is top-level (since the demote) …
+    expect(record.agentMeta?.mailbox).toEqual({ repo: "/m/mailbox", selfOutboxAgentId: "agent-b" })
+    // … a2a is rebuilt wholesale (prior cardUrl dropped), no mailbox key inside it.
+    expect(record.agentMeta?.a2a).toEqual({ agentId: "peer-1" })
   })
 
   it("keeps the existing trustLevel when none is passed", async () => {

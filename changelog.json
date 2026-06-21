@@ -1,6 +1,12 @@
 {
   "versions": [
     {
+      "version": "0.1.0-alpha.5",
+      "changes": [
+        "a2a-client sub-export: real A2A + E2E sign-then-seal overlay (libsodium), did:key/did:web identity, untrusted-relay-safe; git-mailbox demoted to ./mailbox fallback"
+      ]
+    },
+    {
       "version": "0.1.0-alpha.4",
       "changes": [
         "docs: rewrite README as an adoption-focused guide for the feature-complete five-layer surface (identity moat, A2A transport, mission ledger, earned standing, coordination); lead with what friends is + the five capabilities, a library/MCP quickstart with the full 29-tool surface, the trust & consent model and safety invariants, BYO-storage, and the runnable cross-agent proofs."

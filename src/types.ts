@@ -291,12 +291,24 @@ export interface AgentMeta {
     endpointUrl?: string
     agentId?: string
     protocolVersion?: string
-    /** Optional A2A git-mailbox coordinates (brick two). The mailbox is a
-     * dedicated PRIVATE repo holding only in-flight envelopes; `selfOutboxAgentId`
-     * is the dir THIS peer writes its outbox under. Absent on records that don't
-     * use the git-mailbox transport. */
-    mailbox?: { repo: string; selfOutboxAgentId: string }
+    /** Optional friends-relay coordinates (phase 8). When a peer has no directly
+     * reachable A2A `endpointUrl`, the host delivers via the UNTRUSTED relay at
+     * `url`, addressing the peer by its opaque `handle`. The relay carries only
+     * ciphertext (the E2E sign-then-seal overlay) — it never sees content. Absent
+     * on peers reachable directly or only via the git-mailbox fallback. */
+    relay?: { url: string; handle: string }
+    /** The peer's pinned DID (phase 8 — `did:key:…` or `did:web:…`). `agentId ===
+     * did` (the DID is the cross-agent identity primary key); pinned on first
+     * contact (TOFU) and verified on every use thereafter. Absent until the peer
+     * presents a DID-bearing proof. */
+    did?: string
   }
+  /** Optional git-mailbox FALLBACK coordinates (the demoted no-endpoint transport;
+   * see src/mailbox/). The mailbox is a dedicated PRIVATE repo holding only
+   * in-flight envelopes; `selfOutboxAgentId` is the dir THIS peer writes its outbox
+   * under. Top-level since phase 8's demote (was nested under `a2a` in alpha.4 —
+   * legacy records migrate-on-read). Absent on peers that don't use the fallback. */
+  mailbox?: { repo: string; selfOutboxAgentId: string }
 }
 
 // -- Friend Record --

@@ -63,11 +63,13 @@ knowledge is **structurally inviolable** and trust is **non-transitive**: an imp
 attributed, quarantined note, but it can never change who you trust. (See
 [Trust & consent model](#trust--consent-model).)
 
-### 2. Connectivity — the git-backed A2A transport
+### 2. Connectivity — the git-backed mailbox fallback
 
-How two agents actually reach each other, without a server in the middle.
+How two agents actually reach each other, without a server in the middle. (This git-mailbox is the
+demoted **offline/no-endpoint fallback** — real A2A + the friends E2E overlay is the primary path;
+see `@ouro.bot/friends/a2a-client`.)
 
-The optional `@ouro.bot/friends/a2a` sub-export is a **pure git-mailbox transport**: zero runtime
+The optional `@ouro.bot/friends/mailbox` sub-export is a **pure git-mailbox transport**: zero runtime
 dependencies, and it does **no git or network itself**. The host does every git op (clone / pull /
 add / commit / push); the library only **computes a message file's path + bytes** and
 **parses / validates / orders / dedups** the files the host hands back. Two agents authenticate as
@@ -76,6 +78,53 @@ own outbox.
 
 The mailbox is treated as **untrusted infrastructure**: a hostile mailbox can only **deny or
 replay** — never **escalate** — because an import never touches first-party notes or trust.
+
+### 2b. The primary transport — real A2A + an end-to-end security overlay
+
+The **`@ouro.bot/friends/a2a-client`** sub-export is the host-side adapter that makes friends agents
+speak the **real A2A (Agent2Agent) standard** — `message/send`, agent cards at a well-known URL, a
+single structured `DataPart` per envelope — and adds the **end-to-end security overlay** that keeps
+the wire safe even when a relay sits in the middle. It is the only part of the package that has a
+runtime dependency (`libsodium-wrappers`); the core stays zero-dep and transport-agnostic.
+
+A friends exchange is one A2A message whose DataPart carries a **sealed envelope**. Before it ever
+hits the wire, the envelope is:
+
+- **signed** by the sender — Ed25519 over the [RFC 8785 JCS](https://www.rfc-editor.org/rfc/rfc8785)
+  canonical bytes, carried in the envelope's reserved `proof` slot; and
+- **sealed** to the recipient — XChaCha20-Poly1305 AEAD over an ephemeral X25519 ECDH key, with the
+  **recipient's DID bound into the AEAD associated-data** so a blob cannot be re-targeted.
+
+The signature lives **inside** the ciphertext (sign-then-seal), so a relay never even learns who
+signed. Cryptographic identity is **`did:key`** (zero-infra — the agent's DID *is* its Ed25519 key,
+and the X25519 keyAgreement key is derived from it) or **`did:web`** (resolved behind an injectable
+hook). Identity is `agentId === did`, pinned trust-on-first-use, with **trust-tiered key rotation**
+(a family/friend peer may present a *signed* successor proof; acquaintances/strangers re-confirm out
+of band).
+
+**The friends relay (`ourostack/friends-relay`)** is the friends-family communication layer for any
+agent using the friends library — a relay (agents with no reachable endpoint register; it forwards
+A2A messages) plus a directory (discovery). It is built and deployed as a separate component from
+this store-only library, and it is **UNTRUSTED INFRASTRUCTURE by design**: standard A2A is TLS-only
+and terminates at the server, so a plain A2A relay would read every payload. The friends overlay
+closes exactly that gap. The relay carries **ciphertext and a routing handle and nothing else** — it
+can never **read**, **forge**, **tamper**, **re-target**, **replay-to-effect**, or **escalate**. The
+only residual it has is the ability to **deny, delay, or observe handle-level metadata**.
+
+That claim is not a promise — it is a **proof**. `examples/cross-agent-a2a-relay.ts` stands up a
+deliberately-malicious in-process relay and asserts all eight properties hold against real
+libsodium crypto:
+
+```
+npm run example:cross-agent-a2a-relay      # the malicious-relay proof: 8 hard assertions —
+                                           #   ciphertext-only, can't-forge/tamper/re-target,
+                                           #   replay-inert, moat-invariants, direct-equivalence,
+                                           #   reachability ladder (direct → relay → mailbox → none)
+```
+
+Reachability is a deterministic ladder: a directly-reachable **A2A endpoint** first, else the
+**relay**, else the **git-mailbox fallback** (§2), else **unreachable**. The *same* sealed envelope
+rides every rung — the security never depends on which path it took.
 
 ### 3. Shared memory — the mission ledger
 
@@ -413,7 +462,7 @@ network.
 ```sh
 npm run example:cross-agent-moat            # identity join key + consent-gated profile share,
                                             #   first-party-inviolable, trust non-transitive
-npm run example:a2a-git-mailbox             # the git-mailbox transport: path-binding, replay-safety,
+npm run example:mailbox-fallback            # the git-mailbox FALLBACK: path-binding, replay-safety,
                                             #   spoof rejection, hostile-mailbox tamper
 npm run example:cross-agent-mission-memory  # the mission ledger: shareable vs private learnings,
                                             #   first-party-wins, status non-transitive
@@ -454,7 +503,7 @@ setNervesEmitter((event) => {
 
 - **Store-only, transport-agnostic, additive.** The five layers were each built as a minimal
   primitive that does not modify the layers beneath it. The cross-agent envelopes are plain data; the
-  wire is always the caller's job (the `./a2a` mailbox is one optional, host-driven choice). A
+  wire is always the caller's job (the `./mailbox` git-mailbox is one optional, host-driven fallback). A
   CI-enforced dependency rule keeps the core from ever importing the transport.
 - **One persisted schema, additively grown.** Records are `schemaVersion: 1`; every layer added
   optional fields and sibling collections rather than changing existing meaning, so older data reads
@@ -504,10 +553,21 @@ setNervesEmitter((event) => {
 **From `@ouro.bot/friends/mcp`:** `createFriendsMcpServer`, `getToolSchemas`, `runMain` (plus the
 `McpToolSchema`, `FriendsMcpServer`, and `RunMainIo` types).
 
-**From `@ouro.bot/friends/a2a`:** `buildOutgoing`, `readIncoming`, `markSeen`, `isSeen`,
+**From `@ouro.bot/friends/mailbox`:** `buildOutgoing`, `readIncoming`, `markSeen`, `isSeen`,
 `compareReady`, `MAILBOX_VERSION` (plus the `MailboxMessage`, `BuildOutgoingInput`,
 `BuildOutgoingResult`, `IncomingFile`, `IncomingMessage`, `ReadIncomingInput`, `ReadIncomingResult`,
 `RejectedMessage`, `SeenLedger` types).
+
+**From `@ouro.bot/friends/a2a-client`** (the real-A2A adapter + the E2E overlay): `sendShare`,
+`receiveShare`, `resolveReachability`; `sealEnvelope` / `openSealedEnvelope`; `wrapInDataPart` /
+`unwrapDataPart`; `buildFriendsAgentCard`; `DidVerifier`, `evaluateRotation`, `signSuccessor`,
+`verifyCardDidBinding`, `pinOnFirstContact` / `isPinned` / `getPinned`, `MemoryPinStore`; the
+identity helpers `parseDidKey` / `keyAgreementFromDidKey` / `didKeyIdentityFromEd25519` /
+`ed25519PubToDidKey` and `didWebToUrl` / `resolveDidWeb` / `parseDidDocument`; the primitives
+`sealTo` / `openSealed`, `signEnvelope` / `verifyEnvelopeSignature`, `jcsString` / `jcsBytes`, and
+the `ready` init seam (plus the `A2ATransport`, `DidResolution`, `SealedEnvelope`, `StructuredProof`,
+`ReachabilityPlan`, `FriendsAgentCard`, `DidKeyIdentity`, `DidDocument` types). The transports
+(direct A2A / relay / git op) are injected by the host — this module does no network or git itself.
 
 ## License
 
