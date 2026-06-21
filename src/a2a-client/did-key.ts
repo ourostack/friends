@@ -12,7 +12,8 @@
 import type { Sodium } from "./sodium"
 
 const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-// Reverse lookup: char → value (or -1).
+// Reverse lookup: char → value, or `undefined` for a char not in the alphabet
+// (base58btcDecode checks `=== undefined`).
 const BASE58_MAP: Record<string, number> = (() => {
   const m: Record<string, number> = {}
   for (let i = 0; i < BASE58_ALPHABET.length; i++) m[BASE58_ALPHABET[i]] = i
