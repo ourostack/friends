@@ -1,10 +1,12 @@
 // MCP tool schemas for the friends server.
 //
-// 19 tools — a thin 1:1 surface over the friends library (D7): the original 14
-// plus the cross-agent moat surface (resolve_room, import_profile, grant_share,
-// revoke_share, list_shares; share_profile is de-stubbed in place). Each schema
-// follows JSON Schema for `inputSchema` as required by MCP. The shape mirrors the
-// harness's McpToolSchema so the same client tooling consumes both.
+// 24 tools — a thin 1:1 surface over the friends library (D7): the original 14,
+// the cross-agent moat surface (resolve_room, import_profile, grant_share,
+// revoke_share, list_shares; share_profile is de-stubbed in place), and the
+// brick-3 mission ledger (record_mission, get_mission, list_missions,
+// share_mission, import_mission). Each schema follows JSON Schema for
+// `inputSchema` as required by MCP. The shape mirrors the harness's McpToolSchema
+// so the same client tooling consumes both.
 import { emitNervesEvent } from "../observability"
 
 export interface McpToolSchema {
@@ -237,16 +239,16 @@ export function getToolSchemas(): McpToolSchema[] {
     },
     {
       name: "grant_share",
-      description: "Mint an explicit, revocable consent grant: an agent may receive a scope of a friend's profile. The consent half of the moat.",
+      description: "Mint an explicit, revocable consent grant: an agent may receive a scope of a subject (a friend's profile, keyed by friend uuid; or a mission, keyed by its missionKey). The consent half of the moat.",
       inputSchema: {
         type: "object",
         properties: {
-          subjectFriendId: { type: "string", description: "whose profile may be shared (local friend uuid)" },
+          subjectKey: { type: "string", description: "whose data may be shared — a local friend uuid for a profile, or a missionKey for a mission (the legacy arg name subjectFriendId is still accepted)" },
           recipientAgentId: { type: "string", description: "the agent that may receive it (join-key agentId)" },
-          scope: { type: "string", enum: ["name", "identity", "notes:safe", "notes:all", "outcomes"], description: "the scope consented to" },
+          scope: { type: "string", enum: ["name", "identity", "notes:safe", "notes:all", "outcomes", "mission"], description: "the scope consented to" },
           expiresAt: { type: "string", description: "optional ISO expiry; absent ⇒ never expires" },
         },
-        required: ["subjectFriendId", "recipientAgentId", "scope"],
+        required: ["subjectKey", "recipientAgentId", "scope"],
       },
     },
     {
@@ -266,10 +268,74 @@ export function getToolSchemas(): McpToolSchema[] {
       inputSchema: {
         type: "object",
         properties: {
-          subjectFriendId: { type: "string", description: "filter to one subject friend" },
+          subjectKey: { type: "string", description: "filter to one subject — a friend uuid or a missionKey (the legacy arg name subjectFriendId is still accepted)" },
           recipientAgentId: { type: "string", description: "filter to one recipient agent" },
           effectiveOnly: { type: "string", enum: ["true", "false"], description: "set to 'true' to return only grants that currently consent" },
         },
+      },
+    },
+    {
+      name: "record_mission",
+      description: "Upsert a shared mission (brick 3) by its cross-agent missionKey: create one when the key is unknown, else merge into the existing record. Appends first-party learnings / participants / outcomes and sets status. The mission analogue of record_interaction's outcome writer.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          missionKey: { type: "string", description: "the cross-agent join key for the mission (a ticket id / repo+PR / slugged name)" },
+          title: { type: "string", description: "human title; used only when CREATING (ignored on upsert)" },
+          status: { type: "string", enum: ["active", "succeeded", "partial", "failed", "abandoned"], description: "the mission status (first-party)" },
+          participants: { type: "array", description: "agent attributions [{ agentId?, agentName? }], merged deduped by agentId" },
+          learnings: { type: "array", description: "first-party learnings [{ key, value, shareable? }] appended to the mission" },
+          outcomes: { type: "array", description: "first-party outcomes [{ missionId, result, note? }] appended to the mission" },
+        },
+        required: ["missionKey"],
+      },
+    },
+    {
+      name: "get_mission",
+      description: "Fetch a single mission record by its local uuid id.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          missionId: { type: "string", description: "the mission's local uuid id" },
+        },
+        required: ["missionId"],
+      },
+    },
+    {
+      name: "list_missions",
+      description: "List mission records, optionally limited.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          limit: { type: "string", description: "max number of records to return" },
+        },
+      },
+    },
+    {
+      name: "share_mission",
+      description: "Producer: prepare a consent-gated, scope-filtered, provenance-preserving mission-share envelope for another agent (names the mission by its missionKey, never the local uuid). Self identity comes from whoami. 'mission' carries the shareable learnings; 'outcomes' carries the mission's outcomes. Returns { ok, envelope } or { ok:false, status }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          missionId: { type: "string", description: "the local mission to share (its local uuid id)" },
+          toAgentId: { type: "string", description: "the recipient agent's join-key agentId" },
+          scope: { type: "string", enum: ["mission", "outcomes"], description: "what to share: 'mission' (title/status + shareable learnings) or 'outcomes' (the result rows); both require an explicit grant under the tiered policy" },
+          proof: { type: "string", description: "optional opaque proof to stamp on the envelope (for a non-TOFU recipient verifier)" },
+        },
+        required: ["missionId", "toAgentId", "scope"],
+      },
+    },
+    {
+      name: "import_mission",
+      description: "Consumer (non-clobbering merge): import a mission-share envelope. Resolves the mission by missionKey; lands learnings in the imported namespace WITHOUT touching first-party learnings; append-merges + dedupes outcomes; source trust caps acceptance; never recomputes status/participants. Returns { ok, status, record }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          envelope: { type: "object", description: "the MissionShareEnvelope to import" },
+          fromAgentId: { type: "string", description: "the agent the envelope arrived from (join-key agentId)" },
+          trustOfSource: { type: "string", enum: ["family", "friend", "acquaintance", "stranger"], description: "this agent's resolved trust in the source agent — the acceptance cap" },
+        },
+        required: ["envelope", "fromAgentId", "trustOfSource"],
       },
     },
   ]

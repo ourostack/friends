@@ -21,6 +21,10 @@ export type {
   ImportedNote,
   ShareScope,
   ShareGrant,
+  MissionKey,
+  MissionLearning,
+  ImportedLearning,
+  MissionRecord,
   ChannelCapabilities,
   ResolvedContext,
   SenseType,
@@ -30,6 +34,7 @@ export type { Facing } from "./channel"
 export type { TrustExplanation, TrustBasis } from "./trust-explanation"
 export type { FriendStore } from "./store"
 export type { GrantStore } from "./grant-store"
+export type { MissionStore } from "./mission-store"
 export type { FriendResolverParams } from "./resolver"
 export type {
   GroupContextParticipant,
@@ -75,6 +80,7 @@ export {
 
 export { FileFriendStore } from "./store-file"
 export { FileGrantStore, grantsDirFor } from "./grant-store-file"
+export { FileMissionStore, missionsDirFor } from "./mission-store-file"
 export { openFileBundle } from "./file-bundle"
 export type { FileBundle } from "./file-bundle"
 
@@ -108,6 +114,9 @@ export { upsertAgentPeer } from "./agent-peer"
 
 export { recordRelationshipOutcome } from "./outcomes"
 
+export { recordMission } from "./missions"
+export type { RecordMissionInput } from "./missions"
+
 export { whoami } from "./whoami"
 export type { WhoamiResult } from "./whoami"
 
@@ -127,6 +136,19 @@ export {
 export { tofuVerifier, DEFAULT_AGENT_VERIFIER } from "./verifier"
 
 export { prepareProfileShare, importProfileShare } from "./share"
+
+export { prepareMissionShare, importMissionShare } from "./mission-share"
+export type {
+  MissionShareEnvelope,
+  SharedLearning,
+  PrepareMissionShareInput,
+  PrepareMissionShareResult,
+  PrepareMissionShareStatus,
+  ImportMissionShareInput,
+  ImportMissionShareOptions,
+  ImportMissionShareResult,
+  ImportMissionShareStatus,
+} from "./mission-share"
 
 export { grantShare, revokeShare, listShares, isGrantEffective } from "./grants"
 

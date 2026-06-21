@@ -11,6 +11,15 @@ import type { GrantStore } from "./grant-store"
 import type { ShareGrant } from "./types"
 import { isShareScope } from "./types"
 
+/** A grant as it may appear ON DISK: a current `ShareGrant` whose `subjectKey`
+ * may instead be the legacy `subjectFriendId` (Fork D). `normalize` reads both
+ * and always emits a current `ShareGrant` with `subjectKey`. */
+type LegacyShareGrant = Omit<ShareGrant, "subjectKey"> & {
+  subjectKey?: string
+  /** Pre-Fork-D field name; schemaVersion-1 grants carry this. */
+  subjectFriendId?: string
+}
+
 /** The sibling grants directory for a given friends directory: `<friendsDir>/_grants`.
  * The collection lives UNDER the friends dir (a reserved `_`-prefixed subdir) so a
  * single `--dir` still points the whole substrate at one place. */
@@ -74,10 +83,13 @@ export class FileGrantStore implements GrantStore {
     return grants
   }
 
-  private normalize(raw: ShareGrant): ShareGrant {
+  private normalize(raw: LegacyShareGrant): ShareGrant {
     return {
       id: raw.id,
-      subjectFriendId: raw.subjectFriendId,
+      // Fork D compat seam (a): on-disk schemaVersion-1 grants carry the legacy
+      // `subjectFriendId`; newer ones carry `subjectKey`. Read both, persist
+      // forward as `subjectKey` so the legacy field migrates on the next write.
+      subjectKey: raw.subjectKey ?? raw.subjectFriendId ?? "",
       recipientAgentId: raw.recipientAgentId,
       scope: isShareScope(raw.scope) ? raw.scope : "identity",
       grantedAt: typeof raw.grantedAt === "string" ? raw.grantedAt : new Date().toISOString(),
@@ -86,7 +98,7 @@ export class FileGrantStore implements GrantStore {
     }
   }
 
-  private async readJson(filePath: string): Promise<ShareGrant | null> {
+  private async readJson(filePath: string): Promise<LegacyShareGrant | null> {
     try {
       const raw = await fsPromises.readFile(filePath, "utf-8")
       try {
@@ -94,7 +106,7 @@ export class FileGrantStore implements GrantStore {
         if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
           return null
         }
-        return parsed as ShareGrant
+        return parsed as LegacyShareGrant
       } catch {
         return null
       }

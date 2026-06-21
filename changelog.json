@@ -1,6 +1,12 @@
 {
   "versions": [
     {
+      "version": "0.1.0-alpha.1",
+      "changes": [
+        "Add the cross-agent mission ledger (shared work memory): a first-class mission record with first-party/imported learnings, a mission share producer/consumer mirroring the profile moat, a kind:\"mission_share\" mailbox transport, 5 MCP mission tools, and a git-free cross-agent proof. Widen grant subjects (subjectFriendId → subjectKey), backward-compatibly."
+      ]
+    },
+    {
       "version": "0.1.0-alpha.0",
       "changes": [
         "Add the npm CI publish pipeline: an OIDC trusted-publishing `publish` job on push to main, an alpha-channel release-bump script, a changelog gate with freshness enforcement, and a trusted-publisher contract check wired into the coverage-gate preflight."

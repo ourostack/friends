@@ -29,7 +29,7 @@ class MemoryGrantStore implements GrantStore {
 function grant(overrides: Partial<ShareGrant> = {}): ShareGrant {
   return {
     id: "g-1",
-    subjectFriendId: "f-1",
+    subjectKey: "f-1",
     recipientAgentId: "agent-2",
     scope: "notes:safe",
     grantedAt: "2026-01-01T00:00:00.000Z",
@@ -59,9 +59,9 @@ describe("isGrantEffective", () => {
 describe("grantShare", () => {
   it("mints a grant with a fresh id and persists it", async () => {
     const grants = new MemoryGrantStore()
-    const g = await grantShare(grants, { subjectFriendId: "f-1", recipientAgentId: "agent-2", scope: "notes:all" })
+    const g = await grantShare(grants, { subjectKey: "f-1", recipientAgentId: "agent-2", scope: "notes:all" })
     expect(g.id).toBeTruthy()
-    expect(g.subjectFriendId).toBe("f-1")
+    expect(g.subjectKey).toBe("f-1")
     expect(g.recipientAgentId).toBe("agent-2")
     expect(g.scope).toBe("notes:all")
     expect(g.revokedAt).toBeUndefined()
@@ -71,7 +71,7 @@ describe("grantShare", () => {
   it("carries an explicit expiresAt when provided", async () => {
     const grants = new MemoryGrantStore()
     const g = await grantShare(grants, {
-      subjectFriendId: "f-1",
+      subjectKey: "f-1",
       recipientAgentId: "agent-2",
       scope: "identity",
       expiresAt: "2027-01-01T00:00:00.000Z",
@@ -81,7 +81,7 @@ describe("grantShare", () => {
 
   it("omits expiresAt when not provided", async () => {
     const grants = new MemoryGrantStore()
-    const g = await grantShare(grants, { subjectFriendId: "f-1", recipientAgentId: "agent-2", scope: "name" })
+    const g = await grantShare(grants, { subjectKey: "f-1", recipientAgentId: "agent-2", scope: "name" })
     expect("expiresAt" in g).toBe(false)
   })
 })
@@ -116,7 +116,7 @@ describe("revokeShare", () => {
 describe("listShares", () => {
   const live = grant({ id: "live", recipientAgentId: "a", scope: "identity" })
   const revoked = grant({ id: "revoked", recipientAgentId: "a", scope: "notes:safe", revokedAt: "2026-02-01T00:00:00.000Z" })
-  const otherSubject = grant({ id: "other", subjectFriendId: "f-2", recipientAgentId: "b", scope: "outcomes" })
+  const otherSubject = grant({ id: "other", subjectKey: "f-2", recipientAgentId: "b", scope: "outcomes" })
 
   it("returns all grants with their effective flag", async () => {
     const grants = new MemoryGrantStore([live, revoked, otherSubject])
@@ -128,7 +128,7 @@ describe("listShares", () => {
 
   it("filters by subject", async () => {
     const grants = new MemoryGrantStore([live, revoked, otherSubject])
-    const result = await listShares(grants, { subjectFriendId: "f-2" })
+    const result = await listShares(grants, { subjectKey: "f-2" })
     expect(result.map((g) => g.id)).toEqual(["other"])
   })
 

@@ -89,8 +89,10 @@ export type PrepareProfileShareResult =
 /** The original asserter of a note: for an imported note, whoever the import
  * recorded as `originallyAssertedBy` (falling back to its `assertedBy`); for a
  * first-party note, this agent itself. Never launders imported → first-party.
- * Always returns an attribution (a shared fact is always attributable). */
-function originalAsserterOf(
+ * Always returns an attribution (a shared fact is always attributable). Exported
+ * so the mission-share producer reuses it (a MissionLearning is structurally
+ * compatible with the inline param type) — single-sourced, tested once. */
+export function originalAsserterOf(
   note: { provenance?: { origin?: "first_party" | "imported"; assertedBy?: AgentAttribution } },
   selfAgentId: string,
 ): AgentAttribution {
@@ -136,7 +138,7 @@ export async function prepareProfileShare(
   const recipient: ConsentRecipient = { agentId: input.toAgentId, trustLevel: recipientTrust }
 
   const consented = await consent.consents({
-    subjectFriendId: record.id,
+    subjectKey: record.id,
     recipient,
     scope: input.scope,
     grants,

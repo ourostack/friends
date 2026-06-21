@@ -8,7 +8,9 @@
 //     mirroring share.ts / agent-peer.ts;
 //   • NO fs / net / http / child_process / process.env / git anywhere — the wire
 //     (clone / pull / add / commit / push) is entirely the caller's job.
-// Type-only imports of `ProfileShareEnvelope` (../share) carry no runtime edge.
+// Type-only imports of `ProfileShareEnvelope` (../share) + `MissionShareEnvelope`
+// (../mission-share) carry no runtime edge. Both are CORE modules, so the a2a→core
+// import direction is eslint-legal (a2a may import core; the reverse is forbidden).
 //
 // Security model (the git-native TOFU): addressing lives in the PATH, and a
 // single-writer-per-outbox-dir layout means a forged sender can't write into
@@ -20,6 +22,7 @@ import { randomUUID } from "node:crypto"
 
 import { emitNervesEvent } from "../observability"
 import type { ProfileShareEnvelope } from "../share"
+import type { MissionShareEnvelope } from "../mission-share"
 
 /** The mailbox wire-format version. Bumped only on a breaking message change. */
 export const MAILBOX_VERSION = 1
@@ -34,14 +37,19 @@ export interface MailboxMessage {
   fromAgentId: string
   toAgentId: string
   issuedAt: string
-  kind: "profile_share"
-  envelope: ProfileShareEnvelope
+  /** The payload discriminant. The host branches on it to call importProfileShare
+   * vs importMissionShare. The mailbox itself is payload-agnostic. */
+  kind: "profile_share" | "mission_share"
+  envelope: ProfileShareEnvelope | MissionShareEnvelope
 }
 
 export interface BuildOutgoingInput {
-  envelope: ProfileShareEnvelope
+  envelope: ProfileShareEnvelope | MissionShareEnvelope
   fromAgentId: string
   toAgentId: string
+  /** The payload discriminant. Defaults to "profile_share" for backward-compat;
+   * a mission share passes "mission_share". */
+  kind?: "profile_share" | "mission_share"
   /** Injectable ISO clock for deterministic tests; defaults to now. */
   now?: string
 }
@@ -66,7 +74,7 @@ export function buildOutgoing(input: BuildOutgoingInput): BuildOutgoingResult {
     fromAgentId: input.fromAgentId,
     toAgentId: input.toAgentId,
     issuedAt: now,
-    kind: "profile_share",
+    kind: input.kind ?? "profile_share",
     envelope: input.envelope,
   }
   // Mailbox paths are git-relative POSIX (always `/`), intentionally NOT
@@ -88,13 +96,16 @@ export interface IncomingFile {
   bytes: string
 }
 
-/** A validated, path-bound, self-addressed message ready to import. */
+/** A validated, path-bound, self-addressed message ready to import. The `kind`
+ * is the load-bearing routing primitive — the host branches on it to call
+ * importProfileShare vs importMissionShare. */
 export interface IncomingMessage {
   messageId: string
   fromAgentId: string
   toAgentId: string
   issuedAt: string
-  envelope: ProfileShareEnvelope
+  kind: "profile_share" | "mission_share"
+  envelope: ProfileShareEnvelope | MissionShareEnvelope
   relativePath: string
 }
 
@@ -139,7 +150,7 @@ function isWellFormedWrapper(value: Record<string, unknown>): boolean {
     typeof value.fromAgentId === "string" &&
     typeof value.toAgentId === "string" &&
     typeof value.issuedAt === "string" &&
-    value.kind === "profile_share" &&
+    (value.kind === "profile_share" || value.kind === "mission_share") &&
     typeof value.envelope === "object" &&
     value.envelope !== null &&
     !Array.isArray(value.envelope)
@@ -227,7 +238,8 @@ export function readIncoming(input: ReadIncomingInput): ReadIncomingResult {
       fromAgentId: message.fromAgentId as string,
       toAgentId: message.toAgentId as string,
       issuedAt: message.issuedAt as string,
-      envelope: message.envelope as ProfileShareEnvelope,
+      kind: message.kind as IncomingMessage["kind"],
+      envelope: message.envelope as ProfileShareEnvelope | MissionShareEnvelope,
       relativePath: file.relativePath,
     })
   }

@@ -101,10 +101,13 @@ export interface ImportedNote {
 // expose only the JOIN KEY (externalIds + display name) — never note content.
 // Content scopes expose notes: `notes:safe` shares only notes explicitly marked
 // `shareable`, `notes:all` shares every note, `outcomes` shares relationship
-// outcomes. The scope is the unit a `ShareGrant` consents to.
-export type ShareScope = "name" | "identity" | "notes:safe" | "notes:all" | "outcomes"
+// outcomes. `mission` (brick 3) shares a whole mission artifact (title/status +
+// its outcomes + its *shareable* learnings) — like the note scopes it carries
+// content, so under the tiered default it always needs an explicit grant. The
+// scope is the unit a `ShareGrant` consents to.
+export type ShareScope = "name" | "identity" | "notes:safe" | "notes:all" | "outcomes" | "mission"
 
-const SHARE_SCOPES: ReadonlySet<string> = new Set<ShareScope>(["name", "identity", "notes:safe", "notes:all", "outcomes"])
+const SHARE_SCOPES: ReadonlySet<string> = new Set<ShareScope>(["name", "identity", "notes:safe", "notes:all", "outcomes", "mission"])
 
 export function isShareScope(value: unknown): value is ShareScope {
   return typeof value === "string" && SHARE_SCOPES.has(value)
@@ -116,13 +119,20 @@ export const IDENTITY_SCOPES: ReadonlySet<ShareScope> = new Set(["name", "identi
 
 // -- Share Grant --
 // An explicit, auditable, revocable consent record: "agent <recipientAgentId>
-// may receive scope <scope> of friend <subjectFriendId>". The audit + revoke
+// may receive scope <scope> of subject <subjectKey>". The audit + revoke
 // surface (the GDPR / right-to-be-forgotten seam). Lives in its own sibling
 // GrantStore collection (`<dir>/_grants/`), NOT on the friend record — grants
 // are many-to-many with their own lifecycle.
+//
+// `subjectKey` (Fork D, brick 3) is an OPAQUE subject key — a semantic widening
+// of the former `subjectFriendId`. For a profile share it is the local friend
+// UUID; for a mission share it is the mission's `missionKey`. The on-disk value
+// is unchanged, so schemaVersion-1 grants (which carried `subjectFriendId`) read
+// clean — `FileGrantStore.normalize` reads `subjectKey ?? subjectFriendId` and
+// persists forward as `subjectKey`.
 export interface ShareGrant {
   id: string                    // stable UUID
-  subjectFriendId: string       // whose profile may be shared (local friend UUID)
+  subjectKey: string            // whose data may be shared (friend UUID, or a missionKey)
   recipientAgentId: string      // the agent that may receive it (join-key agentId)
   scope: ShareScope
   grantedAt: string             // ISO date
@@ -140,6 +150,70 @@ export interface RelationshipOutcome {
   timestamp: string
   note?: string
   provenance?: NoteProvenance
+}
+
+// -- Mission Key --
+// The cross-agent JOIN KEY for a mission (brick 3): a ticket id / repo+PR / a
+// slugged name two agents agree on out of band. The mission's analogue of
+// `provider:externalId`. NEVER a local UUID on the wire — the mission is named by
+// its `missionKey` in every envelope, so the same mission has a different local
+// `id` in each agent's store while sharing one join key.
+export type MissionKey = string
+
+// -- Mission Learning --
+// One first-party fact about the WORK itself (brick 3) — what two agents
+// collectively learned doing a mission together. Mirrors a `notes` value:
+// timestamped, optionally attributed, and `shareable` (default false —
+// private-by-default) marking it eligible for a `"mission"` share. A first-party
+// learning is ALWAYS this agent's own and can never be overwritten by an import.
+export interface MissionLearning {
+  value: string
+  savedAt: string
+  provenance?: NoteProvenance
+  shareable?: boolean
+}
+
+// -- Imported Learning --
+// One learning accepted from another agent's mission share. Lives in the SEPARATE
+// `importedLearnings` namespace (never in first-party `learnings`), keyed by the
+// asserting agentId then by learning key — mirroring `ImportedNote` so first-party
+// knowledge is structurally inviolable. Carries who introduced it (`assertedBy`)
+// and — when the share relayed a fact that originated elsewhere — who FIRST
+// asserted it (`originallyAssertedBy`), so an imported learning is never laundered
+// into looking first-party.
+export interface ImportedLearning {
+  value: string
+  importedAt: string
+  assertedBy?: AgentAttribution
+  originallyAssertedBy?: AgentAttribution
+}
+
+// -- Mission Record --
+// A first-class shared MISSION (brick 3): the facts two agents collectively
+// learned doing work together. Where a `FriendRecord` answers "who is this person
+// + what do I know about them", a `MissionRecord` answers "what did we do
+// together, how did it go, what did we collectively learn." It reuses the brick-1
+// import machinery (first-party / imported split, attribution, dedupe) re-aimed
+// from a person at a mission. Persisted in its own sibling `MissionStore`
+// collection (`<dir>/_missions/`), NOT on a friend record — a mission is
+// many-to-many with peers and has its own identity/lifecycle.
+export interface MissionRecord {
+  id: string                                       // stable local UUID (never on the wire)
+  missionKey: MissionKey                           // the cross-agent join key
+  title: string
+  status: "active" | "succeeded" | "partial" | "failed" | "abandoned"
+  participants: AgentAttribution[]
+  outcomes: RelationshipOutcome[]                  // reused verbatim from the person path
+  // first-party learnings (this agent's own knowledge of the work), keyed by a
+  // learning key. NEVER overwritten by an import.
+  learnings: Record<string, MissionLearning>
+  // learnings accepted from other agents' shares, namespaced by the asserting
+  // agentId then by learning key — kept structurally apart from first-party
+  // `learnings`. Additive — absent on missions that have never imported anything.
+  importedLearnings?: Record<string, Record<string, ImportedLearning>>
+  createdAt: string                                // ISO date
+  updatedAt: string
+  schemaVersion: number
 }
 
 // -- Agent Meta --

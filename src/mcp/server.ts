@@ -9,6 +9,7 @@
 import { emitNervesEvent } from "../observability"
 import type { FriendStore } from "../store"
 import type { GrantStore } from "../grant-store"
+import type { MissionStore } from "../mission-store"
 import { getToolSchemas } from "./schemas"
 import { dispatchTool } from "./dispatch"
 
@@ -32,6 +33,10 @@ export interface FriendsMcpServerOptions {
    * (grant_share / revoke_share / list_shares / share_profile) report
    * `unsupported`; everything else works store-only. */
   grants?: GrantStore
+  /** Optional mission store. When omitted, the mission ledger tools
+   * (record_mission / get_mission / list_missions / share_mission /
+   * import_mission) report `unsupported`; everything else works without it. */
+  missions?: MissionStore
   stdin: NodeJS.ReadableStream
   stdout: NodeJS.WritableStream
 }
@@ -42,7 +47,7 @@ export interface FriendsMcpServer {
 }
 
 export function createFriendsMcpServer(options: FriendsMcpServerOptions): FriendsMcpServer {
-  const { store, grants, stdin, stdout } = options
+  const { store, grants, missions, stdin, stdout } = options
   let buffer = ""
   let running = false
   let useContentLengthFraming = true
@@ -183,7 +188,7 @@ export function createFriendsMcpServer(options: FriendsMcpServerOptions): Friend
     const toolName = params.name ?? ""
     const toolArgs = params.arguments ?? {}
     try {
-      const { result, isError } = await dispatchTool(store, toolName, toolArgs, grants)
+      const { result, isError } = await dispatchTool(store, toolName, toolArgs, grants, missions)
       writeResponse({
         jsonrpc: "2.0",
         id: request.id!,

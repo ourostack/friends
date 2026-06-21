@@ -32,7 +32,7 @@ class MemoryGrantStore implements GrantStore {
 function grant(overrides: Partial<ShareGrant> = {}): ShareGrant {
   return {
     id: "g-1",
-    subjectFriendId: "f-1",
+    subjectKey: "f-1",
     recipientAgentId: "agent-2",
     scope: "notes:safe",
     grantedAt: "2026-01-01T00:00:00.000Z",
@@ -48,57 +48,69 @@ describe("strictPolicy (A1)", () => {
   it("consents only when an effective grant covers (subject, recipient, scope)", async () => {
     const grants = new MemoryGrantStore([grant()])
     expect(
-      await strictPolicy.consents({ subjectFriendId: "f-1", recipient: recipient("stranger"), scope: "notes:safe", grants, now: NOW }),
+      await strictPolicy.consents({ subjectKey: "f-1", recipient: recipient("stranger"), scope: "notes:safe", grants, now: NOW }),
     ).toBe(true)
   })
 
   it("refuses when no grant exists, even for a family recipient", async () => {
     const grants = new MemoryGrantStore()
     expect(
-      await strictPolicy.consents({ subjectFriendId: "f-1", recipient: recipient("family"), scope: "identity", grants, now: NOW }),
+      await strictPolicy.consents({ subjectKey: "f-1", recipient: recipient("family"), scope: "identity", grants, now: NOW }),
     ).toBe(false)
   })
 
   it("refuses when the grant is for a different scope", async () => {
     const grants = new MemoryGrantStore([grant({ scope: "notes:safe" })])
     expect(
-      await strictPolicy.consents({ subjectFriendId: "f-1", recipient: recipient("friend"), scope: "notes:all", grants, now: NOW }),
+      await strictPolicy.consents({ subjectKey: "f-1", recipient: recipient("friend"), scope: "notes:all", grants, now: NOW }),
     ).toBe(false)
   })
 
   it("refuses when the grant is for a different recipient", async () => {
     const grants = new MemoryGrantStore([grant({ recipientAgentId: "someone-else" })])
     expect(
-      await strictPolicy.consents({ subjectFriendId: "f-1", recipient: recipient("friend"), scope: "notes:safe", grants, now: NOW }),
+      await strictPolicy.consents({ subjectKey: "f-1", recipient: recipient("friend"), scope: "notes:safe", grants, now: NOW }),
     ).toBe(false)
   })
 
   it("refuses when the grant is for a different subject", async () => {
-    const grants = new MemoryGrantStore([grant({ subjectFriendId: "other" })])
+    const grants = new MemoryGrantStore([grant({ subjectKey: "other" })])
     expect(
-      await strictPolicy.consents({ subjectFriendId: "f-1", recipient: recipient("friend"), scope: "notes:safe", grants, now: NOW }),
+      await strictPolicy.consents({ subjectKey: "f-1", recipient: recipient("friend"), scope: "notes:safe", grants, now: NOW }),
     ).toBe(false)
   })
 
   it("refuses when the only matching grant is revoked", async () => {
     const grants = new MemoryGrantStore([grant({ revokedAt: "2026-02-01T00:00:00.000Z" })])
     expect(
-      await strictPolicy.consents({ subjectFriendId: "f-1", recipient: recipient("friend"), scope: "notes:safe", grants, now: NOW }),
+      await strictPolicy.consents({ subjectKey: "f-1", recipient: recipient("friend"), scope: "notes:safe", grants, now: NOW }),
     ).toBe(false)
   })
 
   it("refuses when the only matching grant has expired", async () => {
     const grants = new MemoryGrantStore([grant({ expiresAt: "2026-02-01T00:00:00.000Z" })])
     expect(
-      await strictPolicy.consents({ subjectFriendId: "f-1", recipient: recipient("friend"), scope: "notes:safe", grants, now: NOW }),
+      await strictPolicy.consents({ subjectKey: "f-1", recipient: recipient("friend"), scope: "notes:safe", grants, now: NOW }),
     ).toBe(false)
   })
 
   it("defaults `now` to the current time when omitted (future expiry still effective)", async () => {
     const grants = new MemoryGrantStore([grant({ expiresAt: "2999-01-01T00:00:00.000Z" })])
     expect(
-      await strictPolicy.consents({ subjectFriendId: "f-1", recipient: recipient("friend"), scope: "notes:safe", grants }),
+      await strictPolicy.consents({ subjectKey: "f-1", recipient: recipient("friend"), scope: "notes:safe", grants }),
     ).toBe(true)
+  })
+
+  it("Fork D: hasEffectiveGrant matches on subjectKey for a mission-keyed subject", async () => {
+    // A mission is just another grant subject — keyed by its missionKey, scope "mission".
+    const grants = new MemoryGrantStore([grant({ subjectKey: "PROJ-1234", scope: "mission" })])
+    expect(
+      await strictPolicy.consents({ subjectKey: "PROJ-1234", recipient: recipient("friend"), scope: "mission", grants, now: NOW }),
+    ).toBe(true)
+    // A different mission key does NOT consent.
+    expect(
+      await strictPolicy.consents({ subjectKey: "OTHER-9", recipient: recipient("friend"), scope: "mission", grants, now: NOW }),
+    ).toBe(false)
   })
 })
 
@@ -106,27 +118,27 @@ describe("trustImpliedPolicy (A2)", () => {
   it("consents on trust ≥ friend regardless of scope, with no grant", async () => {
     const grants = new MemoryGrantStore()
     expect(
-      await trustImpliedPolicy.consents({ subjectFriendId: "f-1", recipient: recipient("friend"), scope: "notes:all", grants, now: NOW }),
+      await trustImpliedPolicy.consents({ subjectKey: "f-1", recipient: recipient("friend"), scope: "notes:all", grants, now: NOW }),
     ).toBe(true)
     expect(
-      await trustImpliedPolicy.consents({ subjectFriendId: "f-1", recipient: recipient("family"), scope: "outcomes", grants, now: NOW }),
+      await trustImpliedPolicy.consents({ subjectKey: "f-1", recipient: recipient("family"), scope: "outcomes", grants, now: NOW }),
     ).toBe(true)
   })
 
   it("falls back to the grant check below friend trust — consents with a grant", async () => {
     const grants = new MemoryGrantStore([grant({ scope: "notes:safe" })])
     expect(
-      await trustImpliedPolicy.consents({ subjectFriendId: "f-1", recipient: recipient("acquaintance"), scope: "notes:safe", grants, now: NOW }),
+      await trustImpliedPolicy.consents({ subjectKey: "f-1", recipient: recipient("acquaintance"), scope: "notes:safe", grants, now: NOW }),
     ).toBe(true)
   })
 
   it("refuses below friend trust with no grant", async () => {
     const grants = new MemoryGrantStore()
     expect(
-      await trustImpliedPolicy.consents({ subjectFriendId: "f-1", recipient: recipient("acquaintance"), scope: "notes:safe", grants, now: NOW }),
+      await trustImpliedPolicy.consents({ subjectKey: "f-1", recipient: recipient("acquaintance"), scope: "notes:safe", grants, now: NOW }),
     ).toBe(false)
     expect(
-      await trustImpliedPolicy.consents({ subjectFriendId: "f-1", recipient: recipient("stranger"), scope: "identity", grants, now: NOW }),
+      await trustImpliedPolicy.consents({ subjectKey: "f-1", recipient: recipient("stranger"), scope: "identity", grants, now: NOW }),
     ).toBe(false)
   })
 })
@@ -139,34 +151,34 @@ describe("tieredPolicy (A3, the default)", () => {
   it("consents identity-scope shares on trust ≥ friend without a grant", async () => {
     const grants = new MemoryGrantStore()
     expect(
-      await tieredPolicy.consents({ subjectFriendId: "f-1", recipient: recipient("friend"), scope: "identity", grants, now: NOW }),
+      await tieredPolicy.consents({ subjectKey: "f-1", recipient: recipient("friend"), scope: "identity", grants, now: NOW }),
     ).toBe(true)
     expect(
-      await tieredPolicy.consents({ subjectFriendId: "f-1", recipient: recipient("family"), scope: "name", grants, now: NOW }),
+      await tieredPolicy.consents({ subjectKey: "f-1", recipient: recipient("family"), scope: "name", grants, now: NOW }),
     ).toBe(true)
   })
 
   it("refuses identity-scope shares below friend trust", async () => {
     const grants = new MemoryGrantStore()
     expect(
-      await tieredPolicy.consents({ subjectFriendId: "f-1", recipient: recipient("acquaintance"), scope: "identity", grants, now: NOW }),
+      await tieredPolicy.consents({ subjectKey: "f-1", recipient: recipient("acquaintance"), scope: "identity", grants, now: NOW }),
     ).toBe(false)
   })
 
   it("requires an explicit grant for note-content scopes even at family trust", async () => {
     const grants = new MemoryGrantStore()
     expect(
-      await tieredPolicy.consents({ subjectFriendId: "f-1", recipient: recipient("family"), scope: "notes:safe", grants, now: NOW }),
+      await tieredPolicy.consents({ subjectKey: "f-1", recipient: recipient("family"), scope: "notes:safe", grants, now: NOW }),
     ).toBe(false)
     expect(
-      await tieredPolicy.consents({ subjectFriendId: "f-1", recipient: recipient("family"), scope: "outcomes", grants, now: NOW }),
+      await tieredPolicy.consents({ subjectKey: "f-1", recipient: recipient("family"), scope: "outcomes", grants, now: NOW }),
     ).toBe(false)
   })
 
   it("consents note-content scopes when an explicit grant covers them", async () => {
     const grants = new MemoryGrantStore([grant({ scope: "notes:all" })])
     expect(
-      await tieredPolicy.consents({ subjectFriendId: "f-1", recipient: recipient("stranger"), scope: "notes:all", grants, now: NOW }),
+      await tieredPolicy.consents({ subjectKey: "f-1", recipient: recipient("stranger"), scope: "notes:all", grants, now: NOW }),
     ).toBe(true)
   })
 
