@@ -99,18 +99,98 @@ setNervesEmitter((event) => {
 })
 ```
 
+## MCP server
+
+`@ouro.bot/friends` ships an MCP server (`friends-mcp`) that exposes the library as a tool
+surface for any MCP-speaking harness. **The server runs no agent turn — it is a pure record
+read/write surface over the library, which is exactly what makes it harness-agnostic.** No
+daemon, no LLM, no session: each tool call reads or writes friend records against a directory
+you point it at.
+
+### Configuration (`.mcp.json`)
+
+The server speaks JSON-RPC 2.0 over stdio with **dual framing** — Content-Length (Claude Code)
+and newline-delimited JSON (Codex), auto-detected from the first message.
+
+The **documented (published) form** uses `npx` — but note it requires the package to be
+published to npm first (not yet live):
+
+```json
+{
+  "mcpServers": {
+    "friends": {
+      "command": "npx",
+      "args": ["-y", "--package", "@ouro.bot/friends", "friends-mcp", "--dir", "<path-to-friends-dir>"]
+    }
+  }
+}
+```
+
+Until then, the **dev / node form** is what runs against a local build:
+
+```json
+{
+  "mcpServers": {
+    "friends": {
+      "command": "node",
+      "args": ["<repo>/dist/mcp/bin.js", "--dir", "<path-to-friends-dir>"]
+    }
+  }
+}
+```
+
+For local development you can also `npm pack` then
+`npx -y --package ./ouro.bot-friends-<version>.tgz friends-mcp --dir <path>`, or `npm link`
+then `friends-mcp --dir <path>`.
+
+### The `--dir` coupling
+
+The store directory is the **only** coupling between the server and a bundle. Provide it with
+`--dir <path>` or the `FRIENDS_DIR` environment variable; **the flag wins** when both are set,
+and one of them is required (the server exits otherwise). It points at the bundle's `friends/`
+directory — the same directory a `FileFriendStore` persists to.
+
+### Tool surface
+
+14 tools, a thin 1:1 mapping over the library (no domain logic in the server):
+
+| Tool | What it does |
+|---|---|
+| `resolve_party` | Resolve an external identity into a friend record (creating one on first contact); returns `{ friend, channel, created }`. |
+| `describe_trust` | Explain a friend's trust context (level, basis, permits, constraints). |
+| `get_friend` | Fetch one friend record by uuid or name. |
+| `list_friends` | List friends, optionally filtered by trust / kind and limited. |
+| `save_note` | Save a friend's name, a tool preference, or a general note (with `override`). |
+| `record_interaction` | Accumulate token usage and/or append a shared-mission outcome. |
+| `upsert_group` | Link participants to a shared group, promoting strangers to acquaintances. |
+| `set_trust` | Set a friend's trust level (mirrored onto `role`). |
+| `link_identity` | Link an external identity, merging any orphan record that holds it. |
+| `unlink_identity` | Remove an external identity from a friend. |
+| `onboard_agent` | Upsert an agent-peer record from resolved coordinates (no HTTP fetch). |
+| `whoami` | Resolve the machine owner and which record represents the self. |
+| `channel_caps` | Return a channel's capabilities. |
+| `share_profile` | **Reserved (P1)** — returns `{ supported: false }` until federation lands. |
+
+The server module is consumed in code from the `@ouro.bot/friends/mcp` subpath, exporting
+`createFriendsMcpServer`, `getToolSchemas`, and `runMain` (plus the `McpToolSchema`,
+`FriendsMcpServer`, and `RunMainIo` types).
+
 ## Public API
 
 **Types:** `FriendRecord`, `FriendConnection`, `ExternalId`, `IdentityProvider`, `Channel`,
-`TrustLevel`, `AgentMeta`, `RelationshipOutcome`, `ChannelCapabilities`, `ResolvedContext`,
-`SenseType`, `Facing`, `TrustExplanation`, `TrustBasis`, `FriendStore`, `FriendResolverParams`,
-`GroupContextParticipant`, `GroupContextUpsertResult`, `UsageData`, `NervesEvent`.
+`TrustLevel`, `AgentMeta`, `RelationshipOutcome`, `NoteProvenance`, `ChannelCapabilities`,
+`ResolvedContext`, `SenseType`, `Facing`, `TrustExplanation`, `TrustBasis`, `FriendStore`,
+`FriendResolverParams`, `GroupContextParticipant`, `GroupContextUpsertResult`, `UsageData`,
+`FriendOpResult`, `FriendOpStatus`, `ApplyFriendNoteInput`, `WhoamiResult`, `NervesEvent`.
 
 **Values:** `TRUSTED_LEVELS`, `isTrustedLevel`, `isIdentityProvider`, `FileFriendStore`,
 `FriendResolver`, `machineOwnerUsername`, `isLocalMachineOwnerIdentity`,
 `getChannelCapabilities`, `channelToFacing`, `isRemoteChannel`, `getAlwaysOnSenseNames`,
 `describeTrustContext`, `upsertGroupContextParticipants`, `accumulateFriendTokens`,
-`setNervesEmitter`.
+`applyFriendNote`, `setFriendTrust`, `linkExternalId`, `unlinkExternalId`, `upsertAgentPeer`,
+`recordRelationshipOutcome`, `whoami`, `setNervesEmitter`.
+
+**From `@ouro.bot/friends/mcp`:** `createFriendsMcpServer`, `getToolSchemas`, `runMain`.
 
 ## License
 
