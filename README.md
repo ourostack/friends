@@ -77,6 +77,85 @@ const trust = describeTrustContext({ friend, channel: channel.channel })
 `FileFriendStore` adapter, so you can back friends with anything (in-memory, a database, a
 remote service) by implementing the interface.
 
+## Storage is first-class — bring your own
+
+**`friends` never decides where or how your data lives.** *Where* is the path / connection
+string you pass; *how* is a `FriendStore` / `GrantStore` implementation you choose or write. The
+core domain logic — resolver, trust, notes, consent, share, import — is **100%
+persistence-agnostic**: it only ever calls the two store interfaces.
+
+`openFileBundle` is a one-liner for the filesystem case, encapsulating the sibling `_grants/`
+convention (the explicit two-store construction stays available):
+
+```ts
+import { openFileBundle } from "@ouro.bot/friends"
+
+const { store, grants } = openFileBundle("/bundle/friends") // grants live at /bundle/friends/_grants
+```
+
+### The two seams as a contract
+
+A third-party backend implements two interfaces. Get these three behaviors right or
+cross-channel / cross-agent unification breaks:
+
+- **`findByExternalId(provider, externalId, tenantId?)`** — the cross-agent join-key lookup. A
+  match requires `provider` + `externalId` **and** (`tenantId` undefined ⇒ any tenant, else an
+  exact tenant match). This is how the same person is recognized across channels and how an
+  import resolves its subject by join key.
+- **`get(id)` — UUID-then-name fallback.** Look up by UUID first; if not found, fall back to a
+  **case-insensitive name** lookup (the documented path for proactive sends). A DB backend should
+  index the UUID and MAY implement the name fallback.
+- **Round-trip discipline (load-bearing).** A backend MUST preserve the **full `FriendRecord`
+  losslessly** — including `importedNotes` **and future additive fields** (e.g.
+  `agentMeta.a2a.mailbox`). Storing a lossy projection breaks the schemaVersion-1 guarantee for
+  non-file backends. Prefer storing the **whole record as a JSON blob keyed by id**, with side
+  indexes for lookups.
+
+### Sketch: a SQLite backend (illustrative — not shipped code)
+
+The entire moat works **unchanged** over a database, because the domain only ever calls the
+`FriendStore` interface. Store the record as a JSON blob (lossless) with an index table for the
+join-key lookup:
+
+```ts
+// friends(id TEXT PRIMARY KEY, name TEXT, record TEXT /* JSON */)
+// external_ids(provider TEXT, external_id TEXT, tenant_id TEXT, friend_id TEXT)
+class SqliteFriendStore implements FriendStore {
+  constructor(private readonly db: Database) {}
+
+  async put(id: string, record: FriendRecord): Promise<void> {
+    // Lossless: the WHOLE record as JSON — importedNotes + any additive field survive.
+    this.db.run("INSERT OR REPLACE INTO friends (id, name, record) VALUES (?, ?, ?)",
+      id, record.name, JSON.stringify(record))
+    this.db.run("DELETE FROM external_ids WHERE friend_id = ?", id)
+    for (const ext of record.externalIds) {
+      this.db.run("INSERT INTO external_ids (provider, external_id, tenant_id, friend_id) VALUES (?, ?, ?, ?)",
+        ext.provider, ext.externalId, ext.tenantId ?? null, id)
+    }
+  }
+
+  async get(id: string): Promise<FriendRecord | null> {
+    const byId = this.db.get("SELECT record FROM friends WHERE id = ?", id)
+    if (byId) return JSON.parse(byId.record)
+    // UUID-then-name fallback (case-insensitive).
+    const byName = this.db.get("SELECT record FROM friends WHERE LOWER(name) = LOWER(?)", id)
+    return byName ? JSON.parse(byName.record) : null
+  }
+
+  async findByExternalId(provider: string, externalId: string, tenantId?: string): Promise<FriendRecord | null> {
+    const row = this.db.get(
+      "SELECT friend_id FROM external_ids WHERE provider = ? AND external_id = ? AND (? IS NULL OR tenant_id = ?)",
+      provider, externalId, tenantId ?? null, tenantId ?? null)
+    return row ? this.get(row.friend_id) : null
+  }
+  // delete / listAll / hasAnyFriends follow the same id-keyed-blob shape.
+}
+```
+
+`GrantStore` is the same shape — an id-keyed JSON blob (no external-id index needed). Swap either
+store in and **every import-safety invariant still holds**, because they are structural
+properties of the domain logic, not of the filesystem.
+
 ## Channels
 
 Each channel an agent speaks on (`cli`, `teams`, `bluebubbles`, `mail`, `voice`, `a2a`,
@@ -186,6 +265,37 @@ The server module is consumed in code from the `@ouro.bot/friends/mcp` subpath, 
 `createFriendsMcpServer`, `getToolSchemas`, and `runMain` (plus the `McpToolSchema`,
 `FriendsMcpServer`, and `RunMainIo` types).
 
+## The `./a2a` git-mailbox transport
+
+The package ships an optional **`@ouro.bot/friends/a2a`** sub-export — a *pure* git-mailbox
+transport for the cross-agent moat. It has **zero runtime dependencies** and does **no git or
+network itself**: **the host does every git op** (clone / pull / add / commit / push) and writes
+the bytes; the library only **computes a message file's path + bytes** and **parses / validates /
+orders / dedups** the files the host hands back.
+
+```ts
+import { buildOutgoing, readIncoming, markSeen, isSeen } from "@ouro.bot/friends/a2a"
+
+// Producer: compute the file to write (the host then `git add/commit/push`es it).
+const { relativePath, bytes } = buildOutgoing({ envelope, fromAgentId: "agent-a", toAgentId: "agent-b" })
+//   relativePath → agents/agent-a/outbox/agent-b/<issuedAt>--<uuid>.json
+
+// Consumer: the host `git pull`s + reads the files, then validates/orders/dedups them.
+const { ready, skippedSeen, rejected } = readIncoming({ files, selfAgentId: "agent-b", seen })
+//   ready: self-addressed, path-bound, not-yet-seen messages, ordered by issuedAt
+//   skippedSeen: messageIds already in the seen ledger (replay-safe)
+//   rejected: { relativePath, reason } — e.g. from_path_mismatch (a spoofed sender)
+```
+
+Frame the two sides generically as **two agents that authenticate as two distinct git
+identities**, sharing a dedicated **private** mailbox repo. Addressing lives in the path
+(`agents/<from>/outbox/<to>/…`), each agent is the **single writer** of its own outbox dir, and
+`readIncoming` **path-binds** every message — rejecting any whose claimed sender/recipient
+doesn't match the path. The mailbox is **untrusted infrastructure**: a hostile mailbox can only
+**deny or replay**, never escalate, because `import_profile` never touches first-party notes or
+trust. See [`examples/a2a-git-mailbox.ts`](./examples/a2a-git-mailbox.ts)
+(`npm run example:a2a-git-mailbox`) for an end-to-end, git-free proof of every invariant.
+
 ## Cross-agent sharing (the moat)
 
 Two *different* agents (different owners) can agree a party is the same person **and** share what
@@ -275,7 +385,7 @@ envelope change.
 `ProfileShareEnvelope`, `SharedNote`, `PrepareProfileShareInput`, `PrepareProfileShareResult`,
 `PrepareProfileShareStatus`, `ImportProfileShareInput`, `ImportProfileShareOptions`,
 `ImportProfileShareResult`, `ImportProfileShareStatus`, `GrantShareInput`, `RevokeShareResult`,
-`ListSharesFilter`, `ListedShare`, `NervesEvent`.
+`ListSharesFilter`, `ListedShare`, `FileBundle`, `NervesEvent`.
 
 **Values:** `TRUSTED_LEVELS`, `IDENTITY_SCOPES`, `isTrustedLevel`, `isIdentityProvider`,
 `isShareScope`, `FileFriendStore`, `FileGrantStore`, `grantsDirFor`, `FriendResolver`,
@@ -285,9 +395,14 @@ envelope change.
 `linkExternalId`, `unlinkExternalId`, `upsertAgentPeer`, `recordRelationshipOutcome`, `whoami`,
 `resolveRoom`, `strictPolicy`, `trustImpliedPolicy`, `tieredPolicy`, `DEFAULT_CONSENT_POLICY`,
 `tofuVerifier`, `DEFAULT_AGENT_VERIFIER`, `prepareProfileShare`, `importProfileShare`, `grantShare`,
-`revokeShare`, `listShares`, `isGrantEffective`, `setNervesEmitter`.
+`revokeShare`, `listShares`, `isGrantEffective`, `openFileBundle`, `setNervesEmitter`.
 
 **From `@ouro.bot/friends/mcp`:** `createFriendsMcpServer`, `getToolSchemas`, `runMain`.
+
+**From `@ouro.bot/friends/a2a`:** `buildOutgoing`, `readIncoming`, `markSeen`, `isSeen`,
+`compareReady`, `MAILBOX_VERSION` (+ the `MailboxMessage`, `BuildOutgoingInput`,
+`BuildOutgoingResult`, `IncomingFile`, `IncomingMessage`, `ReadIncomingInput`, `ReadIncomingResult`,
+`RejectedMessage`, `SeenLedger` types).
 
 ## License
 
