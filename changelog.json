@@ -1,6 +1,12 @@
 {
   "versions": [
     {
+      "version": "0.1.0-alpha.4",
+      "changes": [
+        "docs: rewrite README as an adoption-focused guide for the feature-complete five-layer surface (identity moat, A2A transport, mission ledger, earned standing, coordination); lead with what friends is + the five capabilities, a library/MCP quickstart with the full 29-tool surface, the trust & consent model and safety invariants, BYO-storage, and the runnable cross-agent proofs."
+      ]
+    },
+    {
       "version": "0.1.0-alpha.3",
       "changes": [
         "Add coordination / delegation (brick five): five coordination verbs (request/offer/accept/decline/handoff) over a new kind:\"coordination\" mailbox transport that negotiate WHO does a mission; an additive coordination sub-object on MissionRecord (assignee + append-only log) as the only persisted effect; a prepareCoordination/importCoordination producer/consumer pair mirroring the mission share (trust-gated, consent-gated via a new identity-tier \"coordinate\" scope, first-party-inviolable, non-transitive — a handoff never forces an assignee, the receiver's own accept confirms); last-writer-wins assignee-conflict resolution by issuedAt; 3 MCP tools (coordinate, import_coordination, get_coordination); and a git-free three-agent cross-agent proof. The moat, A2A transport (buildOutgoing/readIncoming unchanged), consent stack, mission ledger, and standing are untouched."
