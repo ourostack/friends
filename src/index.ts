@@ -70,6 +70,8 @@ export { setFriendTrust } from "./trust-mutation"
 
 export { linkExternalId, unlinkExternalId } from "./link-identity"
 
+export { upsertAgentPeer } from "./agent-peer"
+
 // -- Observability seam --
 // The package emits structured events through a no-op `emitNervesEvent` by
 // default. Pass a real emitter via `setNervesEmitter` to forward them (the
