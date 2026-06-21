@@ -15,6 +15,10 @@ export interface UpsertAgentPeerInput {
   agentId: string
   trustLevel?: TrustLevel
   a2a?: AgentMeta["a2a"]
+  /** Optional A2A git-mailbox coords — the ergonomic top-level path the MCP
+   * `onboard_agent` tool uses. Folded into the rebuilt `a2a`; if also set inside
+   * `a2a`, this explicit value wins (last spread). Absent ⇒ no mailbox key. */
+  mailbox?: { repo: string; selfOutboxAgentId: string }
   bundleName?: string
 }
 
@@ -52,7 +56,7 @@ export async function upsertAgentPeer(
     agentMeta: {
       ...baseMeta,
       bundleName: baseMeta.bundleName || bundleName || name,
-      a2a: { ...(a2a ?? {}), agentId },
+      a2a: { ...(a2a ?? {}), agentId, ...(input.mailbox ? { mailbox: input.mailbox } : {}) },
     },
     externalIds: [
       ...(existing?.externalIds.filter(

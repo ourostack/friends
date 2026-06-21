@@ -154,6 +154,11 @@ export interface AgentMeta {
     endpointUrl?: string
     agentId?: string
     protocolVersion?: string
+    /** Optional A2A git-mailbox coordinates (brick two). The mailbox is a
+     * dedicated PRIVATE repo holding only in-flight envelopes; `selfOutboxAgentId`
+     * is the dir THIS peer writes its outbox under. Absent on records that don't
+     * use the git-mailbox transport. */
+    mailbox?: { repo: string; selfOutboxAgentId: string }
   }
 }
 

@@ -5,8 +5,7 @@
 // starts an MCP server on the given streams. If neither source supplies a
 // directory, it reports via `onError` and constructs nothing (returns null).
 import { emitNervesEvent } from "../observability"
-import { FileFriendStore } from "../store-file"
-import { FileGrantStore, grantsDirFor } from "../grant-store-file"
+import { openFileBundle } from "../file-bundle"
 import { createFriendsMcpServer } from "./server"
 import type { FriendsMcpServer } from "./server"
 
@@ -47,10 +46,10 @@ export function runMain(
     meta: { source },
   })
 
-  const store = new FileFriendStore(dir)
   // The consent-grant collection is a sibling `_grants/` dir under the friends
   // dir, so the single `--dir` wires the whole substrate (friends + consent).
-  const grants = new FileGrantStore(grantsDirFor(dir))
+  // `openFileBundle` encapsulates that sibling-dir convention.
+  const { store, grants } = openFileBundle(dir)
   const server = createFriendsMcpServer({ store, grants, stdin: io.stdin, stdout: io.stdout })
   server.start()
   return server

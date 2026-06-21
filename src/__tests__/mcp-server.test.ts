@@ -528,6 +528,19 @@ describe("tools/call dispatch", () => {
     expect(rec.agentMeta?.a2a?.cardUrl).toBe("https://card")
   })
 
+  it("onboard_agent: threads a string-encoded mailbox coord into a2a.mailbox", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    start(store)
+    const r = await h.tool("onboard_agent", {
+      name: "PeerBot",
+      agentId: "peer-1",
+      mailbox: JSON.stringify({ repo: "/m/mailbox", selfOutboxAgentId: "agent-a" }),
+    })
+    const rec = r.payload as FriendRecord
+    expect(rec.agentMeta?.a2a?.mailbox).toEqual({ repo: "/m/mailbox", selfOutboxAgentId: "agent-a" })
+  })
+
   it("whoami: reports the machine owner self", async () => {
     const store = makeStore()
     seedOwner(store)

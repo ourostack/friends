@@ -171,6 +171,7 @@ export function getToolSchemas(): McpToolSchema[] {
           agentId: { type: "string", description: "the a2a agent id" },
           trustLevel: { type: "string", description: "trust level (default acquaintance)" },
           a2a: { type: "object", description: "a2a coordinates { cardUrl?, endpointUrl?, protocolVersion? }" },
+          mailbox: { type: "object", description: "optional A2A git-mailbox coords { repo, selfOutboxAgentId }" },
           bundleName: { type: "string", description: "optional bundle name" },
         },
         required: ["name", "agentId"],

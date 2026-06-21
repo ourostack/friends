@@ -195,13 +195,24 @@ export class FileFriendStore implements FriendStore {
   private normalizeA2AMeta(raw: unknown): AgentMeta["a2a"] | undefined {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined
     const meta = raw as Record<string, unknown>
+    const mailbox = this.normalizeMailbox(meta.mailbox)
     const a2a = {
       ...(typeof meta.cardUrl === "string" ? { cardUrl: meta.cardUrl } : {}),
       ...(typeof meta.endpointUrl === "string" ? { endpointUrl: meta.endpointUrl } : {}),
       ...(typeof meta.agentId === "string" ? { agentId: meta.agentId } : {}),
       ...(typeof meta.protocolVersion === "string" ? { protocolVersion: meta.protocolVersion } : {}),
+      ...(mailbox ? { mailbox } : {}),
     }
     return Object.keys(a2a).length > 0 ? a2a : undefined
+  }
+
+  /** Preserve an additive a2a.mailbox coord only when both fields are strings;
+   * otherwise drop it (absent ⇒ unchanged — the additive guarantee). */
+  private normalizeMailbox(raw: unknown): { repo: string; selfOutboxAgentId: string } | undefined {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined
+    const m = raw as Record<string, unknown>
+    if (typeof m.repo !== "string" || typeof m.selfOutboxAgentId !== "string") return undefined
+    return { repo: m.repo, selfOutboxAgentId: m.selfOutboxAgentId }
   }
 
   private async readJson(filePath: string): Promise<FriendRecord | null> {

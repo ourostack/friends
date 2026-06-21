@@ -215,6 +215,7 @@ export async function dispatchTool(
         agentId: coerceString(args.agentId),
         trustLevel: coerceOptionalString(args.trustLevel) as TrustLevel | undefined,
         a2a: parseMaybeJson<AgentMeta["a2a"]>(args.a2a),
+        mailbox: parseMaybeJson<{ repo: string; selfOutboxAgentId: string }>(args.mailbox),
         bundleName: coerceOptionalString(args.bundleName),
       })
       return { result: record, isError: false }

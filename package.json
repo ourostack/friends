@@ -13,6 +13,10 @@
     "./mcp": {
       "types": "./dist/mcp/index.d.ts",
       "default": "./dist/mcp/index.js"
+    },
+    "./a2a": {
+      "types": "./dist/a2a/index.d.ts",
+      "default": "./dist/a2a/index.js"
     }
   },
   "bin": {
@@ -31,7 +35,8 @@
     "test:coverage": "vitest run --coverage",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
-    "example:cross-agent-moat": "npm run build && tsx examples/cross-agent-moat.ts"
+    "example:cross-agent-moat": "npm run build && tsx examples/cross-agent-moat.ts",
+    "example:a2a-git-mailbox": "npm run build && tsx examples/a2a-git-mailbox.ts"
   },
   "repository": {
     "type": "git",
