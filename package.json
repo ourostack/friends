@@ -39,6 +39,7 @@
     "example:cross-agent-moat": "npm run build && tsx examples/cross-agent-moat.ts",
     "example:a2a-git-mailbox": "npm run build && tsx examples/a2a-git-mailbox.ts",
     "example:cross-agent-mission-memory": "npm run build && tsx examples/cross-agent-mission-memory.ts",
+    "example:cross-agent-standing": "npm run build && tsx examples/cross-agent-standing.ts",
     "release:bump": "node scripts/release-bump.cjs",
     "release:preflight": "node scripts/release-preflight.cjs",
     "release:trust:check": "node scripts/npm-trusted-publishers.cjs check",
