@@ -119,13 +119,20 @@ export const IDENTITY_SCOPES: ReadonlySet<ShareScope> = new Set(["name", "identi
 
 // -- Share Grant --
 // An explicit, auditable, revocable consent record: "agent <recipientAgentId>
-// may receive scope <scope> of friend <subjectFriendId>". The audit + revoke
+// may receive scope <scope> of subject <subjectKey>". The audit + revoke
 // surface (the GDPR / right-to-be-forgotten seam). Lives in its own sibling
 // GrantStore collection (`<dir>/_grants/`), NOT on the friend record — grants
 // are many-to-many with their own lifecycle.
+//
+// `subjectKey` (Fork D, brick 3) is an OPAQUE subject key — a semantic widening
+// of the former `subjectFriendId`. For a profile share it is the local friend
+// UUID; for a mission share it is the mission's `missionKey`. The on-disk value
+// is unchanged, so schemaVersion-1 grants (which carried `subjectFriendId`) read
+// clean — `FileGrantStore.normalize` reads `subjectKey ?? subjectFriendId` and
+// persists forward as `subjectKey`.
 export interface ShareGrant {
   id: string                    // stable UUID
-  subjectFriendId: string       // whose profile may be shared (local friend UUID)
+  subjectKey: string            // whose data may be shared (friend UUID, or a missionKey)
   recipientAgentId: string      // the agent that may receive it (join-key agentId)
   scope: ShareScope
   grantedAt: string             // ISO date

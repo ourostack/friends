@@ -125,6 +125,21 @@ describe("FileGrantStore", () => {
     expect(all.find((g) => g.id === "g-old")?.subjectKey).toBe("f-legacy")
   })
 
+  it("Fork D: a grant with NEITHER subjectKey nor subjectFriendId normalizes to an empty subjectKey", async () => {
+    dir = mkdtempSync(join(tmpdir(), "friends-grants-"))
+    const grantsPath = grantsDirFor(dir)
+    new FileGrantStore(grantsPath)
+    // A corrupt on-disk grant missing both subject fields — the `?? ""` third arm.
+    await fsPromises.writeFile(
+      join(grantsPath, "g-bad.json"),
+      JSON.stringify({ id: "g-bad", recipientAgentId: "a", scope: "identity", grantedAt: NOW }),
+      "utf-8",
+    )
+    const store = new FileGrantStore(grantsPath)
+    const loaded = await store.get("g-bad")
+    expect(loaded?.subjectKey).toBe("")
+  })
+
   it("Fork D: a NEW-format grant (subjectKey) round-trips and persists as subjectKey", async () => {
     dir = mkdtempSync(join(tmpdir(), "friends-grants-"))
     const grantsPath = grantsDirFor(dir)

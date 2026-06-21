@@ -237,16 +237,16 @@ export function getToolSchemas(): McpToolSchema[] {
     },
     {
       name: "grant_share",
-      description: "Mint an explicit, revocable consent grant: an agent may receive a scope of a friend's profile. The consent half of the moat.",
+      description: "Mint an explicit, revocable consent grant: an agent may receive a scope of a subject (a friend's profile, keyed by friend uuid; or a mission, keyed by its missionKey). The consent half of the moat.",
       inputSchema: {
         type: "object",
         properties: {
-          subjectFriendId: { type: "string", description: "whose profile may be shared (local friend uuid)" },
+          subjectKey: { type: "string", description: "whose data may be shared — a local friend uuid for a profile, or a missionKey for a mission (the legacy arg name subjectFriendId is still accepted)" },
           recipientAgentId: { type: "string", description: "the agent that may receive it (join-key agentId)" },
-          scope: { type: "string", enum: ["name", "identity", "notes:safe", "notes:all", "outcomes"], description: "the scope consented to" },
+          scope: { type: "string", enum: ["name", "identity", "notes:safe", "notes:all", "outcomes", "mission"], description: "the scope consented to" },
           expiresAt: { type: "string", description: "optional ISO expiry; absent ⇒ never expires" },
         },
-        required: ["subjectFriendId", "recipientAgentId", "scope"],
+        required: ["subjectKey", "recipientAgentId", "scope"],
       },
     },
     {
@@ -266,7 +266,7 @@ export function getToolSchemas(): McpToolSchema[] {
       inputSchema: {
         type: "object",
         properties: {
-          subjectFriendId: { type: "string", description: "filter to one subject friend" },
+          subjectKey: { type: "string", description: "filter to one subject — a friend uuid or a missionKey (the legacy arg name subjectFriendId is still accepted)" },
           recipientAgentId: { type: "string", description: "filter to one recipient agent" },
           effectiveOnly: { type: "string", enum: ["true", "false"], description: "set to 'true' to return only grants that currently consent" },
         },

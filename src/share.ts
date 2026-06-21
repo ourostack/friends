@@ -136,7 +136,7 @@ export async function prepareProfileShare(
   const recipient: ConsentRecipient = { agentId: input.toAgentId, trustLevel: recipientTrust }
 
   const consented = await consent.consents({
-    subjectFriendId: record.id,
+    subjectKey: record.id,
     recipient,
     scope: input.scope,
     grants,

@@ -285,8 +285,12 @@ export async function dispatchTool(
           isError: true,
         }
       }
+      // Fork D compat seam (b): accept the new `subjectKey` arg, falling back to
+      // the legacy `subjectFriendId` so old-arg callers (incl. the unmodified
+      // examples) keep working. coerceString gives "" when an arg is absent, so
+      // `||` selects subjectKey when present, else subjectFriendId.
       const grant = await grantShare(grants, {
-        subjectFriendId: coerceString(args.subjectFriendId),
+        subjectKey: coerceString(args.subjectKey) || coerceString(args.subjectFriendId),
         recipientAgentId: coerceString(args.recipientAgentId),
         scope: scope as ShareScope,
         expiresAt: coerceOptionalString(args.expiresAt),
@@ -302,8 +306,10 @@ export async function dispatchTool(
 
     case "list_shares": {
       if (!grants) return { result: NO_GRANT_STORE, isError: true }
+      // Fork D compat seam (b): accept `subjectKey`, falling back to the legacy
+      // `subjectFriendId` filter arg.
       const result = await listShares(grants, {
-        subjectFriendId: coerceOptionalString(args.subjectFriendId),
+        subjectKey: coerceOptionalString(args.subjectKey) ?? coerceOptionalString(args.subjectFriendId),
         recipientAgentId: coerceOptionalString(args.recipientAgentId),
         effectiveOnly: coerceBool(args.effectiveOnly),
       })

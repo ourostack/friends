@@ -316,7 +316,7 @@ const store = new FileFriendStore("/bundle/friends")
 const grants = new FileGrantStore(grantsDirFor("/bundle/friends")) // sibling _grants/ dir
 
 // Consent is an explicit, auditable, revocable grant.
-await grantShare(grants, { subjectFriendId, recipientAgentId, scope: "notes:safe" })
+await grantShare(grants, { subjectKey, recipientAgentId, scope: "notes:safe" })
 
 // Producer: a consent-gated, scope-filtered, provenance-preserving envelope that
 // names the party by JOIN KEY (externalIds), never the local UUID.
@@ -334,7 +334,7 @@ const result = await importProfileShare(store, {
 // → { ok: true, status: "imported" | "seeded", record } | { ok: false, status }
 
 // Audit + revoke (the right-to-be-forgotten seam).
-await listShares(grants, { subjectFriendId })
+await listShares(grants, { subjectKey })
 await revokeShare(grants, grantId)
 ```
 

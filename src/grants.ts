@@ -22,7 +22,9 @@ export function isGrantEffective(grant: ShareGrant, now: Date = new Date()): boo
 }
 
 export interface GrantShareInput {
-  subjectFriendId: string
+  /** The subject whose data may be shared — a friend UUID, or a missionKey
+   * (Fork D: opaque subject key). */
+  subjectKey: string
   recipientAgentId: string
   scope: ShareScope
   /** Optional ISO expiry; absent ⇒ the grant never expires. */
@@ -34,7 +36,7 @@ export async function grantShare(grants: GrantStore, input: GrantShareInput): Pr
   const now = new Date().toISOString()
   const grant: ShareGrant = {
     id: randomUUID(),
-    subjectFriendId: input.subjectFriendId,
+    subjectKey: input.subjectKey,
     recipientAgentId: input.recipientAgentId,
     scope: input.scope,
     grantedAt: now,
@@ -45,7 +47,7 @@ export async function grantShare(grants: GrantStore, input: GrantShareInput): Pr
     component: "friends",
     event: "friends.share_granted",
     message: "granted profile share",
-    meta: { subjectFriendId: input.subjectFriendId, recipientAgentId: input.recipientAgentId, scope: input.scope },
+    meta: { subjectKey: input.subjectKey, recipientAgentId: input.recipientAgentId, scope: input.scope },
   })
   return grant
 }
@@ -78,7 +80,8 @@ export async function revokeShare(grants: GrantStore, grantId: string): Promise<
 }
 
 export interface ListSharesFilter {
-  subjectFriendId?: string
+  /** Filter to one subject (a friend UUID, or a missionKey). */
+  subjectKey?: string
   recipientAgentId?: string
   /** When true, only grants that currently consent (effective) are returned. */
   effectiveOnly?: boolean
@@ -95,7 +98,7 @@ export async function listShares(grants: GrantStore, filter: ListSharesFilter = 
   const all = await grants.listAll()
   const now = new Date()
   const listed = all
-    .filter((g) => filter.subjectFriendId === undefined || g.subjectFriendId === filter.subjectFriendId)
+    .filter((g) => filter.subjectKey === undefined || g.subjectKey === filter.subjectKey)
     .filter((g) => filter.recipientAgentId === undefined || g.recipientAgentId === filter.recipientAgentId)
     .map((g) => ({ ...g, effective: isGrantEffective(g, now) }))
     .filter((g) => filter.effectiveOnly !== true || g.effective)

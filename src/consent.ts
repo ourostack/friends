@@ -1,7 +1,7 @@
 // Consent policies — Fork A, all three postures behind one swap.
 //
-// A ConsentPolicy answers one question: may scope <scope> of friend
-// <subjectFriendId> be shared with recipient agent <recipient>? The three
+// A ConsentPolicy answers one question: may scope <scope> of subject
+// <subjectKey> be shared with recipient agent <recipient>? The three
 // postures share the same machinery (an explicit-grant lookup + the recipient's
 // trust level) and differ only in the rule they apply, so the operator's choice
 // of posture is a ONE-LINE default swap (see DEFAULT_CONSENT_POLICY below), not a
@@ -25,7 +25,9 @@ export interface ConsentRecipient {
 }
 
 export interface ConsentDecisionInput {
-  subjectFriendId: string
+  /** The subject whose data may be shared — a friend UUID for a profile share, a
+   * missionKey for a mission share (Fork D: opaque subject key). */
+  subjectKey: string
   recipient: ConsentRecipient
   scope: ShareScope
   grants: GrantStore
@@ -53,7 +55,7 @@ async function hasEffectiveGrant(input: ConsentDecisionInput): Promise<boolean> 
   const all = await input.grants.listAll()
   return all.some(
     (g) =>
-      g.subjectFriendId === input.subjectFriendId &&
+      g.subjectKey === input.subjectKey &&
       g.recipientAgentId === input.recipient.agentId &&
       g.scope === input.scope &&
       isGrantEffective(g, now),
