@@ -231,7 +231,7 @@ directory — the same directory a `FileFriendStore` persists to.
 
 ### Tool surface
 
-19 tools, a thin 1:1 mapping over the library (no domain logic in the server):
+24 tools, a thin 1:1 mapping over the library (no domain logic in the server):
 
 | Tool | What it does |
 |---|---|
@@ -251,15 +251,26 @@ directory — the same directory a `FileFriendStore` persists to.
 | `resolve_room` | Resolve a room (a group's external id) into its members, each with trust context and `knownVia`. |
 | `share_profile` | **Producer** — prepare a consent-gated, scope-filtered, provenance-preserving profile-share envelope for another agent. |
 | `import_profile` | **Consumer** — import a profile-share envelope (non-clobbering merge into the imported namespace; never touches first-party notes or trust). |
-| `grant_share` | Mint an explicit, revocable consent grant (an agent may receive a scope of a friend's profile). |
+| `grant_share` | Mint an explicit, revocable consent grant (an agent may receive a scope of a subject — a friend's profile or a mission). |
 | `revoke_share` | Revoke a consent grant by id (tombstones it; the right-to-be-forgotten lever). |
 | `list_shares` | List consent grants with their effective state (the audit + revoke surface). |
+| `record_mission` | Upsert a shared **mission** by its `missionKey` — append first-party learnings / participants / outcomes, set status. |
+| `get_mission` | Fetch one mission record by its local uuid id. |
+| `list_missions` | List mission records, optionally limited. |
+| `share_mission` | **Producer** — prepare a consent-gated, scope-filtered mission-share envelope (`mission` = shareable learnings; `outcomes` = the result rows). |
+| `import_mission` | **Consumer** — import a mission-share envelope (non-clobbering merge into the imported namespace; never touches first-party learnings or status). |
 
 The `share_profile` / `import_profile` / `grant_share` / `revoke_share` / `list_shares` tools
 need a **grant store** (consent persistence). The bin wires one automatically at a sibling
 `_grants/` directory under `--dir`; an embedded server gets one by passing `grants` to
 `createFriendsMcpServer`. Without it those five tools report `{ ok: false, status: "unsupported" }`
 and everything else works store-only.
+
+The `record_mission` / `get_mission` / `list_missions` / `share_mission` / `import_mission` tools
+need a **mission store**, wired the same way at a sibling `_missions/` directory under `--dir` (or
+by passing `missions` to `createFriendsMcpServer`); without it they report
+`{ ok: false, status: "unsupported" }`. `share_mission` additionally needs the grant store (a
+mission is just another grant subject, keyed by its `missionKey`).
 
 The server module is consumed in code from the `@ouro.bot/friends/mcp` subpath, exporting
 `createFriendsMcpServer`, `getToolSchemas`, and `runMain` (plus the `McpToolSchema`,
@@ -373,6 +384,82 @@ per-call. The `AgentVerifier` defaults to **trust-on-first-use** (`tofuVerifier`
 envelope's reserved opaque `proof` slot — a stronger verifier (DID/VC) can be dropped in with no
 envelope change.
 
+## Cross-agent mission ledger (shared work memory)
+
+The moat shares **who a person is**. The mission ledger shares **what two agents collectively
+learned doing work together**. It re-aims the same import machinery — first-party / imported split,
+attribution, the consent stack, the `./a2a` transport — from a *person* at a **mission**: one new
+persistence noun (the mission record) and one new content slot (`learnings`). Entirely additive; the
+person path is untouched.
+
+A **mission** is named by a **`missionKey`** — a cross-agent join key (a ticket id, `repo#PR`, a
+slugged name two agents agree on out of band), the mission's analogue of `provider:externalId`. The
+same mission has a *different local UUID in every store*; the `missionKey` — never the UUID — is what
+crosses the wire.
+
+```ts
+import {
+  recordMission, prepareMissionShare, importMissionShare,
+  FileMissionStore, missionsDirFor,
+} from "@ouro.bot/friends"
+
+const missions = new FileMissionStore(missionsDirFor("/bundle/friends")) // sibling _missions/ dir
+
+// Record a mission + a first-party learning (private by default; mark shareable to share it).
+await recordMission(missions, {
+  missionKey: "PROJ-1234",
+  title: "Ship the ledger",
+  learnings: [{ key: "gotcha", value: "rebase, never merge", shareable: true }],
+})
+
+// Consent: a mission is just another grant subject, keyed by its missionKey.
+await grantShare(grants, { subjectKey: "PROJ-1234", recipientAgentId, scope: "mission" })
+
+// Producer: a consent-gated, scope-filtered envelope that names the mission by missionKey,
+// never the local UUID. scope "mission" carries the SHAREABLE learnings (attributed to self);
+// scope "outcomes" carries the mission's result rows.
+const out = await prepareMissionShare(missions, store, grants, {
+  missionId, toAgentId: recipientAgentId, scope: "mission", selfAgentId,
+})
+// → { ok: true, envelope } | { ok: false, status: "not_found" | "no_consent" | "no_recipient" }
+
+// ...the envelope crosses the wire (e.g. kind:"mission_share" over the ./a2a mailbox)...
+
+// Consumer: the non-clobbering merge, on the OTHER agent's store.
+const result = await importMissionShare(missions, { envelope, fromAgentId, trustOfSource })
+// → { ok: true, status: "imported" | "seeded", record } | { ok: false, status }
+```
+
+**The `"mission"` scope** carries the whole artifact (title / status + *shareable* learnings); the
+existing `"outcomes"` scope carries just the result rows. Both are **content** → under the tiered
+default they **always need an explicit grant** (trust agrees on *who*; content still needs consent).
+
+**Import safety invariants** (each is structurally enforced and tested), the mission analogue of the
+moat's:
+
+- the mission is resolved by **`missionKey`** (`findByMissionKey`), never the local UUID;
+- **first-party-wins**: imported learnings land in a separate **`importedLearnings[fromAgentId]`**
+  namespace — first-party `learnings` are physically untouched;
+- **no laundering**: an imported learning records the source as `assertedBy` + carries
+  `originallyAssertedBy`, so it can never be re-shared as first-party;
+- **non-transitive**: a peer's envelope **never recomputes** the mission's `status` or `participants`
+  (a peer saying "this failed" never flips your mission's status);
+- **outcome merge** (genuinely new logic): imported outcomes are append-merged, stamped
+  `origin:"imported"` + the source attribution, and **deduped by
+  `(missionId, timestamp, assertedBy.agentId)`** — the same peer's row is idempotent, different
+  peers' rows coexist;
+- **seeding gate**: an unknown mission is **seeded only by a friend/family** introducing peer (else
+  `untrusted_introduction` for an acquaintance, `untrusted_source` for a stranger); a seeded mission
+  starts `status:"active"` with empty first-party learnings.
+
+**Over the `./a2a` transport** a mission share is **`kind:"mission_share"`** carrying a
+`MissionShareEnvelope` verbatim. The mailbox (addressing, path-binding, single-writer outboxes,
+seen-ledger dedup, ordering) is payload-agnostic, so it carries it with no transport change;
+`buildOutgoing` defaults `kind` to `"profile_share"` for backward-compat and the host branches on the
+`IncomingMessage.kind` to call `importProfileShare` vs `importMissionShare`. The brick-2 threat model
+holds verbatim: a forged mission envelope is an attributed, quarantined, status-non-transitive claim —
+it escalates nothing.
+
 ## Public API
 
 **Types:** `FriendRecord`, `FriendConnection`, `ExternalId`, `IdentityProvider`, `Channel`,
@@ -385,7 +472,11 @@ envelope change.
 `ProfileShareEnvelope`, `SharedNote`, `PrepareProfileShareInput`, `PrepareProfileShareResult`,
 `PrepareProfileShareStatus`, `ImportProfileShareInput`, `ImportProfileShareOptions`,
 `ImportProfileShareResult`, `ImportProfileShareStatus`, `GrantShareInput`, `RevokeShareResult`,
-`ListSharesFilter`, `ListedShare`, `FileBundle`, `NervesEvent`.
+`ListSharesFilter`, `ListedShare`, `FileBundle`, `NervesEvent`, `MissionKey`, `MissionLearning`,
+`ImportedLearning`, `MissionRecord`, `MissionStore`, `MissionShareEnvelope`, `SharedLearning`,
+`RecordMissionInput`, `PrepareMissionShareInput`, `PrepareMissionShareResult`,
+`PrepareMissionShareStatus`, `ImportMissionShareInput`, `ImportMissionShareOptions`,
+`ImportMissionShareResult`, `ImportMissionShareStatus`.
 
 **Values:** `TRUSTED_LEVELS`, `IDENTITY_SCOPES`, `isTrustedLevel`, `isIdentityProvider`,
 `isShareScope`, `FileFriendStore`, `FileGrantStore`, `grantsDirFor`, `FriendResolver`,
@@ -395,7 +486,8 @@ envelope change.
 `linkExternalId`, `unlinkExternalId`, `upsertAgentPeer`, `recordRelationshipOutcome`, `whoami`,
 `resolveRoom`, `strictPolicy`, `trustImpliedPolicy`, `tieredPolicy`, `DEFAULT_CONSENT_POLICY`,
 `tofuVerifier`, `DEFAULT_AGENT_VERIFIER`, `prepareProfileShare`, `importProfileShare`, `grantShare`,
-`revokeShare`, `listShares`, `isGrantEffective`, `openFileBundle`, `setNervesEmitter`.
+`revokeShare`, `listShares`, `isGrantEffective`, `openFileBundle`, `setNervesEmitter`,
+`recordMission`, `prepareMissionShare`, `importMissionShare`, `FileMissionStore`, `missionsDirFor`.
 
 **From `@ouro.bot/friends/mcp`:** `createFriendsMcpServer`, `getToolSchemas`, `runMain`.
 
