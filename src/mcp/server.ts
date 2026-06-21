@@ -8,6 +8,7 @@
 // from the harness's MCP server with all conversation/socket machinery removed.
 import { emitNervesEvent } from "../observability"
 import type { FriendStore } from "../store"
+import type { GrantStore } from "../grant-store"
 import { getToolSchemas } from "./schemas"
 import { dispatchTool } from "./dispatch"
 
@@ -27,6 +28,10 @@ interface JsonRpcResponse {
 
 export interface FriendsMcpServerOptions {
   store: FriendStore
+  /** Optional consent-grant store. When omitted, the consent/share tools
+   * (grant_share / revoke_share / list_shares / share_profile) report
+   * `unsupported`; everything else works store-only. */
+  grants?: GrantStore
   stdin: NodeJS.ReadableStream
   stdout: NodeJS.WritableStream
 }
@@ -37,7 +42,7 @@ export interface FriendsMcpServer {
 }
 
 export function createFriendsMcpServer(options: FriendsMcpServerOptions): FriendsMcpServer {
-  const { store, stdin, stdout } = options
+  const { store, grants, stdin, stdout } = options
   let buffer = ""
   let running = false
   let useContentLengthFraming = true
@@ -178,7 +183,7 @@ export function createFriendsMcpServer(options: FriendsMcpServerOptions): Friend
     const toolName = params.name ?? ""
     const toolArgs = params.arguments ?? {}
     try {
-      const { result, isError } = await dispatchTool(store, toolName, toolArgs)
+      const { result, isError } = await dispatchTool(store, toolName, toolArgs, grants)
       writeResponse({
         jsonrpc: "2.0",
         id: request.id!,

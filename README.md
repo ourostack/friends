@@ -152,7 +152,7 @@ directory — the same directory a `FileFriendStore` persists to.
 
 ### Tool surface
 
-14 tools, a thin 1:1 mapping over the library (no domain logic in the server):
+19 tools, a thin 1:1 mapping over the library (no domain logic in the server):
 
 | Tool | What it does |
 |---|---|
@@ -169,26 +169,123 @@ directory — the same directory a `FileFriendStore` persists to.
 | `onboard_agent` | Upsert an agent-peer record from resolved coordinates (no HTTP fetch). |
 | `whoami` | Resolve the machine owner and which record represents the self. |
 | `channel_caps` | Return a channel's capabilities. |
-| `share_profile` | **Reserved (P1)** — returns `{ supported: false }` until federation lands. |
+| `resolve_room` | Resolve a room (a group's external id) into its members, each with trust context and `knownVia`. |
+| `share_profile` | **Producer** — prepare a consent-gated, scope-filtered, provenance-preserving profile-share envelope for another agent. |
+| `import_profile` | **Consumer** — import a profile-share envelope (non-clobbering merge into the imported namespace; never touches first-party notes or trust). |
+| `grant_share` | Mint an explicit, revocable consent grant (an agent may receive a scope of a friend's profile). |
+| `revoke_share` | Revoke a consent grant by id (tombstones it; the right-to-be-forgotten lever). |
+| `list_shares` | List consent grants with their effective state (the audit + revoke surface). |
+
+The `share_profile` / `import_profile` / `grant_share` / `revoke_share` / `list_shares` tools
+need a **grant store** (consent persistence). The bin wires one automatically at a sibling
+`_grants/` directory under `--dir`; an embedded server gets one by passing `grants` to
+`createFriendsMcpServer`. Without it those five tools report `{ ok: false, status: "unsupported" }`
+and everything else works store-only.
 
 The server module is consumed in code from the `@ouro.bot/friends/mcp` subpath, exporting
 `createFriendsMcpServer`, `getToolSchemas`, and `runMain` (plus the `McpToolSchema`,
 `FriendsMcpServer`, and `RunMainIo` types).
 
+## Cross-agent sharing (the moat)
+
+Two *different* agents (different owners) can agree a party is the same person **and** share what
+they know about them — **with consent, without first-party knowledge being clobbered**. The
+package stays store-only and transport-agnostic: it produces and consumes a `ProfileShareEnvelope`;
+the **wire between two agents is the caller's job** (the same split that keeps A2A transport
+harness-side). The package does **authorization** — how much a verified peer's claims count, via
+the trust ladder; **authentication of the wire** is plugged in through an `AgentVerifier`.
+
+```ts
+import {
+  prepareProfileShare, importProfileShare,
+  grantShare, listShares, revokeShare,
+  FileFriendStore, FileGrantStore, grantsDirFor,
+} from "@ouro.bot/friends"
+
+const store = new FileFriendStore("/bundle/friends")
+const grants = new FileGrantStore(grantsDirFor("/bundle/friends")) // sibling _grants/ dir
+
+// Consent is an explicit, auditable, revocable grant.
+await grantShare(grants, { subjectFriendId, recipientAgentId, scope: "notes:safe" })
+
+// Producer: a consent-gated, scope-filtered, provenance-preserving envelope that
+// names the party by JOIN KEY (externalIds), never the local UUID.
+const out = await prepareProfileShare(store, grants, {
+  friendId, toAgentId: recipientAgentId, scope: "notes:safe", selfAgentId,
+})
+// → { ok: true, envelope } | { ok: false, status }
+
+// ...caller ships `out.envelope` to the other agent over its own transport...
+
+// Consumer: the non-clobbering merge, on the OTHER agent's store.
+const result = await importProfileShare(store, {
+  envelope, fromAgentId, trustOfSource, // this agent's resolved trust in the source
+})
+// → { ok: true, status: "imported" | "seeded", record } | { ok: false, status }
+
+// Audit + revoke (the right-to-be-forgotten seam).
+await listShares(grants, { subjectFriendId })
+await revokeShare(grants, grantId)
+```
+
+**Import safety invariants** (each is structurally enforced and tested):
+
+- the party is resolved by **join key** (`findByExternalId` over the envelope's `externalIds`);
+- imported facts land in a **separate `importedNotes` namespace** (`origin: "imported"` +
+  `assertedBy` + `importedAt`) — **first-party `notes` are physically untouchable; first-party
+  always wins**;
+- the **source agent's trust caps acceptance** — a `stranger` source is refused (the floor is
+  configurable via `minTrustToAccept`);
+- **imports NEVER change the party's trust level** (non-transitive — the single most important
+  invariant);
+- an **unknown party** is seeded (at `acquaintance`) **only when the introducing peer is
+  `friend`/`family`**; a `stranger`/`acquaintance` peer may not seed a new record.
+
+Provenance is never laundered: a first-party note shared onward is attributed to *this* agent;
+an *imported* note shared onward carries its `originallyAssertedBy` through, so an imported fact
+never masquerades as first-party.
+
+### Consent posture — the swap point
+
+The producer is gated by a **`ConsentPolicy`**. Three postures ship, sharing one machinery, so
+choosing a posture is a **one-line default swap, not a rebuild**:
+
+- **`strictPolicy`** — consented only by a non-revoked, non-expired explicit `ShareGrant`.
+- **`trustImpliedPolicy`** — an explicit grant, *or* recipient trust ≥ `friend` (any scope).
+- **`tieredPolicy`** *(default)* — identity-scope shares (the join key: `name` / `identity`) are
+  consented on recipient trust ≥ `friend`; any **note-content scope** (`notes:*`, `outcomes`)
+  requires an explicit grant.
+
+**The swap point is `DEFAULT_CONSENT_POLICY` in [`src/consent.ts`](./src/consent.ts).** Point it at
+`strictPolicy` / `trustImpliedPolicy` / `tieredPolicy` to change the product's privacy posture
+globally; or pass an explicit policy as the 4th argument to `prepareProfileShare` to override
+per-call. The `AgentVerifier` defaults to **trust-on-first-use** (`tofuVerifier`), which ignores the
+envelope's reserved opaque `proof` slot — a stronger verifier (DID/VC) can be dropped in with no
+envelope change.
+
 ## Public API
 
 **Types:** `FriendRecord`, `FriendConnection`, `ExternalId`, `IdentityProvider`, `Channel`,
-`TrustLevel`, `AgentMeta`, `RelationshipOutcome`, `NoteProvenance`, `ChannelCapabilities`,
-`ResolvedContext`, `SenseType`, `Facing`, `TrustExplanation`, `TrustBasis`, `FriendStore`,
-`FriendResolverParams`, `GroupContextParticipant`, `GroupContextUpsertResult`, `UsageData`,
-`FriendOpResult`, `FriendOpStatus`, `ApplyFriendNoteInput`, `WhoamiResult`, `NervesEvent`.
+`TrustLevel`, `AgentMeta`, `AgentAttribution`, `RelationshipOutcome`, `NoteProvenance`,
+`ImportedNote`, `ShareScope`, `ShareGrant`, `ChannelCapabilities`, `ResolvedContext`, `SenseType`,
+`Facing`, `TrustExplanation`, `TrustBasis`, `FriendStore`, `GrantStore`, `FriendResolverParams`,
+`GroupContextParticipant`, `GroupContextUpsertResult`, `UsageData`, `FriendOpResult`,
+`FriendOpStatus`, `ApplyFriendNoteInput`, `WhoamiResult`, `RoomView`, `RoomMember`, `RoomKnownVia`,
+`ConsentPolicy`, `ConsentRecipient`, `ConsentDecisionInput`, `AgentVerifier`,
+`ProfileShareEnvelope`, `SharedNote`, `PrepareProfileShareInput`, `PrepareProfileShareResult`,
+`PrepareProfileShareStatus`, `ImportProfileShareInput`, `ImportProfileShareOptions`,
+`ImportProfileShareResult`, `ImportProfileShareStatus`, `GrantShareInput`, `RevokeShareResult`,
+`ListSharesFilter`, `ListedShare`, `NervesEvent`.
 
-**Values:** `TRUSTED_LEVELS`, `isTrustedLevel`, `isIdentityProvider`, `FileFriendStore`,
-`FriendResolver`, `machineOwnerUsername`, `isLocalMachineOwnerIdentity`,
-`getChannelCapabilities`, `channelToFacing`, `isRemoteChannel`, `getAlwaysOnSenseNames`,
-`describeTrustContext`, `upsertGroupContextParticipants`, `accumulateFriendTokens`,
-`applyFriendNote`, `setFriendTrust`, `linkExternalId`, `unlinkExternalId`, `upsertAgentPeer`,
-`recordRelationshipOutcome`, `whoami`, `setNervesEmitter`.
+**Values:** `TRUSTED_LEVELS`, `IDENTITY_SCOPES`, `isTrustedLevel`, `isIdentityProvider`,
+`isShareScope`, `FileFriendStore`, `FileGrantStore`, `grantsDirFor`, `FriendResolver`,
+`machineOwnerUsername`, `isLocalMachineOwnerIdentity`, `getChannelCapabilities`, `channelToFacing`,
+`isRemoteChannel`, `getAlwaysOnSenseNames`, `describeTrustContext`,
+`upsertGroupContextParticipants`, `accumulateFriendTokens`, `applyFriendNote`, `setFriendTrust`,
+`linkExternalId`, `unlinkExternalId`, `upsertAgentPeer`, `recordRelationshipOutcome`, `whoami`,
+`resolveRoom`, `strictPolicy`, `trustImpliedPolicy`, `tieredPolicy`, `DEFAULT_CONSENT_POLICY`,
+`tofuVerifier`, `DEFAULT_AGENT_VERIFIER`, `prepareProfileShare`, `importProfileShare`, `grantShare`,
+`revokeShare`, `listShares`, `isGrantEffective`, `setNervesEmitter`.
 
 **From `@ouro.bot/friends/mcp`:** `createFriendsMcpServer`, `getToolSchemas`, `runMain`.
 
