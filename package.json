@@ -35,7 +35,8 @@
     "test:coverage": "vitest run --coverage",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
-    "example:cross-agent-moat": "npm run build && tsx examples/cross-agent-moat.ts"
+    "example:cross-agent-moat": "npm run build && tsx examples/cross-agent-moat.ts",
+    "example:a2a-git-mailbox": "npm run build && tsx examples/a2a-git-mailbox.ts"
   },
   "repository": {
     "type": "git",
