@@ -1,0 +1,10 @@
+{
+  "versions": [
+    {
+      "version": "0.1.0-alpha.0",
+      "changes": [
+        "Add the npm CI publish pipeline: an OIDC trusted-publishing `publish` job on push to main, an alpha-channel release-bump script, a changelog gate with freshness enforcement, and a trusted-publisher contract check wired into the coverage-gate preflight."
+      ]
+    }
+  ]
+}
