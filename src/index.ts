@@ -34,6 +34,7 @@ export type { Facing } from "./channel"
 export type { TrustExplanation, TrustBasis } from "./trust-explanation"
 export type { FriendStore } from "./store"
 export type { GrantStore } from "./grant-store"
+export type { MissionStore } from "./mission-store"
 export type { FriendResolverParams } from "./resolver"
 export type {
   GroupContextParticipant,
@@ -79,6 +80,7 @@ export {
 
 export { FileFriendStore } from "./store-file"
 export { FileGrantStore, grantsDirFor } from "./grant-store-file"
+export { FileMissionStore, missionsDirFor } from "./mission-store-file"
 export { openFileBundle } from "./file-bundle"
 export type { FileBundle } from "./file-bundle"
 

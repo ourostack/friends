@@ -157,13 +157,15 @@ describe("FileMissionStore", () => {
     expect(loaded?.schemaVersion).toBe(1)
   })
 
-  it("normalize: defaults a missing title to the missionKey and empty collections", async () => {
+  it("normalize: defaults a missing title to the missionKey, empty collections, and fills missing timestamps", async () => {
     dir = mkdtempSync(join(tmpdir(), "friends-missions-"))
     const missionsPath = missionsDirFor(dir)
     new FileMissionStore(missionsPath)
+    // Only id + missionKey present — title/participants/outcomes/learnings AND
+    // createdAt/updatedAt are all absent, exercising every normalize fallback arm.
     await fsPromises.writeFile(
       join(missionsPath, "m-y.json"),
-      JSON.stringify({ id: "m-y", missionKey: "PROJ-9", createdAt: NOW, updatedAt: NOW }),
+      JSON.stringify({ id: "m-y", missionKey: "PROJ-9" }),
       "utf-8",
     )
     const store = new FileMissionStore(missionsPath)
@@ -172,6 +174,12 @@ describe("FileMissionStore", () => {
     expect(loaded?.participants).toEqual([])
     expect(loaded?.outcomes).toEqual([])
     expect(loaded?.learnings).toEqual({})
+    expect(loaded?.importedLearnings).toBeUndefined()
+    // Missing timestamps are filled with valid ISO strings (the `: new Date()` arm).
+    expect(() => new Date(loaded!.createdAt).toISOString()).not.toThrow()
+    expect(loaded?.createdAt).not.toBe("")
+    expect(() => new Date(loaded!.updatedAt).toISOString()).not.toThrow()
+    expect(loaded?.updatedAt).not.toBe("")
   })
 
   it("normalize: preserves importedLearnings through a round-trip", async () => {
