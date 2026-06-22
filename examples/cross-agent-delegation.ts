@@ -241,6 +241,18 @@ function mailboxEnumerate(mailboxDir: string, toFilter?: string): Array<{ relati
   return out
 }
 
+/** Read the control-plane audit log a spawned server wrote (the FileAuditSink JSONL at
+ * `<dir>/_audit/control.jsonl`). Returns [] when the file does not exist yet. */
+function readAuditRecords(dir: string): Array<Record<string, unknown>> {
+  const auditPath = join(dir, "_audit", "control.jsonl")
+  if (!existsSync(auditPath)) return []
+  return readFileSync(auditPath, "utf-8")
+    .trim()
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+}
+
 async function main(): Promise<void> {
   const sodium = await ready()
   const dirA = mkdtempSync(join(tmpdir(), "friends-deleg-A-"))
@@ -342,6 +354,54 @@ async function main(): Promise<void> {
     // (STEP 3) is what INTRODUCES each peer at `family`, which is the whole point of the
     // capability. aDid/bDid stay in scope for the connect_to + delegation steps below.
 
+    // ════════════════════════════════════════════════════════════════════════
+    // STEP 3 — The owner LINKS A↔B via connect_to. On the owner-only stdio path the
+    // dispatch supplies the gate a `local` management sense → COMMIT: each side upserts
+    // the other as a `family` agent-peer AND writes an action:"connect" control-plane
+    // audit record (read back from the FileAuditSink JSONL). A single connect_to operates
+    // on ONE store; the owner runs the introduction on EACH side (the bidirectional link).
+    // ════════════════════════════════════════════════════════════════════════
+    step("Owner connect_to links A↔B — a local management-sense COMMIT + an action:\"connect\" audit on each side")
+
+    // A's owner introduces B into A's fleet (with B's did so the link carries identity).
+    const linkBintoA = await agentA.tool("connect_to", { agentId: AGENT_B_ID, did: bDid, name: `Peer ${AGENT_B_ID}` })
+    assert.equal(linkBintoA.isError, false, "connect_to on the owner-only stdio path must COMMIT (local management sense)")
+    assert.equal(linkBintoA.payload.ok, true, "connect_to returns ok:true")
+    assert.equal(linkBintoA.payload.status, "connected", "connect_to status is connected")
+    assert.equal(linkBintoA.payload.record.trustLevel, "family", "the linked own-fleet peer defaults to family")
+    ok(`A connected B → ${linkBintoA.payload.status} at trust ${linkBintoA.payload.record.trustLevel}`)
+
+    // B's owner introduces A into B's fleet (the other half of the bidirectional link).
+    const linkAintoB = await agentB.tool("connect_to", { agentId: AGENT_A_ID, did: aDid, name: `Peer ${AGENT_A_ID}` })
+    assert.equal(linkAintoB.payload.status, "connected", "B connected A")
+    assert.equal(linkAintoB.payload.record.trustLevel, "family", "A is linked at family on B's side")
+    ok(`B connected A → ${linkAintoB.payload.status} at trust ${linkAintoB.payload.record.trustLevel}`)
+
+    // Assert the control-plane AUDIT — each side wrote exactly one action:"connect" record
+    // (actor = the stdio owner boundary, originSense = "stdio").
+    const auditA = readAuditRecords(dirA)
+    const connectAuditA = auditA.find((r) => r.action === "connect")
+    assert.ok(connectAuditA, "A's control-plane log must contain an action:connect record")
+    assert.equal(connectAuditA!.level, "family", "the connect audit records the family link level")
+    assert.equal(connectAuditA!.actor, "owner:stdio", "the connect audit attributes to the stdio owner boundary")
+    assert.equal(connectAuditA!.originSense, "stdio", "the connect audit carries originSense stdio")
+    const auditB = readAuditRecords(dirB)
+    assert.ok(auditB.some((r) => r.action === "connect"), "B's control-plane log must contain an action:connect record")
+    ok(`action:"connect" audit written on BOTH sides (actor owner:stdio, originSense stdio, level family)`)
+
+    // The link is real + PERSISTED: re-resolve B's peer record (by its local id from the
+    // connect_to result) from A's store on a fresh tool call — still a family agent-peer.
+    const bPeerIdInA = linkBintoA.payload.record.id as string
+    const bInA = await agentA.tool("get_friend", { friendId: bPeerIdInA })
+    assert.equal(bInA.payload.trustLevel, "family", "A's store resolves B as a family peer after connect_to")
+    assert.equal(bInA.payload.kind, "agent", "B is an agent-peer record")
+    // and B's join-key agentId is on the record (the a2a-agent externalId the consent layer reads).
+    assert.ok(
+      (bInA.payload.externalIds as Array<{ provider: string; externalId: string }>).some((e) => e.provider === "a2a-agent" && e.externalId === AGENT_B_ID),
+      "B's peer record is keyed by its routing agentId",
+    )
+    ok("A↔B are now linked own-fleet family peers (the introduce effect persisted)")
+
     void buildOutgoing
     void readIncoming
     void markSeen
@@ -349,10 +409,10 @@ async function main(): Promise<void> {
 
     // ════════════════════════════════════════════════════════════════════════
     console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    console.log("✅  DELEGATION PROOF (through STEP 2) — two own-fleet agents on")
-    console.log("    separate stores, recognized as same-account FAMILY via a signed")
-    console.log("    roster (real ed25519) on BOTH sides. (connect_to +")
-    console.log("    delegate→perform→return land in the next units.)")
+    console.log("✅  DELEGATION PROOF (through STEP 3) — two own-fleet agents on")
+    console.log("    separate stores, same-account FAMILY (signed roster), LINKED by")
+    console.log("    the owner via connect_to (action:\"connect\" audited on both sides).")
+    console.log("    (delegate→perform→return lands in the next unit.)")
     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
   } finally {
     agentA?.kill()
