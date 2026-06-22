@@ -411,6 +411,109 @@ describe("prepareCoordination — producer", () => {
 })
 
 // ════════════════════════════════════════════════════════════════════════════
+// PRODUCER — task-spec (gap-1): the delegation request carries an optional task
+// ════════════════════════════════════════════════════════════════════════════
+
+describe("prepareCoordination — task-spec (gap-1)", () => {
+  it("a request WITH a task mints a requestId, stamps task on the envelope, and records it first-party under delegations[requestId]", async () => {
+    const missions = new MemoryMissionStore([mission()])
+    const result = await prepareCoordination(missions, new MemoryStore([recipientAgent("friend")]), new MemoryGrantStore(), {
+      missionId: "m-local-uuid",
+      toAgentId: "agent-b",
+      intent: "request",
+      selfAgentId: "agent-self",
+      task: { summary: "Audit the auth module", details: "focus on the token path", inputs: { repo: "friends", pr: "12" } },
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error("unreachable")
+    // the envelope carries the task with a minted requestId
+    expect(result.envelope.task).toBeDefined()
+    const requestId = result.envelope.task!.requestId
+    expect(typeof requestId).toBe("string")
+    expect(requestId.length).toBeGreaterThan(0)
+    expect(result.envelope.task).toMatchObject({
+      summary: "Audit the auth module",
+      details: "focus on the token path",
+      inputs: { repo: "friends", pr: "12" },
+    })
+    // recorded first-party on the producer's own mission under delegations[requestId]
+    const stored = await missions.get("m-local-uuid")
+    expect(stored!.delegations).toBeDefined()
+    expect(stored!.delegations![requestId]).toBeDefined()
+    expect(stored!.delegations![requestId].task.requestId).toBe(requestId)
+    expect(stored!.delegations![requestId].task.summary).toBe("Audit the auth module")
+    expect(stored!.delegations![requestId].provenance).toEqual({ origin: "first_party" })
+  })
+
+  it("a task on a NON-request intent (offer) is ignored — no task on the envelope, no delegation recorded", async () => {
+    const missions = new MemoryMissionStore([mission()])
+    const result = await prepareCoordination(missions, new MemoryStore([recipientAgent("friend")]), new MemoryGrantStore(), {
+      missionId: "m-local-uuid",
+      toAgentId: "agent-b",
+      intent: "offer",
+      selfAgentId: "agent-self",
+      task: { summary: "should be ignored on an offer" },
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error("unreachable")
+    expect("task" in result.envelope).toBe(false)
+    const stored = await missions.get("m-local-uuid")
+    expect(stored!.delegations).toBeUndefined()
+  })
+
+  it("a request with NO task is byte-identical to today (no task on envelope, no delegations) — BACK-COMPAT", async () => {
+    const missions = new MemoryMissionStore([mission()])
+    const result = await prepareCoordination(missions, new MemoryStore([recipientAgent("friend")]), new MemoryGrantStore(), {
+      missionId: "m-local-uuid",
+      toAgentId: "agent-b",
+      intent: "request",
+      selfAgentId: "agent-self",
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error("unreachable")
+    expect("task" in result.envelope).toBe(false)
+    const stored = await missions.get("m-local-uuid")
+    expect(stored!.delegations).toBeUndefined()
+    // the coordination log still records the request first-party (today's behavior)
+    expect(stored!.coordination!.log).toHaveLength(1)
+    expect(stored!.coordination!.log[0].intent).toBe("request")
+  })
+
+  it("a task with only a summary mints a requestId and omits details/inputs on the envelope task", async () => {
+    const missions = new MemoryMissionStore([mission()])
+    const result = await prepareCoordination(missions, new MemoryStore([recipientAgent("friend")]), new MemoryGrantStore(), {
+      missionId: "m-local-uuid",
+      toAgentId: "agent-b",
+      intent: "request",
+      selfAgentId: "agent-self",
+      task: { summary: "minimal task" },
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error("unreachable")
+    expect(result.envelope.task!.summary).toBe("minimal task")
+    expect("details" in result.envelope.task!).toBe(false)
+    expect("inputs" in result.envelope.task!).toBe(false)
+  })
+
+  it("the task-spec leaves the consent posture unchanged (an acquaintance with a task is still refused no_consent)", async () => {
+    const missions = new MemoryMissionStore([mission()])
+    const result = await prepareCoordination(missions, new MemoryStore([recipientAgent("acquaintance")]), new MemoryGrantStore(), {
+      missionId: "m-local-uuid",
+      toAgentId: "agent-b",
+      intent: "request",
+      selfAgentId: "agent-self",
+      task: { summary: "a task does not bypass consent" },
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("unreachable")
+    expect(result.status).toBe("no_consent")
+    // no delegation written when consent is refused
+    const stored = await missions.get("m-local-uuid")
+    expect(stored!.delegations).toBeUndefined()
+  })
+})
+
+// ════════════════════════════════════════════════════════════════════════════
 // CONSUMER — importCoordination (the non-clobbering merge)
 // ════════════════════════════════════════════════════════════════════════════
 
