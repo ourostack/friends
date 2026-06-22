@@ -286,6 +286,17 @@ export interface AgentMeta {
   familiarity: number
   sharedMissions: string[]
   outcomes: RelationshipOutcome[]
+  /** The durable identity home (p11 Item 2 — the DID re-key). `did` is the
+   * cross-agent primary key; `pinnedKey` is its TOFU-pinned Ed25519 public key.
+   * Additive + optional: legacy records carry only `a2a.did` (or nothing) and
+   * migrate-on-read into this shape via `resolveAgentIdentity`. schemaVersion
+   * stays 1. */
+  identity?: {
+    did: string
+    pinnedKey?: string
+    handle?: string
+    pinnedAt?: string
+  }
   a2a?: {
     cardUrl?: string
     endpointUrl?: string

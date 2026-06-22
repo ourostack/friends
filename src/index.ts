@@ -132,6 +132,10 @@ export { linkExternalId, unlinkExternalId } from "./link-identity"
 
 export { upsertAgentPeer } from "./agent-peer"
 
+// -- Agent identity (p11 Item 2 — DID re-key): durable home + migrate-on-read --
+export { resolveAgentIdentity, withMigratedIdentity } from "./identity"
+export type { ResolvedAgentIdentity } from "./identity"
+
 export { recordRelationshipOutcome } from "./outcomes"
 
 export { recordMission } from "./missions"
