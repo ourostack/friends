@@ -32,27 +32,46 @@ export class FileRosterStore implements RosterStore {
     })
   }
 
-  // Unit 6a stubs: methods throw so the suite fails behaviorally (not on a missing
-  // symbol). Implemented GREEN in Unit 6b. `this.rostersPath`/`fsPromises`/`path`
-  // are referenced so the field + imports are wired for the real bodies.
-  async getRoster(_accountId: string): Promise<AccountRoster | null> {
-    void fsPromises
-    void path.join(this.rostersPath, "")
-    throw new Error("not implemented")
+  async getRoster(accountId: string): Promise<AccountRoster | null> {
+    const raw = await this.readJson(path.join(this.rostersPath, `${accountId}.roster.json`))
+    return raw as AccountRoster | null
   }
 
-  async putRoster(_roster: AccountRoster): Promise<void> {
-    void this.rostersPath
-    throw new Error("not implemented")
+  async putRoster(roster: AccountRoster): Promise<void> {
+    await fsPromises.writeFile(
+      path.join(this.rostersPath, `${roster.accountId}.roster.json`),
+      JSON.stringify(roster, null, 2),
+      "utf-8",
+    )
   }
 
-  async getPin(_accountId: string): Promise<RosterPin | null> {
-    void this.rostersPath
-    throw new Error("not implemented")
+  async getPin(accountId: string): Promise<RosterPin | null> {
+    const raw = await this.readJson(path.join(this.rostersPath, `${accountId}.pin.json`))
+    return raw as RosterPin | null
   }
 
-  async putPin(_pin: RosterPin): Promise<void> {
-    void this.rostersPath
-    throw new Error("not implemented")
+  async putPin(pin: RosterPin): Promise<void> {
+    await fsPromises.writeFile(
+      path.join(this.rostersPath, `${pin.accountId}.pin.json`),
+      JSON.stringify(pin, null, 2),
+      "utf-8",
+    )
+  }
+
+  /** Read + parse a JSON file, returning null on a missing file, invalid JSON, or a
+   * non-object payload (guarded; mirrors FileGrantStore.readJson). */
+  private async readJson(filePath: string): Promise<Record<string, unknown> | null> {
+    try {
+      const raw = await fsPromises.readFile(filePath, "utf-8")
+      try {
+        const parsed = JSON.parse(raw)
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null
+        return parsed as Record<string, unknown>
+      } catch {
+        return null
+      }
+    } catch {
+      return null
+    }
   }
 }
