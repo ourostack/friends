@@ -24,13 +24,24 @@ function rosterSigningBytes(roster: AccountRoster): Uint8Array {
  * signature. (Unit 7a stub — verify not implemented.) */
 export function ed25519RosterVerifier(sodium: Sodium): RosterVerifier {
   return {
-    verify(_roster: AccountRoster, _rosterKey: string): boolean {
-      // RED stub: always-false so the "valid sig ⇒ true" test fails behaviorally.
-      // Implemented GREEN in Unit 7b. `sodium`/`rosterSigningBytes` referenced so
-      // the param + helper are wired for the real body.
-      void sodium
-      void rosterSigningBytes
-      return false
+    verify(roster: AccountRoster, rosterKey: string): boolean {
+      let pub: Uint8Array
+      let sig: Uint8Array
+      try {
+        pub = sodium.from_base64(rosterKey, sodium.base64_variants.ORIGINAL)
+        sig = sodium.from_base64(roster.sig, sodium.base64_variants.ORIGINAL)
+      } catch {
+        // Malformed base64 in the key or sig → a failed verification, never a throw.
+        return false
+      }
+      const msg = rosterSigningBytes(roster)
+      try {
+        return sodium.crypto_sign_verify_detached(sig, msg, pub)
+      } catch {
+        // A wrong-length key/sig can throw inside libsodium — treat as a failed
+        // verification, never an uncaught error (mirrors verifyEnvelopeSignature).
+        return false
+      }
     },
   }
 }
