@@ -139,6 +139,10 @@ export type { ResolvedAgentIdentity } from "./identity"
 // did-aware friend lookup (the durable cross-agent primary key is the DID).
 export { findFriendByDid } from "./friend-lookup"
 
+// -- Account roster (p11 Item 3): pinned roster + TOFU roster-key storage seam --
+export { FileRosterStore, rostersDirFor } from "./roster-store-file"
+export type { RosterStore, AccountRoster, RosterPin } from "./roster-store"
+
 export { recordRelationshipOutcome } from "./outcomes"
 
 export { recordMission } from "./missions"
