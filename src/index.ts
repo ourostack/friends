@@ -148,6 +148,17 @@ export type { RosterStore, AccountRoster, RosterPin } from "./roster-store"
 export { identityRosterVerifier, DEFAULT_ROSTER_VERIFIER } from "./roster-verifier"
 export type { RosterVerifier } from "./roster-verifier"
 
+export { MemoryRosterStore } from "./roster-store-memory"
+
+// -- Account-roster membership (Item 3 payoff): family via same_account for a
+// key-verified, TOFU-pinned roster member; changed roster key hard-fails. --
+export { evaluateAccountMembership } from "./account-roster"
+export type {
+  AccountMembershipDecision,
+  AccountMembershipResult,
+  EvaluateAccountMembershipInput,
+} from "./account-roster"
+
 export { recordRelationshipOutcome } from "./outcomes"
 
 export { recordMission } from "./missions"
