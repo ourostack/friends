@@ -25,6 +25,59 @@ describe("auditPathFor", () => {
   })
 })
 
+describe("ControlPlaneAuditRecord.action — additive widening to include 'connect' (p11 inc2)", () => {
+  let dirConnect: string
+  afterEach(() => {
+    if (dirConnect) rmSync(dirConnect, { recursive: true, force: true })
+  })
+
+  it("accepts a record with action:'connect' (the new control-plane action)", () => {
+    // Type-level assertion: this object must satisfy ControlPlaneAuditRecord with
+    // action 'connect'. Before the widening, this fails to type-check.
+    const connectRecord: ControlPlaneAuditRecord = {
+      action: "connect",
+      targetId: "peer-1",
+      targetDid: "did:key:zPeer",
+      level: "family",
+      actor: "owner:stdio",
+      originSense: "stdio",
+      ts: NOW,
+    }
+    expect(connectRecord.action).toBe("connect")
+  })
+
+  it("still accepts a record with action:'set_trust' (the existing action is unaffected)", () => {
+    const setTrustRecord: ControlPlaneAuditRecord = record({ action: "set_trust" })
+    expect(setTrustRecord.action).toBe("set_trust")
+  })
+
+  it("round-trips a connect-action record through MemoryAuditSink unchanged (append + list)", () => {
+    const sink = new MemoryAuditSink()
+    const connectRecord = record({ action: "connect", targetId: "peer-1", targetDid: "did:key:zPeer", level: "family", originSense: "stdio" })
+    sink.append(connectRecord)
+    const listed = sink.list()
+    expect(listed).toHaveLength(1)
+    expect(listed[0]).toEqual(connectRecord)
+    expect(listed[0].action).toBe("connect")
+  })
+
+  it("round-trips a connect-action record through FileAuditSink as one JSON line (action preserved)", async () => {
+    dirConnect = mkdtempSync(join(tmpdir(), "friends-audit-connect-"))
+    const filePath = auditPathFor(join(dirConnect, "friends"))
+    const sink = new FileAuditSink(filePath)
+    await sink.append(record({ action: "connect", targetId: "peer-1", targetDid: "did:key:zPeer", level: "family", originSense: "stdio" }))
+    await sink.append(record({ action: "set_trust", targetId: "f-9", level: "friend" }))
+    const lines = readFileSync(filePath, "utf-8").trim().split("\n")
+    expect(lines).toHaveLength(2)
+    const first = JSON.parse(lines[0]) as ControlPlaneAuditRecord
+    const second = JSON.parse(lines[1]) as ControlPlaneAuditRecord
+    expect(first.action).toBe("connect")
+    expect(first.targetId).toBe("peer-1")
+    // the value-agnostic JSONL append carries both actions in one log, in order
+    expect(second.action).toBe("set_trust")
+  })
+})
+
 describe("MemoryAuditSink", () => {
   it("is append-only and exposes records in order via list()", () => {
     const sink = new MemoryAuditSink()

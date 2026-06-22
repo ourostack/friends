@@ -13,11 +13,15 @@ import { emitNervesEvent } from "./observability"
 import type { TrustBasis } from "./trust-explanation"
 import type { TrustLevel } from "./types"
 
-/** One append-only control-plane audit record. Captures a single trust mutation:
- * WHO (`actor`), to WHOM (`targetId` / optional `targetDid`), the new `level`, the
- * `basis` it was granted on, the `originSense` it came through, and WHEN (`ts`). */
+/** One append-only control-plane audit record. Captures a single control-plane
+ * mutation: WHO (`actor`), to WHOM (`targetId` / optional `targetDid`), the resulting
+ * `level`, the `basis` it was granted on, the `originSense` it came through, and WHEN
+ * (`ts`). The `action` discriminates the mutation kind: `"set_trust"` (a trust-level
+ * change — the `setFriendTrust` mutation + the `onboard_agent` trust seat) or
+ * `"connect"` (an owner linking one of their own agents into the fleet via `connect_to`
+ * — p11 inc2; additive, the JSONL append is value-agnostic so only the type widened). */
 export interface ControlPlaneAuditRecord {
-  action: "set_trust"
+  action: "set_trust" | "connect"
   targetId: string
   targetDid?: string
   level: TrustLevel

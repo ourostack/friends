@@ -1,13 +1,17 @@
 // MCP tool schemas for the friends server.
 //
-// 29 tools — a thin 1:1 surface over the friends library (D7): the original 14,
+// 32 tools — a thin 1:1 surface over the friends library (D7): the original 14,
 // the cross-agent moat surface (resolve_room, import_profile, grant_share,
 // revoke_share, list_shares; share_profile is de-stubbed in place), the brick-3
 // mission ledger (record_mission, get_mission, list_missions, share_mission,
 // import_mission), the brick-4 earned-standing lenses (assess_standing,
 // explain_standing — read-only, advisory; never write trust, never on the wire),
-// and the brick-5 coordination verbs (coordinate, import_coordination,
-// get_coordination — negotiate WHO does a mission; advisory assignment metadata).
+// the brick-5 coordination verbs (coordinate, import_coordination,
+// get_coordination — negotiate WHO does a mission; advisory assignment metadata),
+// and the p11-inc2 own-fleet delegation surface (connect_to — the management-sense
+// control plane that links two own agents + audits action:"connect"; send_result,
+// import_result — the result-return / delegation deliverable channel that carries
+// B's produced artifact back to A, attributed + correlated + quarantined on import).
 // Each schema follows JSON Schema for
 // `inputSchema` as required by MCP. The shape mirrors the harness's McpToolSchema
 // so the same client tooling consumes both.
@@ -206,6 +210,20 @@ export function getToolSchemas(): McpToolSchema[] {
       },
     },
     {
+      name: "connect_to",
+      description: "Management-sense control plane (brick 8): the owner links one of their OWN agents into this agent's fleet — introduce a peer by agentId/did/name at a trust level (default family for own-fleet). Authority-gated: commits inline ONLY from a local (owner-only stdio) or roster-verified same-account closed sense; an open sense never commits inline (it downgrades to a confirm-prompt); a bare name with no resolvable handle/DID and no record hit returns needs_handle_or_introduction (never fabricates a target). Writes one control-plane audit record (action:'connect') through the wired sink. Returns { ok:true, status:'connected', record } or { ok:false, status:'downgraded'|'needs_handle_or_introduction', downgrade? }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          agentId: { type: "string", description: "the peer agent's join-key agentId (an owner-supplied handle)" },
+          did: { type: "string", description: "the peer's DID (an alternative handle; must resolve to an existing record)" },
+          name: { type: "string", description: "the peer's colloquial name (resolves ONLY by matching an existing record — never fabricated)" },
+          trustLevel: { type: "string", enum: ["family", "friend", "acquaintance", "stranger"], description: "the trust to link at (default family for own-fleet linked agents)" },
+          proof: { type: "string", description: "optional opaque proof slot (reserved; the TOFU path ignores it)" },
+        },
+      },
+    },
+    {
       name: "whoami",
       description: "Resolve who the machine owner is and which friend record represents the self.",
       inputSchema: {
@@ -375,6 +393,7 @@ export function getToolSchemas(): McpToolSchema[] {
           intent: { type: "string", enum: ["request", "offer", "accept", "decline", "handoff"], description: "the coordination verb: request (will you take this?) / offer (I'll take this) / accept (yes, I'm on it — sets assignee=self) / decline (no) / handoff (it's yours now — you must hold the assignment; proposes a new assignee)" },
           note: { type: "string", description: "optional free text carried on the message + logged" },
           proposedAssignee: { type: "object", description: "the proposed new assignee { agentId?, agentName? } — meaningful ONLY on intent=handoff" },
+          task: { type: "object", description: "optional delegation task-spec { summary, details?, inputs? } — meaningful ONLY on intent=request (gap-2); the producer mints a requestId, stamps it on the envelope, and records the delegation first-party for the result-return to correlate against" },
           proof: { type: "string", description: "optional opaque proof to stamp on the envelope (for a non-TOFU recipient verifier)" },
         },
         required: ["missionId", "toAgentId", "intent"],
@@ -402,6 +421,34 @@ export function getToolSchemas(): McpToolSchema[] {
           missionId: { type: "string", description: "the mission's local uuid id" },
         },
         required: ["missionId"],
+      },
+    },
+    {
+      name: "send_result",
+      description: "Producer (gap-2 — the result-return): B returns its DELIVERABLE for a delegation, attributed to B (from whoami) + correlated to A's task-spec by requestId, named by the mission's missionKey (never the local uuid). Consent-gated via the identity-tier 'coordinate' scope (a result is B answering A's own delegation — trust ≥ friend suffices; NO new scope). Records the result first-party on B's own mission. Returns { ok, envelope } or { ok:false, status: not_found|no_consent }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          missionId: { type: "string", description: "the local mission B is returning a result for (its local uuid id)" },
+          toAgentId: { type: "string", description: "the recipient agent's join-key agentId — A, the delegator" },
+          requestId: { type: "string", description: "the delegation correlation key (the task-spec's requestId)" },
+          result: { type: "object", description: "B's deliverable { summary, artifact?, outputs? }" },
+          proof: { type: "string", description: "optional opaque proof to stamp on the envelope (for a non-TOFU recipient verifier)" },
+        },
+        required: ["missionId", "toAgentId", "requestId", "result"],
+      },
+    },
+    {
+      name: "import_result",
+      description: "Consumer (gap-2, non-clobbering merge): A imports B's result-return. Resolves the mission by missionKey; lands B's deliverable QUARANTINED + attributed under importedResults WITHOUT touching first-party; source trust caps acceptance (checked before correlation); a result whose requestId matches no prior first-party delegation is REJECTED (no_delegation — A only accepts results for work it delegated); an unknown mission is no_mission (a result never seeds a mission); never recomputes status/participants. Returns { ok, status, record } or { ok:false, status: untrusted_source|no_mission|no_delegation|invalid }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          envelope: { type: "object", description: "the MissionResultEnvelope to import" },
+          fromAgentId: { type: "string", description: "the agent the envelope arrived from (join-key agentId) — B" },
+          trustOfSource: { type: "string", enum: ["family", "friend", "acquaintance", "stranger"], description: "this agent's resolved trust in the source agent — the acceptance cap" },
+        },
+        required: ["envelope", "fromAgentId", "trustOfSource"],
       },
     },
   ]

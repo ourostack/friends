@@ -12,8 +12,20 @@ import type { MailboxMessage, IncomingFile, IncomingMessage, SeenLedger } from "
 import type { ProfileShareEnvelope } from "../share"
 import type { MissionShareEnvelope } from "../mission-share"
 import type { CoordinationEnvelope } from "../coordination"
+import type { MissionResultEnvelope } from "../types"
 
 const NOW = "2026-03-14T18:00:00.000Z"
+
+function resultEnvelope(overrides: Partial<MissionResultEnvelope> = {}): MissionResultEnvelope {
+  return {
+    subject: { missionKey: "PROJ-1234", title: "Ship it" },
+    fromAgentId: "agent-b",
+    requestId: "req-1",
+    result: { requestId: "req-1", summary: "done — 2 findings" },
+    issuedAt: NOW,
+    ...overrides,
+  }
+}
 
 function missionEnvelope(overrides: Partial<MissionShareEnvelope> = {}): MissionShareEnvelope {
   return {
@@ -142,6 +154,14 @@ describe("buildOutgoing — kind discriminant (brick 3)", () => {
     expect(parsed.kind).toBe("coordination")
     expect(parsed.envelope).toEqual(env)
   })
+
+  it("stamps kind:mission_result on the wrapper when requested, carrying the result envelope verbatim (gap-2)", () => {
+    const env = resultEnvelope()
+    const out = buildOutgoing({ envelope: env, fromAgentId: "agent-b", toAgentId: "agent-a", kind: "mission_result", now: NOW })
+    const parsed = JSON.parse(out.bytes) as MailboxMessage
+    expect(parsed.kind).toBe("mission_result")
+    expect(parsed.envelope).toEqual(env)
+  })
 })
 
 describe("readIncoming — kind propagation (brick 3)", () => {
@@ -180,6 +200,21 @@ describe("readIncoming — kind propagation (brick 3)", () => {
     expect(result.ready).toHaveLength(1)
     expect(result.ready[0].kind).toBe("coordination")
     expect(result.ready[0].envelope).toEqual(coordinationEnvelope())
+  })
+
+  it("accepts a mission_result wrapper and surfaces kind:mission_result on the IncomingMessage (gap-2)", () => {
+    // Before the union widening, isWellFormedWrapper REJECTS kind:"mission_result"
+    // (it's a closed union with a runtime guard) — this is the red that the widening fixes.
+    const out = buildOutgoing({ envelope: resultEnvelope(), fromAgentId: "agent-b", toAgentId: "agent-a", kind: "mission_result", now: NOW })
+    const result = readIncoming({
+      files: [{ relativePath: out.relativePath, bytes: out.bytes }],
+      selfAgentId: "agent-a",
+      seen: emptyLedger,
+    })
+    expect(result.rejected).toEqual([])
+    expect(result.ready).toHaveLength(1)
+    expect(result.ready[0].kind).toBe("mission_result")
+    expect(result.ready[0].envelope).toEqual(resultEnvelope())
   })
 })
 

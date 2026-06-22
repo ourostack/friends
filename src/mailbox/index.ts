@@ -31,6 +31,7 @@ import { emitNervesEvent } from "../observability"
 import type { ProfileShareEnvelope } from "../share"
 import type { MissionShareEnvelope } from "../mission-share"
 import type { CoordinationEnvelope } from "../coordination"
+import type { MissionResultEnvelope } from "../types"
 
 /** The mailbox wire-format version. Bumped only on a breaking message change. */
 export const MAILBOX_VERSION = 1
@@ -46,20 +47,22 @@ export interface MailboxMessage {
   toAgentId: string
   issuedAt: string
   /** The payload discriminant. The host branches on it to call importProfileShare
-   * vs importMissionShare vs importCoordination. The mailbox itself is
-   * payload-agnostic — this union grows by one leaf per brick (additive, backward-
-   * compatible); buildOutgoing/readIncoming carry any of them unchanged. */
-  kind: "profile_share" | "mission_share" | "coordination"
-  envelope: ProfileShareEnvelope | MissionShareEnvelope | CoordinationEnvelope
+   * vs importMissionShare vs importCoordination vs importMissionResult. The mailbox
+   * itself is payload-agnostic — this union grows by one leaf per brick (additive,
+   * backward-compatible); buildOutgoing/readIncoming carry any of them unchanged.
+   * `mission_result` (gap-2) carries B's delegation deliverable back to A. */
+  kind: "profile_share" | "mission_share" | "coordination" | "mission_result"
+  envelope: ProfileShareEnvelope | MissionShareEnvelope | CoordinationEnvelope | MissionResultEnvelope
 }
 
 export interface BuildOutgoingInput {
-  envelope: ProfileShareEnvelope | MissionShareEnvelope | CoordinationEnvelope
+  envelope: ProfileShareEnvelope | MissionShareEnvelope | CoordinationEnvelope | MissionResultEnvelope
   fromAgentId: string
   toAgentId: string
   /** The payload discriminant. Defaults to "profile_share" for backward-compat;
-   * a mission share passes "mission_share", a coordination message "coordination". */
-  kind?: "profile_share" | "mission_share" | "coordination"
+   * a mission share passes "mission_share", a coordination message "coordination",
+   * a result-return "mission_result" (gap-2). */
+  kind?: "profile_share" | "mission_share" | "coordination" | "mission_result"
   /** Injectable ISO clock for deterministic tests; defaults to now. */
   now?: string
 }
@@ -114,8 +117,8 @@ export interface IncomingMessage {
   fromAgentId: string
   toAgentId: string
   issuedAt: string
-  kind: "profile_share" | "mission_share" | "coordination"
-  envelope: ProfileShareEnvelope | MissionShareEnvelope | CoordinationEnvelope
+  kind: "profile_share" | "mission_share" | "coordination" | "mission_result"
+  envelope: ProfileShareEnvelope | MissionShareEnvelope | CoordinationEnvelope | MissionResultEnvelope
   relativePath: string
 }
 
@@ -160,7 +163,7 @@ function isWellFormedWrapper(value: Record<string, unknown>): boolean {
     typeof value.fromAgentId === "string" &&
     typeof value.toAgentId === "string" &&
     typeof value.issuedAt === "string" &&
-    (value.kind === "profile_share" || value.kind === "mission_share" || value.kind === "coordination") &&
+    (value.kind === "profile_share" || value.kind === "mission_share" || value.kind === "coordination" || value.kind === "mission_result") &&
     typeof value.envelope === "object" &&
     value.envelope !== null &&
     !Array.isArray(value.envelope)
@@ -249,7 +252,7 @@ export function readIncoming(input: ReadIncomingInput): ReadIncomingResult {
       toAgentId: message.toAgentId as string,
       issuedAt: message.issuedAt as string,
       kind: message.kind as IncomingMessage["kind"],
-      envelope: message.envelope as ProfileShareEnvelope | MissionShareEnvelope | CoordinationEnvelope,
+      envelope: message.envelope as ProfileShareEnvelope | MissionShareEnvelope | CoordinationEnvelope | MissionResultEnvelope,
       relativePath: file.relativePath,
     })
   }

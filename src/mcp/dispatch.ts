@@ -36,6 +36,11 @@ import type { MissionShareEnvelope } from "../mission-share"
 import { prepareCoordination, importCoordination } from "../coordination"
 import type { CoordinationEnvelope } from "../coordination"
 import { isCoordinationIntent } from "../types"
+import { connectAgents } from "../connect"
+import type { SenseType } from "../types"
+import type { AccountMembershipResult } from "../account-roster"
+import { prepareMissionResult, importMissionResult } from "../mission-result"
+import type { MissionResultEnvelope } from "../types"
 
 type Args = Record<string, unknown>
 
@@ -49,6 +54,19 @@ export interface DispatchResult {
 export interface ControlPlaneContext {
   actor?: string
   originSense?: string
+  /** The management SENSE the gate evaluates for `connect_to` (p11 inc2, brick 8).
+   * The stdio path is owner-only, so this defaults to `local` (`?? "local"`) — a
+   * `local` management sense COMMITS. A network/multi-tenant transport that constructs
+   * the server MUST pass its real senseType (`open` ⇒ confirm-prompt downgrade; `closed`
+   * ⇒ gated by `membership`). Distinct from `originSense` (a free-form audit string like
+   * "stdio"); this is the typed SenseType the authority predicate consumes. */
+  senseType?: SenseType
+  /** The PRE-COMPUTED account-roster membership for a `closed`-sense `connect_to`
+   * (p11 inc2). The stdio `local` path never consults it (left `undefined`); a `closed`
+   * network transport supplies the membership it already evaluated against the roster.
+   * The boundary stays thin — it forwards this to the library, computing no membership
+   * itself (the MCP `resolve_party` path does not wire a roster context). */
+  membership?: AccountMembershipResult
 }
 
 /** SECURITY (finding 3-A): the friends MCP server speaks JSON-RPC over **stdio**, and
@@ -311,6 +329,36 @@ export async function dispatchTool(
       return { result: record, isError: false }
     }
 
+    case "connect_to": {
+      // The management-sense control plane (p11 inc2, brick 8). The boundary stays
+      // thin — coerce the peer handles + level, resolve the gate's management sense
+      // (the stdio path is owner-only ⇒ `local`), and forward to the library, which
+      // owns the authority gate + disambiguation + introduce + audit. `isError` reflects
+      // ok===false (a `downgraded` / `needs_handle_or_introduction` result is an error
+      // result like the other mutation cases).
+      const result = await connectAgents(
+        store,
+        {
+          peer: {
+            agentId: coerceOptionalString(args.agentId),
+            did: coerceOptionalString(args.did),
+            name: coerceOptionalString(args.name),
+          },
+          // The stdio default is `local` (owner-only); a network transport supplies its
+          // real senseType via controlContext. The proof's stdio path commits.
+          senseType: controlContext?.senseType ?? "local",
+          ...(controlContext?.membership ? { membership: controlContext.membership } : {}),
+          trustLevel: coerceOptionalString(args.trustLevel) as TrustLevel | undefined,
+        },
+        {
+          ...(audit ? { audit } : {}),
+          actor: auditActor,
+          originSense: auditOriginSense,
+        },
+      )
+      return { result, isError: result.ok === false }
+    }
+
     case "whoami": {
       return { result: await whoami(store), isError: false }
     }
@@ -497,6 +545,9 @@ export async function dispatchTool(
         note: coerceOptionalString(args.note),
         proposedAssignee: parseMaybeJson<AgentAttribution>(args.proposedAssignee),
         selfAgentId,
+        // gap-1 (p11 inc2): an optional task-spec, meaningful only on a `request`. The
+        // library mints the requestId + records the delegation first-party.
+        task: parseMaybeJson<{ summary: string; details?: string; inputs?: Record<string, string> }>(args.task),
         proof: coerceOptionalString(args.proof),
       })
       return { result, isError: result.ok === false }
@@ -525,6 +576,41 @@ export async function dispatchTool(
         return { result: { ok: false, status: "not_found", message: "mission record not found" }, isError: true }
       }
       return { result: record.coordination ?? { assignee: undefined, log: [] }, isError: false }
+    }
+
+    case "send_result": {
+      // Producer (gap-2): B returns its deliverable. Self identity comes from whoami
+      // (the dispatch is store-only); the mission is named by its missionKey inside the
+      // library. Gated on BOTH a GrantStore (consent via the "coordinate" scope) and a
+      // MissionStore — exactly like share_mission.
+      if (!missions || !grants) return { result: NO_MISSION_STORE, isError: true }
+      const self = await whoami(store)
+      const selfAgentId = self.selfFriendId ?? ""
+      const result = await prepareMissionResult(missions, store, grants, {
+        missionId: coerceString(args.missionId),
+        toAgentId: coerceString(args.toAgentId),
+        requestId: coerceString(args.requestId),
+        result: parseMaybeJson<{ summary: string; artifact?: string; outputs?: Record<string, string> }>(args.result) ?? { summary: "" },
+        selfAgentId,
+        proof: coerceOptionalString(args.proof),
+      })
+      return { result, isError: result.ok === false }
+    }
+
+    case "import_result": {
+      // Consumer (gap-2): A imports B's deliverable. Gated on the MissionStore, like
+      // import_mission. An invalid/malformed envelope is a clean `invalid` result.
+      if (!missions) return { result: NO_MISSION_STORE, isError: true }
+      const envelope = parseMaybeJson<MissionResultEnvelope>(args.envelope)
+      if (!envelope || typeof envelope !== "object") {
+        return { result: { ok: false, status: "invalid", message: "an envelope object is required" }, isError: true }
+      }
+      const result = await importMissionResult(missions, {
+        envelope,
+        fromAgentId: coerceString(args.fromAgentId),
+        trustOfSource: coerceString(args.trustOfSource) as TrustLevel,
+      })
+      return { result, isError: result.ok === false }
     }
 
     default: {

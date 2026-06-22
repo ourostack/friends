@@ -39,12 +39,12 @@ narrow:
 - **Bring your own storage.** The library never decides *where* or *how* your data lives — you
   pass a path (or a connection string) and, if you want, your own storage backend.
 
-It is built as **five additive capability layers**. Each is a minimal primitive on the one before
+It is built as **six additive capability layers**. Each is a minimal primitive on the one before
 it; none is a workflow engine; removing any layer leaves the ones beneath it unchanged.
 
 ---
 
-## What it does — the five capabilities
+## What it does — the six capabilities
 
 ### 1. Identity + the cross-agent moat
 
@@ -158,9 +158,29 @@ an assignee onto anyone (the receiver's own `accept` confirms it — non-transit
 advisory metadata rather than a granted capability, and conflicts resolve last-writer-wins by
 timestamp. No queue, no DAG, no workflow DSL.
 
+### 6. Own-fleet delegation — link your own agents, then delegate work end-to-end
+
+The control-plane thread: the owner can **link two of their own agents** and have one **delegate a
+task** to the other, get it done, and **receive the result back** — over the same consent-gated,
+trust-capped, first-party-inviolable machinery.
+
+`connect_to` is a first-class **management-sense** capability — the owner introduces a peer into an
+agent's fleet, but **only from a trusted control surface**: a `local` (owner-only) sense commits
+inline; an `open` sense never does (it downgrades to a confirm-prompt); a `closed` sense is gated by
+a **signed account-roster membership check** (same-account `family` via `same_account`), never a
+blanket allow. The link is recorded as an `action:"connect"` control-plane audit. A bare name with
+no resolvable handle is answered honestly (`needs_handle_or_introduction`) rather than invented.
+
+Delegation then rides the layers already here: a **task-spec** travels on a coordination `request`
+(correlated by a minted `requestId`), and the **result-return** (`send_result` / `import_result`)
+carries the actual produced **deliverable** back — attributed to the doer, correlated to the original
+delegation, landing **quarantined** in a separate namespace on import. A result for work you never
+delegated is rejected (`no_delegation`); a stranger's result is refused at the trust cap; first-party
+knowledge is never touched. It is a deliverable channel, **not a remote-exec grant**.
+
 > The stack, in one line: agents **recognize** each other (1), **reach** each other (2),
-> **remember** shared work (3), **assess** each other (4), and **negotiate** who does what (5) —
-> each a minimal primitive on the last.
+> **remember** shared work (3), **assess** each other (4), **negotiate** who does what (5), and the
+> owner **links their own agents to delegate end-to-end** (6) — each a minimal primitive on the last.
 
 ---
 
@@ -252,7 +272,7 @@ You can also `npm pack` then
 Content-Length and newline-delimited JSON — auto-detected from the first message, so it works with
 harnesses on either convention.
 
-#### The tool surface — 29 tools
+#### The tool surface — 32 tools
 
 A thin 1:1 mapping over the library (no domain logic in the server):
 
@@ -269,6 +289,7 @@ A thin 1:1 mapping over the library (no domain logic in the server):
 | `link_identity` | Link an external identity, merging any orphan record that holds it. |
 | `unlink_identity` | Remove an external identity from a friend. |
 | `onboard_agent` | Upsert an agent-peer record from resolved coordinates (no HTTP fetch). |
+| `connect_to` | **Control plane** — the owner links one of their OWN agents into the fleet (introduce a peer by agentId/did/name at a trust level, default `family`). Authority-gated to a management sense (`local` commits; an `open` sense downgrades to a confirm-prompt; `closed` is gated by a roster/membership check); a bare name with no resolvable handle/DID returns `needs_handle_or_introduction` (never fabricates). Writes an `action:"connect"` control-plane audit. |
 | `whoami` | Resolve the machine owner and which record represents the self. |
 | `channel_caps` | Return a channel's capabilities. |
 | `resolve_room` | Resolve a room (a group's external id) into its members, each with trust context and `knownVia`. |
@@ -287,13 +308,17 @@ A thin 1:1 mapping over the library (no domain logic in the server):
 | `coordinate` | **Producer** — prepare a coordination message (`request` / `offer` / `accept` / `decline` / `handoff`) that negotiates **who** does a mission. |
 | `import_coordination` | **Consumer** — import a coordination message (appends to the mission's coordination log; only a self-`accept` sets the assignee; a `handoff` never forces one). |
 | `get_coordination` | Read a mission's coordination state — its current assignee + the append-only negotiation log. |
+| `send_result` | **Producer** — return B's DELIVERABLE for a delegation, attributed to B + correlated to A's task-spec by `requestId`, named by the mission's `missionKey` (consent-gated via the `coordinate` scope). |
+| `import_result` | **Consumer** — import a result-return; lands B's deliverable quarantined + attributed under `importedResults`, trust-capped; a result whose `requestId` matches no prior first-party delegation is rejected (`no_delegation`); never recomputes status. |
 
 The consent tools (`share_profile` / `import_profile` / `grant_share` / `revoke_share` /
-`list_shares`) need a **grant store**; the mission and coordination tools need a **mission store**.
-The `friends-mcp` binary wires both automatically at sibling `_grants/` and `_missions/` directories
-under `--dir`. An embedded server gets them by passing `grants` / `missions` to
-`createFriendsMcpServer`. Without the relevant store, those tools report
-`{ ok: false, status: "unsupported" }` and everything else works store-only.
+`list_shares`) need a **grant store**; the mission, coordination, and result-return tools
+(`send_result` consumes both) need a **mission store**. The `friends-mcp` binary wires both
+automatically at sibling `_grants/` and `_missions/` directories under `--dir` (plus the
+`_audit/` control-plane log `connect_to` / `set_trust` write through). An embedded server gets
+them by passing `grants` / `missions` / `audit` to `createFriendsMcpServer`. Without the
+relevant store, those tools report `{ ok: false, status: "unsupported" }` and everything else
+works store-only.
 
 The server module is consumed in code from the `@ouro.bot/friends/mcp` subpath, exporting
 `createFriendsMcpServer`, `getToolSchemas`, and `runMain`.
@@ -470,6 +495,10 @@ npm run example:cross-agent-standing        # earned standing: first-party-only,
                                             #   inert on trust
 npm run example:cross-agent-coordination    # the five coordination verbs end-to-end: assignment,
                                             #   non-transitive handoff, last-writer-wins, seeding gate
+npm run example:cross-agent-delegation      # own-fleet delegation: two of the owner's agents,
+                                            #   same-account family (signed roster), connect_to link,
+                                            #   A delegates → B performs → B returns the result → A
+                                            #   imports it — every invariant hard-asserted
 ```
 
 Read them as the honest spec of what the package promises: if a guarantee weren't real, the
@@ -501,7 +530,7 @@ setNervesEmitter((event) => {
 
 ## Design notes & status
 
-- **Store-only, transport-agnostic, additive.** The five layers were each built as a minimal
+- **Store-only, transport-agnostic, additive.** The six layers were each built as a minimal
   primitive that does not modify the layers beneath it. The cross-agent envelopes are plain data; the
   wire is always the caller's job (the `./mailbox` git-mailbox is one optional, host-driven fallback). A
   CI-enforced dependency rule keeps the core from ever importing the transport.
@@ -510,8 +539,9 @@ setNervesEmitter((event) => {
   clean.
 - **Not a workflow engine.** Each layer deliberately refuses the larger machine it brushes against:
   the mission ledger is not a knowledge base, standing is not a reputation engine, coordination is not
-  a scheduler. The discipline is the point.
-- **Alpha.** The surface is feature-complete across the five layers but pre-1.0 — expect additive
+  a scheduler, and the delegation channel is a deliverable return — not a remote-exec grant. The
+  discipline is the point.
+- **Alpha.** The surface is feature-complete across the six layers but pre-1.0 — expect additive
   changes, and pin a version. Feedback and issues are welcome.
 
 ### Public API
@@ -538,10 +568,17 @@ setNervesEmitter((event) => {
 `ImportCoordinationStatus`, `SetFriendTrustContext`, `AuditSink`, `ControlPlaneAuditRecord`,
 `ResolvedAgentIdentity`, `RosterStore`, `AccountRoster`, `RosterPin`, `RosterVerifier`,
 `AccountMembershipDecision`, `AccountMembershipResult`, `EvaluateAccountMembershipInput`,
-`FriendResolverRosterContext`. (`TrustBasis` additively gains the `"same_account"` member — the basis
-for family granted via the signed account roster — and `AgentMeta` additively gains an optional
-`identity { did, pinnedKey?, handle?, pinnedAt? }` durable-identity home; both are schemaVersion-1
-additive, and a legacy `a2a.did` migrates-on-read into `identity.did`.)
+`FriendResolverRosterContext`, `ConnectPeer`, `ConnectAgentsInput`, `ConnectAgentsDeps`,
+`ConnectResult`, `ConnectStatus`, `AuthorizeConnectInput`, `ConnectAuthorization`, `MissionTaskSpec`,
+`MissionResult`, `MissionResultEnvelope`, `PrepareMissionResultInput`, `PrepareMissionResultResult`,
+`PrepareMissionResultStatus`, `ImportMissionResultInput`, `ImportMissionResultOptions`,
+`ImportMissionResultResult`, `ImportMissionResultStatus`. (`TrustBasis` additively gains the
+`"same_account"` member — the basis for family granted via the signed account roster — and `AgentMeta`
+additively gains an optional `identity { did, pinnedKey?, handle?, pinnedAt? }` durable-identity home;
+both are schemaVersion-1 additive, and a legacy `a2a.did` migrates-on-read into `identity.did`.
+`MissionRecord` additively gains the own-fleet delegation namespaces `delegations` / `importedDelegations`
+(gap-1) and `results` / `importedResults` (gap-2), and `ControlPlaneAuditRecord.action` widens additively
+to `"set_trust" | "connect"`.)
 
 **Values:** `TRUSTED_LEVELS`, `IDENTITY_SCOPES`, `isTrustedLevel`, `isIdentityProvider`,
 `isIntegration`, `isShareScope`, `isCoordinationIntent`, `FileFriendStore`, `FileGrantStore`,
@@ -557,7 +594,8 @@ additive, and a legacy `a2a.did` migrates-on-read into `identity.did`.)
 `listShares`, `isGrantEffective`, `setNervesEmitter`, `emitNervesEvent`, `resolveAgentIdentity`,
 `withMigratedIdentity`, `findFriendByDid`, `MemoryAuditSink`, `FileAuditSink`, `auditPathFor`,
 `FileRosterStore`, `rostersDirFor`, `MemoryRosterStore`, `identityRosterVerifier`,
-`DEFAULT_ROSTER_VERIFIER`, `evaluateAccountMembership`.
+`DEFAULT_ROSTER_VERIFIER`, `evaluateAccountMembership`, `connectAgents`, `authorizeConnect`,
+`prepareMissionResult`, `importMissionResult`.
 
 **From `@ouro.bot/friends/mcp`:** `createFriendsMcpServer`, `getToolSchemas`, `runMain` (plus the
 `McpToolSchema`, `FriendsMcpServer`, and `RunMainIo` types).

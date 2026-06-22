@@ -158,13 +158,14 @@ function seedOwner(store: FriendStore): FriendRecord {
 }
 
 describe("getToolSchemas", () => {
-  it("returns exactly the 29 tools with object input schemas", () => {
+  it("returns exactly the 32 tools with object input schemas", () => {
     const schemas = getToolSchemas()
     const names = schemas.map((s) => s.name).sort()
     expect(names).toEqual(
       [
         "assess_standing",
         "channel_caps",
+        "connect_to",
         "coordinate",
         "describe_trust",
         "explain_standing",
@@ -175,6 +176,7 @@ describe("getToolSchemas", () => {
         "import_coordination",
         "import_mission",
         "import_profile",
+        "import_result",
         "link_identity",
         "list_friends",
         "list_missions",
@@ -186,6 +188,7 @@ describe("getToolSchemas", () => {
         "resolve_room",
         "revoke_share",
         "save_note",
+        "send_result",
         "set_trust",
         "share_mission",
         "share_profile",
@@ -194,7 +197,7 @@ describe("getToolSchemas", () => {
         "whoami",
       ].sort(),
     )
-    expect(schemas).toHaveLength(29)
+    expect(schemas).toHaveLength(32)
     for (const s of schemas) {
       expect(s.inputSchema.type).toBe("object")
       expect(typeof s.description).toBe("string")
@@ -236,7 +239,7 @@ describe("protocol layer", () => {
     const server = createFriendsMcpServer({ store: makeStore(), stdin: h.stdin, stdout: h.stdout })
     server.start()
     const res = await h.call({ jsonrpc: "2.0", id: 2, method: "tools/list" })
-    expect((res.result as { tools: unknown[] }).tools).toHaveLength(29)
+    expect((res.result as { tools: unknown[] }).tools).toHaveLength(32)
     server.stop()
   })
 
@@ -928,6 +931,127 @@ describe("tools/call dispatch — control-plane audit wiring (finding 3)", () =>
   })
 })
 
+// ── connect_to dispatch (p11 inc2, brick 8) — the management-sense control plane ──
+// The stdio path is owner-only ⇒ a `local` management sense (controlContext.senseType
+// ?? "local"), so the gate COMMITS; a network transport that constructs the server with
+// controlContext.senseType = "open" (or "closed") drives the downgrade / membership path.
+describe("tools/call dispatch — connect_to (p11 inc2)", () => {
+  let h: Harness
+  beforeEach(() => {
+    h = new Harness()
+  })
+  afterEach(() => {
+    h.stdin.destroy()
+    h.stdout.destroy()
+  })
+
+  function start(store: FriendStore, audit?: MemoryAuditSink, controlContext?: { actor?: string; originSense?: string; senseType?: "open" | "closed" | "local" | "internal"; membership?: { decision: string } }) {
+    const server = createFriendsMcpServer({ store, audit, controlContext, stdin: h.stdin, stdout: h.stdout })
+    server.start()
+    return server
+  }
+
+  it("default stdio path (no controlContext) gets a LOCAL management sense → COMMITS, links + audits action:'connect'", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    const audit = new MemoryAuditSink()
+    start(store, audit)
+    const r = await h.tool("connect_to", { agentId: "peer-1", name: "Peer One" })
+    expect(r.isError).toBe(false)
+    const payload = r.payload as { ok: boolean; status: string; record: FriendRecord }
+    expect(payload.ok).toBe(true)
+    expect(payload.status).toBe("connected")
+    expect(payload.record.trustLevel).toBe("family") // own-fleet default
+    const records = audit.list()
+    expect(records).toHaveLength(1)
+    expect(records[0]).toMatchObject({ action: "connect", level: "family", originSense: "stdio", actor: "owner:stdio" })
+  })
+
+  it("honors an explicit trustLevel arg on the link", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    const audit = new MemoryAuditSink()
+    start(store, audit)
+    const r = await h.tool("connect_to", { agentId: "peer-2", trustLevel: "friend" })
+    const payload = r.payload as { ok: boolean; record: FriendRecord }
+    expect(payload.record.trustLevel).toBe("friend")
+    expect((audit.list()[0] as ControlPlaneAuditRecord).level).toBe("friend")
+  })
+
+  it("an injected senseType:'open' controlContext yields the DOWNGRADED result (isError true), NO link, NO audit", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    const audit = new MemoryAuditSink()
+    start(store, audit, { senseType: "open" })
+    const r = await h.tool("connect_to", { agentId: "peer-3" })
+    expect(r.isError).toBe(true)
+    const payload = r.payload as { ok: boolean; status: string; downgrade?: { decision: string; reason: string } }
+    expect(payload.ok).toBe(false)
+    expect(payload.status).toBe("downgraded")
+    expect(payload.downgrade).toEqual({ decision: "downgrade", reason: "open_sense_needs_confirmation" })
+    expect(audit.list()).toHaveLength(0)
+  })
+
+  it("an injected senseType:'closed' WITHOUT a family membership downgrades (closed_sense_not_member)", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    const audit = new MemoryAuditSink()
+    start(store, audit, { senseType: "closed" })
+    const r = await h.tool("connect_to", { agentId: "peer-4" })
+    expect(r.isError).toBe(true)
+    const payload = r.payload as { ok: boolean; status: string; downgrade?: { reason: string } }
+    expect(payload.status).toBe("downgraded")
+    expect(payload.downgrade?.reason).toBe("closed_sense_not_member")
+    expect(audit.list()).toHaveLength(0)
+  })
+
+  it("an injected senseType:'closed' WITH a family_same_account membership COMMITS", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    const audit = new MemoryAuditSink()
+    start(store, audit, { senseType: "closed", membership: { decision: "family_same_account" } })
+    const r = await h.tool("connect_to", { agentId: "peer-5", name: "Peer Five" })
+    expect(r.isError).toBe(false)
+    const payload = r.payload as { ok: boolean; status: string }
+    expect(payload.ok).toBe(true)
+    expect(payload.status).toBe("connected")
+    expect(audit.list()).toHaveLength(1)
+  })
+
+  it("a bare name with no record hit → needs_handle_or_introduction (isError true), NO audit", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    const audit = new MemoryAuditSink()
+    start(store, audit)
+    const r = await h.tool("connect_to", { name: "Nobody Known" })
+    expect(r.isError).toBe(true)
+    const payload = r.payload as { ok: boolean; status: string }
+    expect(payload.ok).toBe(false)
+    expect(payload.status).toBe("needs_handle_or_introduction")
+    expect(audit.list()).toHaveLength(0)
+  })
+
+  it("a did arg is threaded to the library (a did with no record → needs_handle_or_introduction)", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    start(store)
+    const r = await h.tool("connect_to", { did: "did:key:zUnknownPeer" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("needs_handle_or_introduction")
+  })
+
+  it("works with NO audit sink wired (the link is made; no audit appended)", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    const server = createFriendsMcpServer({ store, stdin: h.stdin, stdout: h.stdout })
+    server.start()
+    const r = await h.tool("connect_to", { agentId: "peer-nosink" })
+    expect(r.isError).toBe(false)
+    expect((r.payload as { ok: boolean }).ok).toBe(true)
+    server.stop()
+  })
+})
+
 // ── Cross-agent moat dispatch (N11 + N12) ──
 
 function makeGrantStore(initial: ShareGrant[] = []): GrantStore {
@@ -1514,6 +1638,150 @@ describe("mission tools/call dispatch", () => {
     expect(r.isError).toBe(true)
     expect((r.payload as { status: string }).status).toBe("untrusted_source")
   })
+
+  // ── send_result (gap-2: prepareMissionResult) ──
+
+  it("send_result: reports unsupported when no mission store is wired", async () => {
+    start(ownerStore(), makeGrantStore()) // grants but no missions
+    const r = await h.tool("send_result", { missionId: "m-1", toAgentId: "agent-a", requestId: "req-1", result: JSON.stringify({ summary: "done" }) })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("unsupported")
+  })
+
+  it("send_result: reports unsupported when no grant store is wired", async () => {
+    const missions = makeMissionStore([missionOf()])
+    start(ownerStore(), undefined, missions) // missions but no grants
+    const r = await h.tool("send_result", { missionId: "m-1", toAgentId: "agent-a", requestId: "req-1", result: JSON.stringify({ summary: "done" }) })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("unsupported")
+  })
+
+  it("send_result: no_consent for an unknown (stranger) recipient", async () => {
+    const missions = makeMissionStore([missionOf()])
+    start(ownerStore(), makeGrantStore(), missions)
+    const r = await h.tool("send_result", { missionId: "m-1", toAgentId: "agent-a", requestId: "req-1", result: JSON.stringify({ summary: "done" }) })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("no_consent")
+  })
+
+  it("send_result: produces a result envelope attributed to self (from whoami), named by missionKey", async () => {
+    const missions = makeMissionStore([missionOf()])
+    // owner is family → whoami self; a friend recipient record for agent-a so coordinate consents at the identity tier.
+    const store = makeStore([
+      ownerRecord(),
+      { ...ownerRecord(), id: "rec-a", name: "Delegator", role: "agent-peer", kind: "agent", trustLevel: "friend", externalIds: [{ provider: "a2a-agent", externalId: "agent-a", linkedAt: NOW }] },
+    ])
+    start(store, makeGrantStore(), missions)
+    const r = await h.tool("send_result", { missionId: "m-1", toAgentId: "agent-a", requestId: "req-1", result: JSON.stringify({ summary: "Auth audited", outputs: { findings: "2" } }) })
+    expect(r.isError).toBe(false)
+    const payload = r.payload as { ok: boolean; envelope: { subject: { missionKey: string }; fromAgentId: string; requestId: string; result: { summary: string } } }
+    expect(payload.ok).toBe(true)
+    expect(payload.envelope.subject.missionKey).toBe("PROJ-1234")
+    expect(payload.envelope.fromAgentId).toBe("owner-1") // self from whoami
+    expect(payload.envelope.requestId).toBe("req-1")
+    expect(payload.envelope.result.summary).toBe("Auth audited")
+  })
+
+  it("send_result: not_found when the missionId does not resolve", async () => {
+    const missions = makeMissionStore() // empty
+    start(ownerStore(), makeGrantStore(), missions)
+    const r = await h.tool("send_result", { missionId: "ghost", toAgentId: "agent-a", requestId: "req-1", result: JSON.stringify({ summary: "x" }) })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("not_found")
+  })
+
+  it("send_result: self id is empty when whoami resolves no self (no owner/family)", async () => {
+    const missions = makeMissionStore([missionOf()])
+    // No owner/family record → whoami returns no self → selfAgentId "". A friend recipient
+    // for agent-a so the coordinate scope consents at the identity tier.
+    const store = makeStore([
+      { ...ownerRecord(), id: "rec-a", name: "Delegator", role: "agent-peer", kind: "agent", trustLevel: "friend", externalIds: [{ provider: "a2a-agent", externalId: "agent-a", linkedAt: NOW }] },
+    ])
+    start(store, makeGrantStore(), missions)
+    const r = await h.tool("send_result", { missionId: "m-1", toAgentId: "agent-a", requestId: "req-1", result: JSON.stringify({ summary: "done" }) })
+    expect(r.isError).toBe(false)
+    const payload = r.payload as { ok: boolean; envelope: { fromAgentId: string } }
+    expect(payload.ok).toBe(true)
+    expect(payload.envelope.fromAgentId).toBe("")
+  })
+
+  it("send_result: a missing/malformed result arg defaults to an empty-summary deliverable", async () => {
+    const missions = makeMissionStore([missionOf()])
+    const store = makeStore([
+      ownerRecord(),
+      { ...ownerRecord(), id: "rec-a", name: "Delegator", role: "agent-peer", kind: "agent", trustLevel: "friend", externalIds: [{ provider: "a2a-agent", externalId: "agent-a", linkedAt: NOW }] },
+    ])
+    start(store, makeGrantStore(), missions)
+    // no `result` arg → parseMaybeJson undefined → defaults to { summary: "" }
+    const r = await h.tool("send_result", { missionId: "m-1", toAgentId: "agent-a", requestId: "req-1" })
+    expect(r.isError).toBe(false)
+    const payload = r.payload as { ok: boolean; envelope: { result: { summary: string } } }
+    expect(payload.ok).toBe(true)
+    expect(payload.envelope.result.summary).toBe("")
+  })
+
+  // ── import_result (gap-2: importMissionResult) ──
+
+  it("import_result: reports unsupported with no mission store", async () => {
+    start(ownerStore())
+    const envelope = { subject: { missionKey: "PROJ-1234", title: "T" }, fromAgentId: "agent-b", requestId: "req-1", result: { requestId: "req-1", summary: "done" }, issuedAt: NOW }
+    const r = await h.tool("import_result", { envelope, fromAgentId: "agent-b", trustOfSource: "friend" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("unsupported")
+  })
+
+  it("import_result: rejects a missing/malformed envelope", async () => {
+    const missions = makeMissionStore()
+    start(ownerStore(), undefined, missions)
+    const missing = await h.tool("import_result", { fromAgentId: "agent-b", trustOfSource: "friend" })
+    expect(missing.isError).toBe(true)
+    expect((missing.payload as { status: string }).status).toBe("invalid")
+    const malformed = await h.tool("import_result", { envelope: "{bad json", fromAgentId: "agent-b", trustOfSource: "friend" })
+    expect(malformed.isError).toBe(true)
+    expect((malformed.payload as { status: string }).status).toBe("invalid")
+  })
+
+  it("import_result: lands B's deliverable on A's mission (correlated to a first-party delegation whose assignee is B)", async () => {
+    const missionWithDelegation = missionOf({ delegations: { "req-1": { task: { requestId: "req-1", summary: "Audit auth" }, assignee: { agentId: "agent-b" }, provenance: { origin: "first_party" } } } })
+    const missions = makeMissionStore([missionWithDelegation])
+    start(ownerStore(), undefined, missions)
+    const envelope = JSON.stringify({ subject: { missionKey: "PROJ-1234", title: "Ship it" }, fromAgentId: "agent-b", requestId: "req-1", result: { requestId: "req-1", summary: "Auth audited - 2 findings" }, issuedAt: NOW })
+    const r = await h.tool("import_result", { envelope, fromAgentId: "agent-b", trustOfSource: "friend" })
+    expect(r.isError).toBe(false)
+    const payload = r.payload as { ok: boolean; status: string; record: MissionRecord }
+    expect(payload.ok).toBe(true)
+    expect(payload.status).toBe("imported")
+    expect(payload.record.importedResults!["agent-b"]["req-1"].summary).toBe("Auth audited - 2 findings")
+  })
+
+  it("import_result: assignee_mismatch when a trusted NON-assignee submits a result for a real requestId (finding 1, isError true)", async () => {
+    // A delegated req-1 to agent-b; a different trusted peer agent-c tries to inject a result.
+    const missionWithDelegation = missionOf({ delegations: { "req-1": { task: { requestId: "req-1", summary: "Audit auth" }, assignee: { agentId: "agent-b" }, provenance: { origin: "first_party" } } } })
+    const missions = makeMissionStore([missionWithDelegation])
+    start(ownerStore(), undefined, missions)
+    const envelope = JSON.stringify({ subject: { missionKey: "PROJ-1234", title: "Ship it" }, fromAgentId: "agent-c", requestId: "req-1", result: { requestId: "req-1", summary: "forged" }, issuedAt: NOW })
+    const r = await h.tool("import_result", { envelope, fromAgentId: "agent-c", trustOfSource: "family" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("assignee_mismatch")
+  })
+
+  it("import_result: no_delegation when the result correlates to no prior delegation (isError true)", async () => {
+    const missions = makeMissionStore([missionOf()]) // no delegations
+    start(ownerStore(), undefined, missions)
+    const envelope = JSON.stringify({ subject: { missionKey: "PROJ-1234", title: "Ship it" }, fromAgentId: "agent-b", requestId: "req-1", result: { requestId: "req-1", summary: "x" }, issuedAt: NOW })
+    const r = await h.tool("import_result", { envelope, fromAgentId: "agent-b", trustOfSource: "friend" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("no_delegation")
+  })
+
+  it("import_result: untrusted_source for a stranger source (isError true)", async () => {
+    const missions = makeMissionStore([missionOf({ delegations: { "req-1": { task: { requestId: "req-1", summary: "t" }, provenance: { origin: "first_party" } } } })])
+    start(ownerStore(), undefined, missions)
+    const envelope = { subject: { missionKey: "PROJ-1234", title: "Ship it" }, fromAgentId: "agent-b", requestId: "req-1", result: { requestId: "req-1", summary: "x" }, issuedAt: NOW }
+    const r = await h.tool("import_result", { envelope, fromAgentId: "agent-b", trustOfSource: "stranger" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("untrusted_source")
+  })
 })
 
 describe("coordination tools/call dispatch (brick 5)", () => {
@@ -1594,6 +1862,33 @@ describe("coordination tools/call dispatch (brick 5)", () => {
     expect(payload.envelope.subject.missionKey).toBe("PROJ-1234")
     expect(payload.envelope.fromAgentId).toBe("owner-1")
     expect(payload.envelope.note).toBe("take the API side?")
+  })
+
+  it("coordinate: threads a string-encoded task-spec onto a request (gap-1) — mints a requestId, records the delegation", async () => {
+    const missions = makeMissionStore([missionOf()])
+    start(ownerAndFriendPeer(), makeGrantStore(), missions)
+    const r = await h.tool("coordinate", { missionId: "m-1", toAgentId: "agent-b", intent: "request", task: JSON.stringify({ summary: "Audit auth", details: "token path" }) })
+    expect(r.isError).toBe(false)
+    const payload = r.payload as { ok: boolean; envelope: { task?: { requestId: string; summary: string; details?: string } } }
+    expect(payload.ok).toBe(true)
+    expect(payload.envelope.task).toBeDefined()
+    expect(typeof payload.envelope.task!.requestId).toBe("string")
+    expect(payload.envelope.task!.requestId.length).toBeGreaterThan(0)
+    expect(payload.envelope.task!.summary).toBe("Audit auth")
+    expect(payload.envelope.task!.details).toBe("token path")
+    // the delegation is recorded first-party on the producer's mission
+    const stored = await (missions.get("m-1"))
+    expect(stored!.delegations![payload.envelope.task!.requestId].task.summary).toBe("Audit auth")
+  })
+
+  it("coordinate: a task on a non-request intent is ignored (no task on the offer envelope)", async () => {
+    const missions = makeMissionStore([missionOf()])
+    start(ownerAndFriendPeer(), makeGrantStore(), missions)
+    const r = await h.tool("coordinate", { missionId: "m-1", toAgentId: "agent-b", intent: "offer", task: JSON.stringify({ summary: "ignored" }) })
+    expect(r.isError).toBe(false)
+    const payload = r.payload as { ok: boolean; envelope: Record<string, unknown> }
+    expect(payload.ok).toBe(true)
+    expect("task" in payload.envelope).toBe(false)
   })
 
   it("coordinate: self id is empty when whoami resolves no self (no owner/family)", async () => {

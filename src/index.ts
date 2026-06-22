@@ -132,6 +132,17 @@ export { linkExternalId, unlinkExternalId } from "./link-identity"
 
 export { upsertAgentPeer } from "./agent-peer"
 
+// -- connect_to (brick 8, p11 inc2): the owner links one of their OWN agents into the
+// fleet, gated to a management sense (local/closed) — `local` commits; an `open` sense
+// downgrades to a confirm-prompt; `closed` is gated by a roster/membership check (never a
+// blanket allow); a bare name with no resolvable handle/DID returns needs_handle (never
+// fabricated). Writes one `action:"connect"` control-plane audit. `authorizeConnect` is the
+// pure authority predicate (consumes a pre-computed AccountMembershipResult — core-clean).
+export { connectAgents } from "./connect"
+export type { ConnectPeer, ConnectAgentsInput, ConnectAgentsDeps, ConnectResult, ConnectStatus } from "./connect"
+export { authorizeConnect } from "./connect-authority"
+export type { AuthorizeConnectInput, ConnectAuthorization } from "./connect-authority"
+
 // -- Agent identity (p11 Item 2 — DID re-key): durable home + migrate-on-read --
 export { resolveAgentIdentity, withMigratedIdentity } from "./identity"
 export type { ResolvedAgentIdentity } from "./identity"
@@ -214,6 +225,25 @@ export type {
   ImportCoordinationResult,
   ImportCoordinationStatus,
 } from "./coordination"
+
+// -- Result-return / delegation deliverable (gap-2, p11 inc2): B returns its result --
+// prepareMissionResult (producer) / importMissionResult (consumer) carry B's actual
+// produced deliverable back to A — attributed to B, correlated to A's delegation via
+// missionKey + requestId, consent-gated via the existing "coordinate" scope, lands
+// quarantined + attributed on import, trust-capped, non-transitive, first-party-inviolable.
+// `MissionTaskSpec` (gap-1) rides the CoordinationEnvelope; the new MissionRecord fields
+// (delegations / importedDelegations / results / importedResults) are additive.
+export { prepareMissionResult, importMissionResult } from "./mission-result"
+export type {
+  PrepareMissionResultInput,
+  PrepareMissionResultResult,
+  PrepareMissionResultStatus,
+  ImportMissionResultInput,
+  ImportMissionResultOptions,
+  ImportMissionResultResult,
+  ImportMissionResultStatus,
+} from "./mission-result"
+export type { MissionTaskSpec, MissionResult, MissionResultEnvelope } from "./types"
 
 export { grantShare, revokeShare, listShares, isGrantEffective } from "./grants"
 
