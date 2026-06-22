@@ -43,7 +43,7 @@ import { buildOutgoing, readIncoming, markSeen } from "../src/mailbox"
 import type { SeenLedger } from "../src/mailbox"
 import { evaluateAccountMembership, verifiedCandidate, MemoryRosterStore } from "../src"
 import type { AccountRoster } from "../src"
-import { ready, signRoster, ed25519RosterVerifier } from "../src/a2a-client"
+import { ready, signRoster, ed25519RosterVerifier, ed25519PubToDidKey } from "../src/a2a-client"
 
 // The built MCP entrypoint. The npm script runs `npm run build` first so it exists.
 const BIN_PATH = join(__dirname, "..", "dist", "mcp", "bin.js")
@@ -278,23 +278,80 @@ async function main(): Promise<void> {
     assert.equal((await agentB.tool("whoami", {})).payload.selfFriendId, AGENT_B_ID)
     ok("both MCP servers up; whoami resolves each owner's self to its routing id")
 
-    // Keep sodium referenced (the roster crypto lands in Unit 8b).
-    void sodium
-    void evaluateAccountMembership
-    void verifiedCandidate
-    void MemoryRosterStore
-    void signRoster
-    void ed25519RosterVerifier
+    // ════════════════════════════════════════════════════════════════════════
+    // STEP 2 — Same-account FAMILY via a SIGNED account roster. The owner's account
+    // signs a roster listing BOTH A's and B's DIDs; evaluateAccountMembership (the
+    // increment-1 payoff) grants `family_same_account` ONLY for a key-verified, in-roster,
+    // DID-control-proven candidate — asserted on BOTH sides with the real ed25519 verifier.
+    // (The MCP resolve_party does NOT wire a roster context — matching increment-1, the
+    // proof asserts membership directly via the library, exactly as the owner's harness would.)
+    // ════════════════════════════════════════════════════════════════════════
+    step("Same-account family — a SIGNED roster → evaluateAccountMembership → family_same_account on BOTH sides")
+
+    // A real account signing key + per-agent did:key identities (A, B).
+    const accountKp = sodium.crypto_sign_keypair()
+    const rosterKey = sodium.to_base64(accountKp.publicKey, sodium.base64_variants.ORIGINAL)
+    const aKp = sodium.crypto_sign_keypair()
+    const bKp = sodium.crypto_sign_keypair()
+    const aDid = ed25519PubToDidKey(aKp.publicKey)
+    const bDid = ed25519PubToDidKey(bKp.publicKey)
+    assert.ok(aDid.startsWith("did:key:") && bDid.startsWith("did:key:"), "both agents have did:key identities")
+
+    // The owner's account roster lists BOTH agents; the account key signs it (epoch 1).
+    const rosterBody = { accountId: ACCOUNT_ID, members: [{ handle: AGENT_A_ID, did: aDid }, { handle: AGENT_B_ID, did: bDid }], epoch: 1 }
+    const rosterSig = signRoster({ sodium, accountKeyPriv: accountKp.privateKey, roster: rosterBody })
+    const roster: AccountRoster = { ...rosterBody, sig: rosterSig }
+    const verifier = ed25519RosterVerifier(sodium)
+
+    // A's side evaluates B (the candidate whose DID-control A has authenticated out of band):
+    // a fresh TOFU roster-store pins the account key on first contact, the ed25519 verifier
+    // (grantsFamily:true) accepts the signed roster, B's DID is in it → family_same_account.
+    const membershipBfromA = await evaluateAccountMembership({
+      roster,
+      candidate: verifiedCandidate(bDid),
+      rosterKey,
+      store: new MemoryRosterStore(),
+      verifier,
+    })
+    assert.equal(membershipBfromA.decision, "family_same_account", "A must recognize B as same-account family (not unverified/not_member)")
+    ok(`A → B: ${membershipBfromA.decision} (signed roster, real ed25519, B's did in the roster)`)
+
+    // B's side evaluates A symmetrically.
+    const membershipAfromB = await evaluateAccountMembership({
+      roster,
+      candidate: verifiedCandidate(aDid),
+      rosterKey,
+      store: new MemoryRosterStore(),
+      verifier,
+    })
+    assert.equal(membershipAfromB.decision, "family_same_account", "B must recognize A as same-account family")
+    ok(`B → A: ${membershipAfromB.decision}`)
+
+    // Negative control: a stranger DID NOT in the roster is NOT family.
+    const strangerDid = ed25519PubToDidKey(sodium.crypto_sign_keypair().publicKey)
+    const strangerMembership = await evaluateAccountMembership({
+      roster,
+      candidate: verifiedCandidate(strangerDid),
+      rosterKey,
+      store: new MemoryRosterStore(),
+      verifier,
+    })
+    assert.equal(strangerMembership.decision, "not_member", "a DID absent from the roster must NOT be family (not_member)")
+    ok(`stranger DID absent from roster → ${strangerMembership.decision} (the roster gate is real, not a blanket allow)`)
+    // NOTE: the family peer records are NOT pre-seeded here — the owner's connect_to
+    // (STEP 3) is what INTRODUCES each peer at `family`, which is the whole point of the
+    // capability. aDid/bDid stay in scope for the connect_to + delegation steps below.
+
     void buildOutgoing
     void readIncoming
     void markSeen
     void ({} as SeenLedger)
-    void ({} as AccountRoster)
 
     // ════════════════════════════════════════════════════════════════════════
     console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    console.log("✅  DELEGATION PROOF SKELETON — two own-fleet agents stood up on")
-    console.log("    separate stores; whoami resolves each. (Roster + connect_to +")
+    console.log("✅  DELEGATION PROOF (through STEP 2) — two own-fleet agents on")
+    console.log("    separate stores, recognized as same-account FAMILY via a signed")
+    console.log("    roster (real ed25519) on BOTH sides. (connect_to +")
     console.log("    delegate→perform→return land in the next units.)")
     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
   } finally {
