@@ -1,6 +1,12 @@
 {
   "versions": [
     {
+      "version": "0.1.0-alpha.6",
+      "changes": [
+        "p11 increment 1 — own-fleet foundation. Bug A: cold A2A contact defaults to stranger (safe-by-default; explicit owner-initiated trustLevel still wins). Bug B: append-only control-plane audit (AuditSink + MemoryAuditSink/FileAuditSink) on every setFriendTrust. Bug C: FriendResolver is roster-aware — a key-verified member of the pinned account roster is recognized as family across OS users, without loosening the cold-A2A stranger default. DID re-key (additive, schemaVersion still 1): AgentMeta.identity durable home with a2a.did migrate-on-read; did-aware findFriendByDid. Account roster: RosterStore/FileRosterStore/MemoryRosterStore + the RosterVerifier seam (core identity-only default; a2a-client ed25519RosterVerifier Ed25519 impl) granting family via a new same_account TrustBasis only to a TOFU-pinned, key-verified roster member (changed roster key hard-fails). Core remains transport-free (the CI core⊥a2a-client dependency rule is unmodified)."
+      ]
+    },
+    {
       "version": "0.1.0-alpha.5",
       "changes": [
         "a2a-client sub-export: real A2A + E2E sign-then-seal overlay (libsodium), did:key/did:web identity, untrusted-relay-safe; git-mailbox demoted to ./mailbox fallback"

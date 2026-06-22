@@ -535,7 +535,13 @@ setNervesEmitter((event) => {
 `ImportMissionShareResult`, `ImportMissionShareStatus`, `CoordinationEnvelope`,
 `PrepareCoordinationInput`, `PrepareCoordinationResult`, `PrepareCoordinationStatus`,
 `ImportCoordinationInput`, `ImportCoordinationOptions`, `ImportCoordinationResult`,
-`ImportCoordinationStatus`.
+`ImportCoordinationStatus`, `SetFriendTrustContext`, `AuditSink`, `ControlPlaneAuditRecord`,
+`ResolvedAgentIdentity`, `RosterStore`, `AccountRoster`, `RosterPin`, `RosterVerifier`,
+`AccountMembershipDecision`, `AccountMembershipResult`, `EvaluateAccountMembershipInput`,
+`FriendResolverRosterContext`. (`TrustBasis` additively gains the `"same_account"` member — the basis
+for family granted via the signed account roster — and `AgentMeta` additively gains an optional
+`identity { did, pinnedKey?, handle?, pinnedAt? }` durable-identity home; both are schemaVersion-1
+additive, and a legacy `a2a.did` migrates-on-read into `identity.did`.)
 
 **Values:** `TRUSTED_LEVELS`, `IDENTITY_SCOPES`, `isTrustedLevel`, `isIdentityProvider`,
 `isIntegration`, `isShareScope`, `isCoordinationIntent`, `FileFriendStore`, `FileGrantStore`,
@@ -548,7 +554,10 @@ setNervesEmitter((event) => {
 `trustImpliedPolicy`, `tieredPolicy`, `DEFAULT_CONSENT_POLICY`, `tofuVerifier`,
 `DEFAULT_AGENT_VERIFIER`, `prepareProfileShare`, `importProfileShare`, `prepareMissionShare`,
 `importMissionShare`, `prepareCoordination`, `importCoordination`, `grantShare`, `revokeShare`,
-`listShares`, `isGrantEffective`, `setNervesEmitter`, `emitNervesEvent`.
+`listShares`, `isGrantEffective`, `setNervesEmitter`, `emitNervesEvent`, `resolveAgentIdentity`,
+`withMigratedIdentity`, `findFriendByDid`, `MemoryAuditSink`, `FileAuditSink`, `auditPathFor`,
+`FileRosterStore`, `rostersDirFor`, `MemoryRosterStore`, `identityRosterVerifier`,
+`DEFAULT_ROSTER_VERIFIER`, `evaluateAccountMembership`.
 
 **From `@ouro.bot/friends/mcp`:** `createFriendsMcpServer`, `getToolSchemas`, `runMain` (plus the
 `McpToolSchema`, `FriendsMcpServer`, and `RunMainIo` types).
@@ -565,7 +574,9 @@ setNervesEmitter((event) => {
 identity helpers `parseDidKey` / `keyAgreementFromDidKey` / `didKeyIdentityFromEd25519` /
 `ed25519PubToDidKey` and `didWebToUrl` / `resolveDidWeb` / `parseDidDocument`; the primitives
 `sealTo` / `openSealed`, `signEnvelope` / `verifyEnvelopeSignature`, `jcsString` / `jcsBytes`, and
-the `ready` init seam (plus the `A2ATransport`, `DidResolution`, `SealedEnvelope`, `StructuredProof`,
+the `ready` init seam; and the account-roster Ed25519 verify `ed25519RosterVerifier` / `signRoster`
+(the crypto implementation of the core `RosterVerifier` seam — host-injected, so the core stays
+transport-free) (plus the `A2ATransport`, `DidResolution`, `SealedEnvelope`, `StructuredProof`,
 `ReachabilityPlan`, `FriendsAgentCard`, `DidKeyIdentity`, `DidDocument` types). The transports
 (direct A2A / relay / git op) are injected by the host — this module does no network or git itself.
 
