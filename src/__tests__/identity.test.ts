@@ -44,6 +44,26 @@ describe("resolveAgentIdentity", () => {
   it("returns {} for an undefined meta (no throw)", () => {
     expect(resolveAgentIdentity(undefined)).toEqual({})
   })
+
+  // SECURITY (finding 6, LOW — ties to finding 4): an empty-string did is NOT a did.
+  // It must never surface as a matchable identity key, on either the durable
+  // identity.did home or the legacy a2a.did hint.
+  it("treats an empty-string identity.did as no-did (omits did)", () => {
+    const r = resolveAgentIdentity(meta({ identity: { did: "" } }))
+    expect(r.did).toBeUndefined()
+  })
+
+  it("treats an empty-string identity.did as no-did but keeps other present identity fields", () => {
+    const r = resolveAgentIdentity(meta({ identity: { did: "", pinnedKey: "kX", handle: "alice" } }))
+    expect(r.did).toBeUndefined()
+    expect(r.pinnedKey).toBe("kX")
+    expect(r.handle).toBe("alice")
+  })
+
+  it("does NOT lift an empty-string legacy a2a.did (treats it as no-did)", () => {
+    const r = resolveAgentIdentity(meta({ a2a: { did: "", agentId: "peer-1" } }))
+    expect(r).toEqual({})
+  })
 })
 
 describe("withMigratedIdentity", () => {
@@ -66,6 +86,14 @@ describe("withMigratedIdentity", () => {
 
   it("returns undefined for an undefined meta (no throw)", () => {
     expect(withMigratedIdentity(undefined)).toBeUndefined()
+  })
+
+  // finding 6: an empty-string legacy a2a.did is not a real did, so there is nothing
+  // to backfill — the meta is returned unchanged (no empty-string identity.did written).
+  it("does not backfill from an empty-string a2a.did (returns the meta unchanged)", () => {
+    const input = meta({ a2a: { did: "", agentId: "peer-1" } })
+    const out = withMigratedIdentity(input)
+    expect(out?.identity).toBeUndefined()
   })
 
   it("emits friends.identity_migrated on a backfill", () => {

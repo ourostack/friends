@@ -119,4 +119,31 @@ describe("findFriendByDid", () => {
     const store = new NoListAllStore()
     expect(await findFriendByDid(store, "did:key:zAny")).toBeNull()
   })
+
+  // SECURITY (finding 4, MEDIUM): a falsy did query must never match a did-less
+  // record. Previously findFriendByDid(store, undefined|"") returned the first
+  // did-less record (undefined !== undefined is false → treated as a match), so an
+  // absent/empty query silently resolved to an unrelated peer.
+  it("returns null for an undefined did query even when did-less records exist", async () => {
+    const store = new MemoryStore([
+      agent({ id: "f-nodid" }, { bundleName: "p", familiarity: 0, sharedMissions: [], outcomes: [], a2a: { agentId: "peer-1" } }),
+    ])
+    expect(await findFriendByDid(store, undefined as unknown as string)).toBeNull()
+  })
+
+  it("returns null for an empty-string did query even when did-less records exist", async () => {
+    const store = new MemoryStore([
+      agent({ id: "f-nodid" }, { bundleName: "p", familiarity: 0, sharedMissions: [], outcomes: [], a2a: { agentId: "peer-1" } }),
+    ])
+    expect(await findFriendByDid(store, "")).toBeNull()
+  })
+
+  it("never matches a record whose RESOLVED did is empty-string, even on a real did query", async () => {
+    // A record carrying an empty-string identity.did must not be a matchable key.
+    const store = new MemoryStore([
+      agent({ id: "f-emptydid" }, { bundleName: "p", familiarity: 0, sharedMissions: [], outcomes: [], identity: { did: "" } }),
+    ])
+    expect(await findFriendByDid(store, "")).toBeNull()
+    expect(await findFriendByDid(store, "did:key:zReal")).toBeNull()
+  })
 })

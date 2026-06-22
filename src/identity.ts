@@ -25,18 +25,21 @@ export interface ResolvedAgentIdentity {
 export function resolveAgentIdentity(meta: AgentMeta | undefined): ResolvedAgentIdentity {
   if (!meta) return {}
   // Durable home wins (authoritative). Spread only the present optional fields so
-  // a partial identity ({ did } only) doesn't surface undefined keys.
+  // a partial identity ({ did } only) doesn't surface undefined keys. SECURITY
+  // (finding 6, LOW): an empty-string did is NOT a did — omit it so it can never be a
+  // matchable identity key (ties to findFriendByDid's falsy-did guard, finding 4).
   if (meta.identity) {
     const { did, pinnedKey, handle, pinnedAt } = meta.identity
     return {
-      did,
+      ...(did ? { did } : {}),
       ...(pinnedKey !== undefined ? { pinnedKey } : {}),
       ...(handle !== undefined ? { handle } : {}),
       ...(pinnedAt !== undefined ? { pinnedAt } : {}),
     }
   }
   // Migrate-on-read: lift the legacy a2a.did hint when the durable home is absent.
-  if (meta.a2a?.did !== undefined) return { did: meta.a2a.did }
+  // A falsy (absent or empty-string) hint is treated as no-did.
+  if (meta.a2a?.did) return { did: meta.a2a.did }
   return {}
 }
 
@@ -47,8 +50,9 @@ export function withMigratedIdentity(meta: AgentMeta | undefined): AgentMeta | u
   if (!meta) return undefined
   // Already carries the durable home → no clobber.
   if (meta.identity) return meta
-  // Nothing to migrate from → unchanged.
-  if (meta.a2a?.did === undefined) return meta
+  // Nothing to migrate from → unchanged. A falsy (absent or empty-string) a2a.did is
+  // not a real did to backfill (finding 6).
+  if (!meta.a2a?.did) return meta
   // Backfill identity.did from the legacy a2a.did so the next put persists forward.
   emitNervesEvent({
     component: "friends",
