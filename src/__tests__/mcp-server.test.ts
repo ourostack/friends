@@ -1741,8 +1741,8 @@ describe("mission tools/call dispatch", () => {
     expect((malformed.payload as { status: string }).status).toBe("invalid")
   })
 
-  it("import_result: lands B's deliverable on A's mission (correlated to a first-party delegation)", async () => {
-    const missionWithDelegation = missionOf({ delegations: { "req-1": { task: { requestId: "req-1", summary: "Audit auth" }, provenance: { origin: "first_party" } } } })
+  it("import_result: lands B's deliverable on A's mission (correlated to a first-party delegation whose assignee is B)", async () => {
+    const missionWithDelegation = missionOf({ delegations: { "req-1": { task: { requestId: "req-1", summary: "Audit auth" }, assignee: { agentId: "agent-b" }, provenance: { origin: "first_party" } } } })
     const missions = makeMissionStore([missionWithDelegation])
     start(ownerStore(), undefined, missions)
     const envelope = JSON.stringify({ subject: { missionKey: "PROJ-1234", title: "Ship it" }, fromAgentId: "agent-b", requestId: "req-1", result: { requestId: "req-1", summary: "Auth audited - 2 findings" }, issuedAt: NOW })
@@ -1752,6 +1752,17 @@ describe("mission tools/call dispatch", () => {
     expect(payload.ok).toBe(true)
     expect(payload.status).toBe("imported")
     expect(payload.record.importedResults!["agent-b"]["req-1"].summary).toBe("Auth audited - 2 findings")
+  })
+
+  it("import_result: assignee_mismatch when a trusted NON-assignee submits a result for a real requestId (finding 1, isError true)", async () => {
+    // A delegated req-1 to agent-b; a different trusted peer agent-c tries to inject a result.
+    const missionWithDelegation = missionOf({ delegations: { "req-1": { task: { requestId: "req-1", summary: "Audit auth" }, assignee: { agentId: "agent-b" }, provenance: { origin: "first_party" } } } })
+    const missions = makeMissionStore([missionWithDelegation])
+    start(ownerStore(), undefined, missions)
+    const envelope = JSON.stringify({ subject: { missionKey: "PROJ-1234", title: "Ship it" }, fromAgentId: "agent-c", requestId: "req-1", result: { requestId: "req-1", summary: "forged" }, issuedAt: NOW })
+    const r = await h.tool("import_result", { envelope, fromAgentId: "agent-c", trustOfSource: "family" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("assignee_mismatch")
   })
 
   it("import_result: no_delegation when the result correlates to no prior delegation (isError true)", async () => {

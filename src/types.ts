@@ -337,12 +337,18 @@ export interface MissionRecord {
   // under status/learnings/trust.
   coordination?: MissionCoordination
   // first-party delegations this agent ISSUED on this mission (gap-1, p11 inc2),
-  // keyed by the minted `requestId`. Each is the task-spec A asked B to do plus its
-  // first-party provenance. This is the correlation anchor for the result-return: when
-  // A later imports B's result, the result's `requestId` must be present HERE (A only
-  // accepts results for work it actually delegated). Additive — absent ⇒ no delegations
-  // issued (schemaVersion stays 1; legacy records read clean). NEVER touched by an import.
-  delegations?: Record<string, { task: MissionTaskSpec; provenance: NoteProvenance }>
+  // keyed by the minted `requestId`. Each is the task-spec A asked B to do, the
+  // delegated-TO agent (`assignee`), plus its first-party provenance. This is the
+  // correlation anchor for the result-return: when A later imports B's result, the
+  // result's `requestId` must be present HERE AND the result's source must equal this
+  // delegation's `assignee` (A only accepts a result for work it actually delegated, and
+  // only from the very agent it delegated TO — see importMissionResult's assignee check,
+  // security-review inc-2 finding 1). `assignee` is additive + back-tolerant: a legacy
+  // delegation record written before this field existed has no `assignee` and the importer
+  // FAILS CLOSED on it (a result for an assignee-less delegation is rejected, never landed).
+  // Additive overall — absent ⇒ no delegations issued (schemaVersion stays 1; legacy
+  // records read clean). NEVER touched by an import.
+  delegations?: Record<string, { task: MissionTaskSpec; assignee?: AgentAttribution; provenance: NoteProvenance }>
   // delegation task-specs IMPORTED from a peer's coordination request (gap-1), in a
   // QUARANTINED namespace keyed by the asserting agentId then by `requestId` (mirroring
   // `importedLearnings`). Stamped origin:"imported" + assertedBy + importedAt. Kept

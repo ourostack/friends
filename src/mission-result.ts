@@ -20,6 +20,10 @@
 //    attributed to B + stamped imported, WITHOUT touching first-party;
 //  - correlation honesty: a result whose requestId matches NO prior first-party delegation
 //    on A is REJECTED (no_delegation) — A only accepts results for work it delegated;
+//  - assignee honesty (security-review inc-2 finding 1): a result whose source is NOT the
+//    agent A delegated TO (delegation.assignee.agentId !== fromAgentId) is REJECTED
+//    (assignee_mismatch), even from a trusted peer with the right requestId; a legacy
+//    delegation with no recorded assignee FAILS CLOSED;
 //  - NO seeding: an unknown mission → no_mission (a result never creates a mission);
 //  - the source agent's trust CAPS acceptance (a stranger/over-trust source writes nothing),
 //    checked BEFORE correlation;
@@ -147,11 +151,12 @@ export type ImportMissionResultStatus =
   | "imported"
   | "no_mission"
   | "no_delegation"
+  | "assignee_mismatch"
   | "untrusted_source"
 
 export type ImportMissionResultResult =
   | { ok: true; status: "imported"; record: MissionRecord }
-  | { ok: false; status: "no_mission" | "no_delegation" | "untrusted_source" }
+  | { ok: false; status: "no_mission" | "no_delegation" | "assignee_mismatch" | "untrusted_source" }
 
 export interface ImportMissionResultOptions {
   /** Authentication seam. Defaults to TOFU. Authorization (trust) is still applied
@@ -197,6 +202,10 @@ function mergeImportedResult(
  *      never creates a mission);
  *  (3) the result's `requestId` not present in the record's FIRST-PARTY `delegations`
  *      (A never delegated this) → `no_delegation` — correlation honesty;
+ *  (3b) the matched delegation's recorded `assignee` is not the result's source
+ *      (`delegation.assignee.agentId !== fromAgentId`) → `assignee_mismatch` — assignee
+ *      honesty (security-review inc-2 finding 1). FAILS CLOSED on a legacy delegation with
+ *      no recorded assignee. A mismatch writes NOTHING (not even quarantined);
  *  (4) otherwise land under `importedResults[agentId][requestId]` (dedupe on replay),
  *      stamped imported + attributed + importedAt, NEVER touching first-party
  *      `learnings`/`notes`/`status`/`delegations`/`results`, NEVER recomputing
@@ -233,8 +242,29 @@ export async function importMissionResult(
 
   // (3) Correlation honesty — the requestId must name a delegation THIS agent issued
   // first-party (A only accepts results for work it actually delegated).
-  if (!existing.delegations || !existing.delegations[input.envelope.requestId]) {
+  const delegation = existing.delegations?.[input.envelope.requestId]
+  if (!delegation) {
     return { ok: false, status: "no_delegation" }
+  }
+
+  // (3b) Assignee honesty (security-review inc-2 finding 1) — the result's SOURCE must be
+  // the very agent A delegated TO. The requestId being delegated is NOT enough: a peer C
+  // that A trusts (≥ the cap) who learned a requestId A delegated to a DIFFERENT agent B
+  // could otherwise inject a forged result. FAILS CLOSED on a legacy/orphan delegation with
+  // no recorded assignee (reject, never land). A mismatch writes NOTHING — not even
+  // quarantined.
+  if (delegation.assignee?.agentId !== input.fromAgentId) {
+    emitNervesEvent({
+      component: "friends",
+      event: "friends.mission_result_refused",
+      message: "refused mission result — source is not the delegation's assignee",
+      meta: {
+        fromAgentId: input.fromAgentId,
+        requestId: input.envelope.requestId,
+        expectedAssignee: delegation.assignee?.agentId ?? null,
+      },
+    })
+    return { ok: false, status: "assignee_mismatch" }
   }
 
   // (4) Land the deliverable quarantined + attributed, never touching first-party, never

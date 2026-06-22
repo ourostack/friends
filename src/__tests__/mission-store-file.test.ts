@@ -213,13 +213,17 @@ describe("FileMissionStore", () => {
     expect(loaded?.coordination?.log[0].intent).toBe("accept")
   })
 
-  it("normalize: preserves first-party delegations through a round-trip (gap-1)", async () => {
+  it("normalize: preserves first-party delegations (incl. the assignee) through a round-trip (gap-1 + finding 1)", async () => {
     dir = mkdtempSync(join(tmpdir(), "friends-missions-"))
     const store = new FileMissionStore(missionsDirFor(dir))
-    await store.put("m-1", mission({ delegations: { "req-1": { task: { requestId: "req-1", summary: "Audit auth" }, provenance: { origin: "first_party" } } } }))
+    await store.put("m-1", mission({ delegations: { "req-1": { task: { requestId: "req-1", summary: "Audit auth" }, assignee: { agentId: "agent-b" }, provenance: { origin: "first_party" } } } }))
     const loaded = await store.get("m-1")
     expect(loaded?.delegations?.["req-1"].task.summary).toBe("Audit auth")
     expect(loaded?.delegations?.["req-1"].provenance.origin).toBe("first_party")
+    // The assignee MUST survive the file round-trip — the result-import enforcement
+    // (security-review inc-2 finding 1) reads it; if the file store dropped it, a
+    // file-backed deployment would fail closed on every legitimate result.
+    expect(loaded?.delegations?.["req-1"].assignee).toEqual({ agentId: "agent-b" })
   })
 
   it("normalize: preserves imported delegations through a round-trip (gap-1)", async () => {

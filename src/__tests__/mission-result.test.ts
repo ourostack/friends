@@ -124,7 +124,9 @@ function missionOnB(overrides: Partial<MissionRecord> = {}): MissionRecord {
 }
 
 /** A mission on A's side, carrying A's FIRST-PARTY delegation under delegations[requestId]
- * (so A's import of B's result for that requestId correlates). */
+ * (so A's import of B's result for that requestId correlates). The delegation records its
+ * `assignee` — the agent A delegated TO (agent-b by default) — which the result import now
+ * enforces the source against (security-review inc-2 finding 1). */
 function missionOnA(requestId = "req-1", overrides: Partial<MissionRecord> = {}): MissionRecord {
   return {
     id: "m-on-a",
@@ -134,7 +136,7 @@ function missionOnA(requestId = "req-1", overrides: Partial<MissionRecord> = {})
     participants: [{ agentId: "agent-a" }],
     outcomes: [],
     learnings: { gotcha: { value: "A's own learning", savedAt: NOW, shareable: false, provenance: { origin: "first_party" } } },
-    delegations: { [requestId]: { task: { requestId, summary: "Audit the auth module" }, provenance: { origin: "first_party" } } },
+    delegations: { [requestId]: { task: { requestId, summary: "Audit the auth module" }, assignee: { agentId: "agent-b" }, provenance: { origin: "first_party" } } },
     createdAt: NOW,
     updatedAt: NOW,
     schemaVersion: 1,
@@ -442,8 +444,8 @@ describe("importMissionResult — consumer (the non-clobbering merge)", () => {
   it("two DIFFERENT requestIds from B coexist under importedResults[B] (each correlated to its own delegation)", async () => {
     const twoDelegations = missionOnA("req-1", {
       delegations: {
-        "req-1": { task: { requestId: "req-1", summary: "task 1" }, provenance: { origin: "first_party" } },
-        "req-2": { task: { requestId: "req-2", summary: "task 2" }, provenance: { origin: "first_party" } },
+        "req-1": { task: { requestId: "req-1", summary: "task 1" }, assignee: { agentId: "agent-b" }, provenance: { origin: "first_party" } },
+        "req-2": { task: { requestId: "req-2", summary: "task 2" }, assignee: { agentId: "agent-b" }, provenance: { origin: "first_party" } },
       },
     })
     const missions = new MemoryMissionStore([twoDelegations])
@@ -471,10 +473,108 @@ describe("importMissionResult — consumer (the non-clobbering merge)", () => {
   })
 })
 
+// ════════════════════════════════════════════════════════════════════════════
+// CONSUMER — cross-delegation result injection (security-review inc-2 finding 1)
+//
+// The hole the example battery missed: importMissionResult verified the result's
+// requestId WAS delegated, but NOT that the result's SOURCE is the agent it was
+// delegated TO. A peer C the victim trusts (≥ acquaintance) who learns a requestId R the
+// victim delegated to a DIFFERENT agent B could inject a forged result for R. The fix
+// PERSISTS the assignee on the delegation (the producer) and ENFORCES
+// `delegation.assignee.agentId === fromAgentId` here. A non-assignee — even a TRUSTED
+// one, even with the RIGHT requestId — is rejected with `assignee_mismatch` and writes
+// NOTHING (not even quarantined). A legacy delegation with no recorded assignee FAILS
+// CLOSED (rejected), never falls through.
+// ════════════════════════════════════════════════════════════════════════════
+
+describe("importMissionResult — cross-delegation assignee enforcement (finding 1)", () => {
+  it("a TRUSTED non-assignee (agent-c, family) submitting a result for a REAL requestId is REJECTED (assignee_mismatch), writes nothing", async () => {
+    // A delegated req-1 to agent-b. A different, also-trusted peer agent-c learns req-1 and
+    // tries to inject a forged result for it. This is the exact vector the battery missed.
+    const missions = new MemoryMissionStore([missionOnA("req-1")]) // assignee = agent-b
+    const result = await importMissionResult(missions, {
+      envelope: resultEnvelope({ fromAgentId: "agent-c", result: { requestId: "req-1", summary: "forged deliverable" } }),
+      fromAgentId: "agent-c",
+      trustOfSource: "family", // fully trusted — the ONLY thing stopping it is the assignee check
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("unreachable")
+    expect(result.status).toBe("assignee_mismatch")
+    const stored = await missions.get("m-on-a")
+    // the forged result did NOT land — not under agent-c, not anywhere.
+    expect(stored!.importedResults).toBeUndefined()
+    expect(missions.putCalls).toBe(0)
+  })
+
+  it("the ACTUAL assignee (agent-b) submitting the result is ACCEPTED (happy path, source === assignee)", async () => {
+    const missions = new MemoryMissionStore([missionOnA("req-1")]) // assignee = agent-b
+    const result = await importMissionResult(missions, {
+      envelope: resultEnvelope(), // fromAgentId agent-b
+      fromAgentId: "agent-b",
+      trustOfSource: "friend",
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error("unreachable")
+    expect(result.status).toBe("imported")
+    const stored = await missions.get("m-on-a")
+    expect(stored!.importedResults!["agent-b"]!["req-1"]).toBeDefined()
+  })
+
+  it("a LEGACY delegation with NO recorded assignee FAILS CLOSED (assignee_mismatch) — never falls through", async () => {
+    // A pre-existing/orphan delegation record written before `assignee` existed: the
+    // correlation (requestId present) passes, but with no assignee to match against the
+    // importer must REJECT, not land.
+    const legacy = missionOnA("req-1", {
+      delegations: { "req-1": { task: { requestId: "req-1", summary: "legacy task" }, provenance: { origin: "first_party" } } },
+    })
+    const missions = new MemoryMissionStore([legacy])
+    const result = await importMissionResult(missions, {
+      envelope: resultEnvelope(), // fromAgentId agent-b — even the "right" agent can't satisfy a missing assignee
+      fromAgentId: "agent-b",
+      trustOfSource: "friend",
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("unreachable")
+    expect(result.status).toBe("assignee_mismatch")
+    const stored = await missions.get("m-on-a")
+    expect(stored!.importedResults).toBeUndefined()
+    expect(missions.putCalls).toBe(0)
+  })
+
+  it("the assignee check is applied AFTER the no_delegation check (an orphan requestId is still no_delegation, not assignee_mismatch)", async () => {
+    // Ordering proof: a requestId with no delegation at all reports no_delegation (the
+    // correlation gate fires first); the assignee check only governs a real delegation.
+    const missions = new MemoryMissionStore([missionOnA("req-1")])
+    const result = await importMissionResult(missions, {
+      envelope: resultEnvelope({ requestId: "req-UNKNOWN", result: { requestId: "req-UNKNOWN", summary: "x" } }),
+      fromAgentId: "agent-b",
+      trustOfSource: "friend",
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("unreachable")
+    expect(result.status).toBe("no_delegation")
+  })
+
+  it("the trust cap still fires BEFORE the assignee check (a stranger non-assignee is untrusted_source, not assignee_mismatch)", async () => {
+    // A stranger is refused at the cap regardless of assignee — the cap is the outermost gate.
+    const missions = new MemoryMissionStore([missionOnA("req-1")])
+    const result = await importMissionResult(missions, {
+      envelope: resultEnvelope({ fromAgentId: "agent-c", result: { requestId: "req-1", summary: "forged" } }),
+      fromAgentId: "agent-c",
+      trustOfSource: "stranger",
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("unreachable")
+    expect(result.status).toBe("untrusted_source")
+  })
+})
+
 // Type-level: the PINNED shapes exist.
 const _r: MissionResult = { requestId: "x", summary: "y" }
 const _imp: ImportMissionResultResult = { ok: false, status: "no_delegation" }
+const _mismatch: ImportMissionResultResult = { ok: false, status: "assignee_mismatch" }
 const _spec: MissionTaskSpec = { requestId: "x", summary: "y" }
 void _r
 void _imp
+void _mismatch
 void _spec

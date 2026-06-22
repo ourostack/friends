@@ -443,6 +443,11 @@ describe("prepareCoordination — task-spec (gap-1)", () => {
     expect(stored!.delegations![requestId].task.requestId).toBe(requestId)
     expect(stored!.delegations![requestId].task.summary).toBe("Audit the auth module")
     expect(stored!.delegations![requestId].provenance).toEqual({ origin: "first_party" })
+    // PERSIST THE ASSIGNEE (security-review inc-2 finding 1): the delegation records the
+    // agent it was delegated TO (toAgentId), so importMissionResult can check a returned
+    // result's source against it. Without this the result-return can't tell who was
+    // delegated TO, and a trusted non-assignee could inject a forged result.
+    expect(stored!.delegations![requestId].assignee).toEqual({ agentId: "agent-b" })
   })
 
   it("a task on a NON-request intent (offer) is ignored — no task on the envelope, no delegation recorded", async () => {

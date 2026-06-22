@@ -133,9 +133,10 @@ function holdsAssignment(record: MissionRecord, selfAgentId: string): boolean {
  * step: always append the intent to `coordination.log`; on an `accept`, also claim
  * the assignment for self (the accepter is taking it). No other intent moves the
  * producer's `assignee`. When a `taskSpec` is supplied (a request carrying a task,
- * gap-1), ALSO record it first-party under `delegations[requestId]` — the correlation
- * anchor the result-return matches against. Mirrors how recordMission stamps
- * first-party provenance. */
+ * gap-1), ALSO record it first-party under `delegations[requestId]` — the task-spec, the
+ * delegated-TO `assignee` (`input.toAgentId`), and first-party provenance. The assignee is
+ * the anchor importMissionResult checks the result's source against (security-review inc-2
+ * finding 1). Mirrors how recordMission stamps first-party provenance. */
 function applyOutgoingIntent(
   record: MissionRecord,
   input: PrepareCoordinationInput,
@@ -154,9 +155,17 @@ function applyOutgoingIntent(
     input.intent === "accept"
       ? { ...withLog, assignee: { agentId: input.selfAgentId }, assignedAt: now }
       : withLog
-  // gap-1: record the issued delegation first-party under delegations[requestId].
+  // gap-1: record the issued delegation first-party under delegations[requestId]. PERSIST
+  // the ASSIGNEE — the agent this task is delegated TO (input.toAgentId) — alongside the
+  // task-spec (security-review inc-2 finding 1). This is the anchor importMissionResult
+  // checks the result's SOURCE against: A only accepts a result for this requestId from the
+  // very agent it delegated TO. Without it, a trusted non-assignee who learned the
+  // requestId could inject a forged result.
   const delegations: MissionRecord["delegations"] = taskSpec
-    ? { ...(record.delegations ?? {}), [taskSpec.requestId]: { task: taskSpec, provenance: { origin: "first_party" } } }
+    ? {
+        ...(record.delegations ?? {}),
+        [taskSpec.requestId]: { task: taskSpec, assignee: { agentId: input.toAgentId }, provenance: { origin: "first_party" } },
+      }
     : record.delegations
   return {
     ...record,
