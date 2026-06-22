@@ -158,7 +158,7 @@ function seedOwner(store: FriendStore): FriendRecord {
 }
 
 describe("getToolSchemas", () => {
-  it("returns exactly the 30 tools with object input schemas", () => {
+  it("returns exactly the 32 tools with object input schemas", () => {
     const schemas = getToolSchemas()
     const names = schemas.map((s) => s.name).sort()
     expect(names).toEqual(
@@ -176,6 +176,7 @@ describe("getToolSchemas", () => {
         "import_coordination",
         "import_mission",
         "import_profile",
+        "import_result",
         "link_identity",
         "list_friends",
         "list_missions",
@@ -187,6 +188,7 @@ describe("getToolSchemas", () => {
         "resolve_room",
         "revoke_share",
         "save_note",
+        "send_result",
         "set_trust",
         "share_mission",
         "share_profile",
@@ -195,7 +197,7 @@ describe("getToolSchemas", () => {
         "whoami",
       ].sort(),
     )
-    expect(schemas).toHaveLength(30)
+    expect(schemas).toHaveLength(32)
     for (const s of schemas) {
       expect(s.inputSchema.type).toBe("object")
       expect(typeof s.description).toBe("string")
@@ -237,7 +239,7 @@ describe("protocol layer", () => {
     const server = createFriendsMcpServer({ store: makeStore(), stdin: h.stdin, stdout: h.stdout })
     server.start()
     const res = await h.call({ jsonrpc: "2.0", id: 2, method: "tools/list" })
-    expect((res.result as { tools: unknown[] }).tools).toHaveLength(30)
+    expect((res.result as { tools: unknown[] }).tools).toHaveLength(32)
     server.stop()
   })
 
@@ -1633,6 +1635,109 @@ describe("mission tools/call dispatch", () => {
     start(ownerStore(), undefined, missions)
     const envelope = { subject: { missionKey: "PROJ-1234", title: "Ship it" }, fromAgentId: "agent-a", scope: "mission", learnings: [], issuedAt: NOW }
     const r = await h.tool("import_mission", { envelope, fromAgentId: "agent-a", trustOfSource: "stranger" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("untrusted_source")
+  })
+
+  // ── send_result (gap-2: prepareMissionResult) ──
+
+  it("send_result: reports unsupported when no mission store is wired", async () => {
+    start(ownerStore(), makeGrantStore()) // grants but no missions
+    const r = await h.tool("send_result", { missionId: "m-1", toAgentId: "agent-a", requestId: "req-1", result: JSON.stringify({ summary: "done" }) })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("unsupported")
+  })
+
+  it("send_result: reports unsupported when no grant store is wired", async () => {
+    const missions = makeMissionStore([missionOf()])
+    start(ownerStore(), undefined, missions) // missions but no grants
+    const r = await h.tool("send_result", { missionId: "m-1", toAgentId: "agent-a", requestId: "req-1", result: JSON.stringify({ summary: "done" }) })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("unsupported")
+  })
+
+  it("send_result: no_consent for an unknown (stranger) recipient", async () => {
+    const missions = makeMissionStore([missionOf()])
+    start(ownerStore(), makeGrantStore(), missions)
+    const r = await h.tool("send_result", { missionId: "m-1", toAgentId: "agent-a", requestId: "req-1", result: JSON.stringify({ summary: "done" }) })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("no_consent")
+  })
+
+  it("send_result: produces a result envelope attributed to self (from whoami), named by missionKey", async () => {
+    const missions = makeMissionStore([missionOf()])
+    // owner is family → whoami self; a friend recipient record for agent-a so coordinate consents at the identity tier.
+    const store = makeStore([
+      ownerRecord(),
+      { ...ownerRecord(), id: "rec-a", name: "Delegator", role: "agent-peer", kind: "agent", trustLevel: "friend", externalIds: [{ provider: "a2a-agent", externalId: "agent-a", linkedAt: NOW }] },
+    ])
+    start(store, makeGrantStore(), missions)
+    const r = await h.tool("send_result", { missionId: "m-1", toAgentId: "agent-a", requestId: "req-1", result: JSON.stringify({ summary: "Auth audited", outputs: { findings: "2" } }) })
+    expect(r.isError).toBe(false)
+    const payload = r.payload as { ok: boolean; envelope: { subject: { missionKey: string }; fromAgentId: string; requestId: string; result: { summary: string } } }
+    expect(payload.ok).toBe(true)
+    expect(payload.envelope.subject.missionKey).toBe("PROJ-1234")
+    expect(payload.envelope.fromAgentId).toBe("owner-1") // self from whoami
+    expect(payload.envelope.requestId).toBe("req-1")
+    expect(payload.envelope.result.summary).toBe("Auth audited")
+  })
+
+  it("send_result: not_found when the missionId does not resolve", async () => {
+    const missions = makeMissionStore() // empty
+    start(ownerStore(), makeGrantStore(), missions)
+    const r = await h.tool("send_result", { missionId: "ghost", toAgentId: "agent-a", requestId: "req-1", result: JSON.stringify({ summary: "x" }) })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("not_found")
+  })
+
+  // ── import_result (gap-2: importMissionResult) ──
+
+  it("import_result: reports unsupported with no mission store", async () => {
+    start(ownerStore())
+    const envelope = { subject: { missionKey: "PROJ-1234", title: "T" }, fromAgentId: "agent-b", requestId: "req-1", result: { requestId: "req-1", summary: "done" }, issuedAt: NOW }
+    const r = await h.tool("import_result", { envelope, fromAgentId: "agent-b", trustOfSource: "friend" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("unsupported")
+  })
+
+  it("import_result: rejects a missing/malformed envelope", async () => {
+    const missions = makeMissionStore()
+    start(ownerStore(), undefined, missions)
+    const missing = await h.tool("import_result", { fromAgentId: "agent-b", trustOfSource: "friend" })
+    expect(missing.isError).toBe(true)
+    expect((missing.payload as { status: string }).status).toBe("invalid")
+    const malformed = await h.tool("import_result", { envelope: "{bad json", fromAgentId: "agent-b", trustOfSource: "friend" })
+    expect(malformed.isError).toBe(true)
+    expect((malformed.payload as { status: string }).status).toBe("invalid")
+  })
+
+  it("import_result: lands B's deliverable on A's mission (correlated to a first-party delegation)", async () => {
+    const missionWithDelegation = missionOf({ delegations: { "req-1": { task: { requestId: "req-1", summary: "Audit auth" }, provenance: { origin: "first_party" } } } })
+    const missions = makeMissionStore([missionWithDelegation])
+    start(ownerStore(), undefined, missions)
+    const envelope = JSON.stringify({ subject: { missionKey: "PROJ-1234", title: "Ship it" }, fromAgentId: "agent-b", requestId: "req-1", result: { requestId: "req-1", summary: "Auth audited — 2 findings" }, issuedAt: NOW })
+    const r = await h.tool("import_result", { envelope, fromAgentId: "agent-b", trustOfSource: "friend" })
+    expect(r.isError).toBe(false)
+    const payload = r.payload as { ok: boolean; status: string; record: MissionRecord }
+    expect(payload.ok).toBe(true)
+    expect(payload.status).toBe("imported")
+    expect(payload.record.importedResults!["agent-b"]["req-1"].summary).toBe("Auth audited — 2 findings")
+  })
+
+  it("import_result: no_delegation when the result correlates to no prior delegation (isError true)", async () => {
+    const missions = makeMissionStore([missionOf()]) // no delegations
+    start(ownerStore(), undefined, missions)
+    const envelope = JSON.stringify({ subject: { missionKey: "PROJ-1234", title: "Ship it" }, fromAgentId: "agent-b", requestId: "req-1", result: { requestId: "req-1", summary: "x" }, issuedAt: NOW })
+    const r = await h.tool("import_result", { envelope, fromAgentId: "agent-b", trustOfSource: "friend" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("no_delegation")
+  })
+
+  it("import_result: untrusted_source for a stranger source (isError true)", async () => {
+    const missions = makeMissionStore([missionOf({ delegations: { "req-1": { task: { requestId: "req-1", summary: "t" }, provenance: { origin: "first_party" } } } })])
+    start(ownerStore(), undefined, missions)
+    const envelope = { subject: { missionKey: "PROJ-1234", title: "Ship it" }, fromAgentId: "agent-b", requestId: "req-1", result: { requestId: "req-1", summary: "x" }, issuedAt: NOW }
+    const r = await h.tool("import_result", { envelope, fromAgentId: "agent-b", trustOfSource: "stranger" })
     expect(r.isError).toBe(true)
     expect((r.payload as { status: string }).status).toBe("untrusted_source")
   })
