@@ -46,6 +46,7 @@
     "example:cross-agent-mission-memory": "npm run build && tsx examples/cross-agent-mission-memory.ts",
     "example:cross-agent-standing": "npm run build && tsx examples/cross-agent-standing.ts",
     "example:cross-agent-coordination": "npm run build && tsx examples/cross-agent-coordination.ts",
+    "example:cross-agent-delegation": "npm run build && tsx examples/cross-agent-delegation.ts",
     "example:cross-agent-a2a-relay": "npm run build && tsx examples/cross-agent-a2a-relay.ts",
     "release:bump": "node scripts/release-bump.cjs",
     "release:preflight": "node scripts/release-preflight.cjs",
