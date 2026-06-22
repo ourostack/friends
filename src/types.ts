@@ -194,6 +194,26 @@ export interface ImportedLearning {
   originallyAssertedBy?: AgentAttribution
 }
 
+// -- Mission Task Spec --
+// The structured "what B is being asked to do" carried on a delegation REQUEST
+// (gap-1, p11 inc2). A delegation request IS a coordination `request` — so this rides
+// the EXISTING CoordinationEnvelope as an optional `task?` field (like `proposedAssignee?`
+// rides only `handoff`), reusing the "coordinate" identity-tier scope + the consent gate
+// + the trust cap + the append-only log already there. `requestId` is the correlation key
+// the eventual result-return (gap-2) matches against — minted by the producer, preserved
+// through the import, and echoed on the result envelope. Additive; absent ⇒ a plain
+// coordination request exactly as before.
+export interface MissionTaskSpec {
+  /** Correlation key the result-return matches (PINNED). Minted by the producer. */
+  requestId: string
+  /** What B is being asked to do (the headline ask). */
+  summary: string
+  /** Optional longer brief. */
+  details?: string
+  /** Optional structured inputs. */
+  inputs?: Record<string, string>
+}
+
 // -- Coordination Intent --
 // The coordination verb set (brick 5) — five leaves of one closed union, mirroring
 // how `ShareScope` and the transport `kind` are closed unions with a guard. A
@@ -274,6 +294,19 @@ export interface MissionRecord {
   // absent ⇒ unclaimed). The ONLY persisted coordination effect; never load-bearing
   // under status/learnings/trust.
   coordination?: MissionCoordination
+  // first-party delegations this agent ISSUED on this mission (gap-1, p11 inc2),
+  // keyed by the minted `requestId`. Each is the task-spec A asked B to do plus its
+  // first-party provenance. This is the correlation anchor for the result-return: when
+  // A later imports B's result, the result's `requestId` must be present HERE (A only
+  // accepts results for work it actually delegated). Additive — absent ⇒ no delegations
+  // issued (schemaVersion stays 1; legacy records read clean). NEVER touched by an import.
+  delegations?: Record<string, { task: MissionTaskSpec; provenance: NoteProvenance }>
+  // delegation task-specs IMPORTED from a peer's coordination request (gap-1), in a
+  // QUARANTINED namespace keyed by the asserting agentId then by `requestId` (mirroring
+  // `importedLearnings`). Stamped origin:"imported" + assertedBy + importedAt. Kept
+  // structurally apart from first-party `delegations` so an import can never masquerade as
+  // a delegation THIS agent issued. Additive — absent until something is imported.
+  importedDelegations?: Record<string, Record<string, { task: MissionTaskSpec; provenance: NoteProvenance }>>
   createdAt: string                                // ISO date
   updatedAt: string
   schemaVersion: number

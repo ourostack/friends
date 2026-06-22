@@ -37,6 +37,7 @@ import type {
   CoordinationLogEntry,
   MissionCoordination,
   MissionRecord,
+  MissionTaskSpec,
   TrustLevel,
 } from "./types"
 import type { ConsentPolicy, ConsentRecipient } from "./consent"
@@ -67,6 +68,12 @@ export interface CoordinationEnvelope {
    * PROPOSES as the new assignee (named by join-key agentId). The receiver's own
    * accept is what actually sets it — a handoff never forces an assignment. */
   proposedAssignee?: AgentAttribution
+  /** The delegation task-spec, meaningful ONLY on intent:"request" (gap-1, p11 inc2):
+   * the structured "what B is being asked to do", carrying the minted `requestId` the
+   * result-return correlates against. Present only when the producer was given a task on
+   * a request; a plain coordination request omits it (back-compat). Mirrors how
+   * `proposedAssignee` rides only `handoff`. */
+  task?: MissionTaskSpec
   /** Opaque, verifier-specific proof slot. The TOFU verifier ignores it. */
   proof?: string
   issuedAt: string
@@ -99,6 +106,12 @@ export interface PrepareCoordinationInput {
   /** This agent's own join-key agentId — the asserter of the first-party log entry
    * (and, on an `accept`, the assignee it claims for itself). */
   selfAgentId: string
+  /** Optional delegation task-spec (gap-1, p11 inc2), meaningful ONLY on
+   * intent:"request". When provided on a request, the producer MINTS a `requestId`,
+   * stamps the full `MissionTaskSpec` on the envelope's `task`, and records it first-party
+   * under the mission's `delegations[requestId]`. Ignored on any non-request intent.
+   * Absent ⇒ a plain coordination request, byte-identical to today (back-compat). */
+  task?: { summary: string; details?: string; inputs?: Record<string, string> }
   /** Optional proof to stamp on the envelope (for a non-TOFU recipient verifier). */
   proof?: string
 }
@@ -119,11 +132,15 @@ function holdsAssignment(record: MissionRecord, selfAgentId: string): boolean {
 /** Apply the OUTGOING intent to the producer's own mission record as a first-party
  * step: always append the intent to `coordination.log`; on an `accept`, also claim
  * the assignment for self (the accepter is taking it). No other intent moves the
- * producer's `assignee`. Mirrors how recordMission stamps first-party provenance. */
+ * producer's `assignee`. When a `taskSpec` is supplied (a request carrying a task,
+ * gap-1), ALSO record it first-party under `delegations[requestId]` — the correlation
+ * anchor the result-return matches against. Mirrors how recordMission stamps
+ * first-party provenance. */
 function applyOutgoingIntent(
   record: MissionRecord,
   input: PrepareCoordinationInput,
   now: string,
+  taskSpec: MissionTaskSpec | undefined,
 ): MissionRecord {
   const entry: CoordinationLogEntry = {
     intent: input.intent,
@@ -137,7 +154,30 @@ function applyOutgoingIntent(
     input.intent === "accept"
       ? { ...withLog, assignee: { agentId: input.selfAgentId }, assignedAt: now }
       : withLog
-  return { ...record, coordination, updatedAt: now }
+  // gap-1: record the issued delegation first-party under delegations[requestId].
+  const delegations: MissionRecord["delegations"] = taskSpec
+    ? { ...(record.delegations ?? {}), [taskSpec.requestId]: { task: taskSpec, provenance: { origin: "first_party" } } }
+    : record.delegations
+  return {
+    ...record,
+    coordination,
+    ...(delegations ? { delegations } : {}),
+    updatedAt: now,
+  }
+}
+
+/** Build the MissionTaskSpec for a request carrying a task (gap-1): mint the
+ * `requestId` and carry the optional details/inputs only when present. Returns undefined
+ * when there is no task to attach, or the intent is not a request (a task on any other
+ * intent is ignored). */
+function buildTaskSpec(input: PrepareCoordinationInput): MissionTaskSpec | undefined {
+  if (input.intent !== "request" || input.task === undefined) return undefined
+  return {
+    requestId: randomUUID(),
+    summary: input.task.summary,
+    ...(input.task.details !== undefined ? { details: input.task.details } : {}),
+    ...(input.task.inputs !== undefined ? { inputs: input.task.inputs } : {}),
+  }
 }
 
 /**
@@ -187,6 +227,10 @@ export async function prepareCoordination(
   }
 
   const now = new Date().toISOString()
+  // gap-1: a request carrying a task mints a requestId + a MissionTaskSpec (undefined on
+  // any non-request intent, or when no task was given). Minted ONCE so the envelope's
+  // task and the first-party delegations[requestId] share the same correlation key.
+  const taskSpec = buildTaskSpec(input)
   const envelope: CoordinationEnvelope = {
     subject: { missionKey: record.missionKey, title: record.title },
     fromAgentId: input.selfAgentId,
@@ -196,12 +240,14 @@ export async function prepareCoordination(
     ...(input.intent === "handoff" && input.proposedAssignee !== undefined
       ? { proposedAssignee: input.proposedAssignee }
       : {}),
+    ...(taskSpec ? { task: taskSpec } : {}),
     ...(input.proof !== undefined ? { proof: input.proof } : {}),
   }
 
   // Record the outgoing intent on the producer's own mission (first-party), so the
-  // sender's record reflects "I asked / I offered / I accepted".
-  const updated = applyOutgoingIntent(record, input, now)
+  // sender's record reflects "I asked / I offered / I accepted" — and, for a request
+  // with a task, the issued delegation under delegations[requestId].
+  const updated = applyOutgoingIntent(record, input, now, taskSpec)
   await missions.put(updated.id, updated)
 
   emitNervesEvent({
