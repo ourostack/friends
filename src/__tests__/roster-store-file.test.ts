@@ -106,6 +106,48 @@ describe("FileRosterStore", () => {
     expect(existsSync(join(rostersPath, "acct-1.roster.json"))).toBe(true)
     expect(existsSync(join(rostersPath, "acct-1.pin.json"))).toBe(true)
   })
+
+  // SECURITY (finding 8, LOW): a wire-influenced accountId must not be able to escape
+  // the _rosters/ dir via path traversal. The accountId is interpolated into the
+  // `<accountId>.roster.json` / `.pin.json` filename, so "../evil" would otherwise
+  // write/read OUTSIDE the rosters dir.
+  describe("path-traversal guard", () => {
+    const TRAVERSALS = ["../evil", "..", "a/b", "a\\b", "/abs", ".", "foo/../bar", ""]
+
+    it("rejects a '../evil' accountId on every method (read + write, roster + pin)", async () => {
+      dir = mkdtempSync(join(tmpdir(), "friends-rosters-"))
+      const store = new FileRosterStore(rostersDirFor(dir))
+      await expect(store.getRoster("../evil")).rejects.toThrow(/accountId/)
+      await expect(store.getPin("../evil")).rejects.toThrow(/accountId/)
+      await expect(store.putRoster(roster({ accountId: "../evil" }))).rejects.toThrow(/accountId/)
+      await expect(store.putPin(pin({ accountId: "../evil" }))).rejects.toThrow(/accountId/)
+    })
+
+    it("rejects a range of traversal / separator / empty accountIds", async () => {
+      dir = mkdtempSync(join(tmpdir(), "friends-rosters-"))
+      const store = new FileRosterStore(rostersDirFor(dir))
+      for (const bad of TRAVERSALS) {
+        await expect(store.getRoster(bad)).rejects.toThrow(/accountId/)
+      }
+    })
+
+    it("does NOT write any file outside the rosters dir for a traversal accountId", async () => {
+      dir = mkdtempSync(join(tmpdir(), "friends-rosters-"))
+      const rostersPath = rostersDirFor(dir)
+      const store = new FileRosterStore(rostersPath)
+      // The escape target would be `<dir>/evil.roster.json` (one level up from _rosters).
+      const escaped = join(dir, "evil.roster.json")
+      await expect(store.putRoster(roster({ accountId: "../evil" }))).rejects.toThrow()
+      expect(existsSync(escaped)).toBe(false)
+    })
+
+    it("still accepts a normal allowlisted accountId (alphanumerics, hyphen, underscore, dot)", async () => {
+      dir = mkdtempSync(join(tmpdir(), "friends-rosters-"))
+      const store = new FileRosterStore(rostersDirFor(dir))
+      await store.putRoster(roster({ accountId: "acct_OK-1.v2" }))
+      expect((await store.getRoster("acct_OK-1.v2"))?.accountId).toBe("acct_OK-1.v2")
+    })
+  })
 })
 
 describe("MemoryRosterStore", () => {
