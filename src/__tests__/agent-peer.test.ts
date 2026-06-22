@@ -75,7 +75,9 @@ describe("upsertAgentPeer — new peer", () => {
     expect(record.name).toBe("PeerBot")
     expect(record.role).toBe("agent-peer")
     expect(record.kind).toBe("agent")
-    expect(record.trustLevel).toBe("acquaintance")
+    // Bug A: a cold peer with no explicit trustLevel now defaults to stranger
+    // (safe-by-default), not acquaintance.
+    expect(record.trustLevel).toBe("stranger")
     expect(record.agentMeta?.bundleName).toBe("PeerBot")
     expect(record.agentMeta?.familiarity).toBe(0)
     expect(record.agentMeta?.sharedMissions).toEqual([])
