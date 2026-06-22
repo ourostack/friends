@@ -10,7 +10,7 @@ import { getChannelCapabilities } from "./channel"
 import { emitNervesEvent } from "./observability"
 import type { RosterStore } from "./roster-store"
 import type { RosterVerifier } from "./roster-verifier"
-import { evaluateAccountMembership } from "./account-roster"
+import { evaluateAccountMembership, verifiedCandidate } from "./account-roster"
 
 /** Optional roster context for a cold-contact resolution (Bug C). When supplied AND
  * the candidate's `did` is a key-verified member of the pinned account roster, the
@@ -22,7 +22,16 @@ import { evaluateAccountMembership } from "./account-roster"
 export interface FriendResolverRosterContext {
   store: RosterStore
   accountId: string
+  /** The peer's did. PRECONDITION (finding 2): the host has already authenticated
+   * that the peer controls this did (the a2a-client sealed-envelope gate runs
+   * `DidVerifier` before resolution). The resolver wraps it in a `VerifiedCandidate`
+   * on the caller's behalf — so only seed this from a verified inbound identity, never
+   * an unauthenticated, peer-claimed string. */
   candidateDid: string
+  /** PRECONDITION (finding 1): to actually seat family, this MUST be a cryptographic
+   * verifier (`ed25519RosterVerifier`, `grantsFamily: true`). With it absent (the
+   * identity-only default), `evaluateAccountMembership` fails closed and the resolver
+   * keeps the cold-A2A `stranger` default — never family. */
   verifier?: RosterVerifier
 }
 
@@ -260,7 +269,9 @@ export class FriendResolver {
     if (!roster || !pin) return false
     const result = await evaluateAccountMembership({
       roster,
-      candidateDid: ctx.candidateDid,
+      // The host authenticated the peer's control of this did upstream (see the
+      // FriendResolverRosterContext.candidateDid precondition); wrap it as verified.
+      candidate: verifiedCandidate(ctx.candidateDid),
       rosterKey: pin.rosterKey,
       store: ctx.store,
       ...(ctx.verifier !== undefined ? { verifier: ctx.verifier } : {}),

@@ -24,6 +24,10 @@ function rosterSigningBytes(roster: AccountRoster): Uint8Array {
  * signature. (Unit 7a stub — verify not implemented.) */
 export function ed25519RosterVerifier(sodium: Sodium): RosterVerifier {
   return {
+    // SECURITY (finding 1): the REAL cryptographic verifier — the only RosterVerifier
+    // strong enough to back a family grant. `evaluateAccountMembership` checks this
+    // flag and fails closed (→ unverified) under any verifier that lacks it.
+    grantsFamily: true,
     verify(roster: AccountRoster, rosterKey: string): boolean {
       let pub: Uint8Array
       let sig: Uint8Array

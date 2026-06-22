@@ -18,6 +18,14 @@ export interface RosterVerifier {
    * default returns true for any well-formed roster (ignores the sig); an Ed25519
    * impl verifies the detached sig over the canonical roster bytes. */
   verify(roster: AccountRoster, rosterKey: string): boolean
+
+  /** SECURITY (finding 1, HIGH): whether this verifier is strong enough to back a
+   * FAMILY grant. The identity-only default ignores the sig, so it MUST NOT grant
+   * family — only a real cryptographic verifier (the a2a-client `ed25519RosterVerifier`)
+   * sets this true. `evaluateAccountMembership` fails closed (→ `unverified`, never
+   * `family_same_account`) when the active verifier is not family-granting. Optional
+   * + defaulting-to-false so a custom verifier is non-granting unless it opts in. */
+  grantsFamily?: boolean
 }
 
 /** A roster is well-formed when it has the structural shape the membership check
@@ -35,8 +43,11 @@ function isWellFormedRoster(roster: AccountRoster): boolean {
 }
 
 /** Identity-only roster verifier: accept any well-formed roster, ignore the sig.
- * The day-one default; the trust LADDER + the roster MEMBERSHIP check (not the
- * wire) cap what an accepted roster grants. Mirrors `tofuVerifier`. */
+ * The day-one default for NON-GRANT identity checks; it deliberately omits
+ * `grantsFamily` (defaults to false) so the family-granting path
+ * (`evaluateAccountMembership`) fails closed under it — a garbage-signed roster can
+ * never yield a family grant without a real cryptographic verifier injected. Mirrors
+ * `tofuVerifier`. */
 export const identityRosterVerifier: RosterVerifier = {
   verify(roster: AccountRoster): boolean {
     const ok = isWellFormedRoster(roster)

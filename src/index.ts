@@ -152,11 +152,12 @@ export { MemoryRosterStore } from "./roster-store-memory"
 
 // -- Account-roster membership (Item 3 payoff): family via same_account for a
 // key-verified, TOFU-pinned roster member; changed roster key hard-fails. --
-export { evaluateAccountMembership } from "./account-roster"
+export { evaluateAccountMembership, verifiedCandidate, _resetRosterVerifierWarningForTest } from "./account-roster"
 export type {
   AccountMembershipDecision,
   AccountMembershipResult,
   EvaluateAccountMembershipInput,
+  VerifiedCandidate,
 } from "./account-roster"
 
 export { recordRelationshipOutcome } from "./outcomes"

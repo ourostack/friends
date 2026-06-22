@@ -6,8 +6,8 @@
 // no-crypto path.
 import { describe, it, expect } from "vitest"
 
-import { evaluateAccountMembership, MemoryRosterStore } from "../index"
-import type { AccountRoster } from "../index"
+import { evaluateAccountMembership, MemoryRosterStore, verifiedCandidate, DEFAULT_ROSTER_VERIFIER, setNervesEmitter, _resetRosterVerifierWarningForTest } from "../index"
+import type { AccountRoster, NervesEvent } from "../index"
 import { ed25519RosterVerifier, signRoster } from "../a2a-client/roster-verify"
 import { readySodium } from "./_sodium"
 
@@ -30,7 +30,7 @@ describe("evaluateAccountMembership (crypto verifier injected)", () => {
     const store = new MemoryRosterStore()
     const result = await evaluateAccountMembership({
       roster,
-      candidateDid: "did:key:zMember",
+      candidate: verifiedCandidate("did:key:zMember"),
       rosterKey,
       store,
       verifier: ed25519RosterVerifier(sodium),
@@ -47,7 +47,7 @@ describe("evaluateAccountMembership (crypto verifier injected)", () => {
     const roster = signedRoster(sodium, kp.privateKey, [{ handle: "alice", did: "did:key:zMember" }])
     const result = await evaluateAccountMembership({
       roster,
-      candidateDid: "did:key:zStranger",
+      candidate: verifiedCandidate("did:key:zStranger"),
       rosterKey,
       store: new MemoryRosterStore(),
       verifier: ed25519RosterVerifier(sodium),
@@ -64,7 +64,7 @@ describe("evaluateAccountMembership (crypto verifier injected)", () => {
     const tampered: AccountRoster = { ...roster, members: [{ handle: "alice", did: "did:key:zMember" }, { handle: "evil", did: "did:key:zEvil" }] }
     const result = await evaluateAccountMembership({
       roster: tampered,
-      candidateDid: "did:key:zEvil",
+      candidate: verifiedCandidate("did:key:zEvil"),
       rosterKey,
       store: new MemoryRosterStore(),
       verifier: ed25519RosterVerifier(sodium),
@@ -82,7 +82,7 @@ describe("evaluateAccountMembership (crypto verifier injected)", () => {
     await store.putPin({ accountId: "acct-1", rosterKey: "K1-different", pinnedAt: NOW })
     const result = await evaluateAccountMembership({
       roster,
-      candidateDid: "did:key:zMember",
+      candidate: verifiedCandidate("did:key:zMember"),
       rosterKey, // K2
       store,
       verifier: ed25519RosterVerifier(sodium),
@@ -99,8 +99,8 @@ describe("evaluateAccountMembership (crypto verifier injected)", () => {
     const roster = signedRoster(sodium, kp.privateKey, [{ handle: "alice", did: "did:key:zMember" }])
     const store = new MemoryRosterStore()
     const verifier = ed25519RosterVerifier(sodium)
-    const first = await evaluateAccountMembership({ roster, candidateDid: "did:key:zMember", rosterKey, store, verifier })
-    const second = await evaluateAccountMembership({ roster, candidateDid: "did:key:zMember", rosterKey, store, verifier })
+    const first = await evaluateAccountMembership({ roster, candidate: verifiedCandidate("did:key:zMember"), rosterKey, store, verifier })
+    const second = await evaluateAccountMembership({ roster, candidate: verifiedCandidate("did:key:zMember"), rosterKey, store, verifier })
     expect(first.decision).toBe("family_same_account")
     expect(second.decision).toBe("family_same_account")
     expect((await store.getPin("acct-1"))?.rosterKey).toBe(rosterKey)
@@ -113,7 +113,7 @@ describe("evaluateAccountMembership (crypto verifier injected)", () => {
     const roster = signedRoster(sodium, kp.privateKey, [])
     const result = await evaluateAccountMembership({
       roster,
-      candidateDid: "did:key:zAnyone",
+      candidate: verifiedCandidate("did:key:zAnyone"),
       rosterKey,
       store: new MemoryRosterStore(),
       verifier: ed25519RosterVerifier(sodium),
@@ -122,27 +122,91 @@ describe("evaluateAccountMembership (crypto verifier injected)", () => {
   })
 })
 
-describe("evaluateAccountMembership (identity default, no crypto injected)", () => {
-  it("decides membership on did-presence alone for a member when no verifier is wired", async () => {
-    // DEFAULT_ROSTER_VERIFIER accepts any well-formed roster → membership turns on
-    // did presence. Documents the core-only behavior with no crypto.
+// SECURITY (finding 1, HIGH): the family-granting path must NEVER produce a family
+// grant via the identity-only default. The identity verifier ignores the sig, so a
+// garbage-signed roster would otherwise grant family to any did it lists. With no
+// real (family-granting) verifier injected, the strongest tier is unreachable:
+// membership is `unverified`, never `family_same_account`.
+describe("evaluateAccountMembership (identity default, no crypto injected) — fail-closed", () => {
+  it("NEVER grants family_same_account via the identity-only default (would-be member → unverified)", async () => {
+    // A well-formed, garbage-signed roster that NAMES the candidate. Under the old
+    // (vulnerable) behavior this granted family on did-presence alone; it must now
+    // fail closed to `unverified` because no cryptographic verifier was injected.
+    const roster: AccountRoster = { accountId: "acct-1", members: [{ handle: "alice", did: "did:key:zMember" }], epoch: 1, sig: "garbage-not-a-real-sig" }
+    const result = await evaluateAccountMembership({
+      roster,
+      candidate: verifiedCandidate("did:key:zMember"),
+      rosterKey: "any-key",
+      store: new MemoryRosterStore(),
+    })
+    expect(result.decision).toBe("unverified")
+  })
+
+  it("fails closed for the explicit DEFAULT_ROSTER_VERIFIER too (no family grant)", async () => {
     const roster: AccountRoster = { accountId: "acct-1", members: [{ handle: "alice", did: "did:key:zMember" }], epoch: 1, sig: "ignored" }
     const result = await evaluateAccountMembership({
       roster,
-      candidateDid: "did:key:zMember",
+      candidate: verifiedCandidate("did:key:zMember"),
       rosterKey: "any-key",
       store: new MemoryRosterStore(),
+      verifier: DEFAULT_ROSTER_VERIFIER,
+    })
+    expect(result.decision).toBe("unverified")
+  })
+
+  it("emits a loud (warn-level) one-time warning when the family grant is refused for lack of a real verifier", async () => {
+    _resetRosterVerifierWarningForTest()
+    const seen: NervesEvent[] = []
+    setNervesEmitter((e) => seen.push(e))
+    try {
+      const roster: AccountRoster = { accountId: "acct-warn", members: [{ handle: "alice", did: "did:key:zMember" }], epoch: 1, sig: "ignored" }
+      // First refusal warns loudly...
+      await evaluateAccountMembership({ roster, candidate: verifiedCandidate("did:key:zMember"), rosterKey: "k", store: new MemoryRosterStore() })
+      const warns = seen.filter((e) => e.level === "warn" && e.event === "friends.roster_verifier_not_cryptographic")
+      expect(warns).toHaveLength(1)
+      // ...a SECOND refusal does not re-warn (one-time).
+      await evaluateAccountMembership({ roster, candidate: verifiedCandidate("did:key:zMember"), rosterKey: "k", store: new MemoryRosterStore() })
+      const warnsAfter = seen.filter((e) => e.level === "warn" && e.event === "friends.roster_verifier_not_cryptographic")
+      expect(warnsAfter).toHaveLength(1)
+    } finally {
+      setNervesEmitter(null)
+    }
+  })
+})
+
+// SECURITY (finding 2, HIGH): the candidate-DID precondition is un-forgettable. The
+// function grants family ONLY for a `VerifiedCandidate` — a value the caller can only
+// mint via `verifiedCandidate(did)`, which IS the assertion "I verified this peer
+// controls this did". A bare string does not type-check (compile-time enforcement),
+// so the membership check can never be fooled by an unverified, attacker-claimed did.
+describe("evaluateAccountMembership (finding 2: verified-candidate precondition)", () => {
+  it("verifiedCandidate(did) carries the did through to the membership check", async () => {
+    const sodium = await readySodium()
+    const kp = sodium.crypto_sign_keypair()
+    const rosterKey = sodium.to_base64(kp.publicKey, sodium.base64_variants.ORIGINAL)
+    const roster = signedRoster(sodium, kp.privateKey, [{ handle: "alice", did: "did:key:zVerified" }])
+    const result = await evaluateAccountMembership({
+      roster,
+      candidate: verifiedCandidate("did:key:zVerified"),
+      rosterKey,
+      store: new MemoryRosterStore(),
+      verifier: ed25519RosterVerifier(sodium),
     })
     expect(result.decision).toBe("family_same_account")
   })
 
-  it("returns not_member for a non-member under the identity default", async () => {
-    const roster: AccountRoster = { accountId: "acct-1", members: [{ handle: "alice", did: "did:key:zMember" }], epoch: 1, sig: "ignored" }
+  it("a verified candidate whose did is NOT a roster member never gets family (not_member)", async () => {
+    const sodium = await readySodium()
+    const kp = sodium.crypto_sign_keypair()
+    const rosterKey = sodium.to_base64(kp.publicKey, sodium.base64_variants.ORIGINAL)
+    const roster = signedRoster(sodium, kp.privateKey, [{ handle: "alice", did: "did:key:zMember" }])
     const result = await evaluateAccountMembership({
       roster,
-      candidateDid: "did:key:zNotIn",
-      rosterKey: "any-key",
+      // The caller verified the peer controls zOutsider — but it is not in the roster.
+      candidate: verifiedCandidate("did:key:zOutsider"),
+      rosterKey,
       store: new MemoryRosterStore(),
+      verifier: ed25519RosterVerifier(sodium),
     })
     expect(result.decision).toBe("not_member")
   })
