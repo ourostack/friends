@@ -749,4 +749,91 @@ describe("importCoordination — consumer (the non-clobbering merge)", () => {
     if (!result.ok) expect(result.status).toBe("untrusted_source")
     expect(missions.putCalls).toBe(0)
   })
+
+  // ── task-spec import (gap-1): a request carrying a task lands QUARANTINED + attributed ──
+
+  function requestWithTask(requestId = "req-1", overrides: Partial<CoordinationEnvelope> = {}): CoordinationEnvelope {
+    return envelope({
+      intent: "request",
+      task: { requestId, summary: "Audit the auth module", details: "token path", inputs: { repo: "friends" } },
+      ...overrides,
+    })
+  }
+
+  it("a trusted request carrying a task lands it under importedDelegations[agentId][requestId], stamped imported+attributed+importedAt", async () => {
+    const missions = new MemoryMissionStore([mission()])
+    const result = await importCoordination(missions, { envelope: requestWithTask("req-1"), fromAgentId: "agent-a", trustOfSource: "friend" })
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error("unreachable")
+    const stored = await missions.get("m-local-uuid")
+    const landed = stored!.importedDelegations!["agent-a"]!["req-1"]
+    expect(landed).toBeDefined()
+    expect(landed.task.requestId).toBe("req-1")
+    expect(landed.task.summary).toBe("Audit the auth module")
+    expect(landed.provenance.origin).toBe("imported")
+    expect(landed.provenance.assertedBy).toEqual({ agentId: "agent-a" })
+    expect(typeof landed.provenance.importedAt).toBe("string")
+  })
+
+  it("the task-spec import NEVER touches first-party learnings/notes/status/delegations (first-party inviolable)", async () => {
+    const missions = new MemoryMissionStore([mission({ delegations: { "own-req": { task: { requestId: "own-req", summary: "my own delegation" }, provenance: { origin: "first_party" } } } })])
+    await importCoordination(missions, { envelope: requestWithTask("req-1"), fromAgentId: "agent-a", trustOfSource: "friend" })
+    const stored = await missions.get("m-local-uuid")
+    // first-party learnings + status untouched
+    expect(stored!.learnings.gotcha.value).toBe("rebase not merge")
+    expect(stored!.status).toBe("active")
+    // first-party delegations untouched (the imported one is in a SEPARATE namespace)
+    expect(stored!.delegations!["own-req"].task.summary).toBe("my own delegation")
+    expect(stored!.delegations!["own-req"].provenance.origin).toBe("first_party")
+    // the imported delegation did NOT leak into first-party delegations
+    expect(stored!.delegations!["req-1"]).toBeUndefined()
+  })
+
+  it("a STRANGER source's task-spec writes NOTHING (trust cap, untrusted_source)", async () => {
+    const missions = new MemoryMissionStore([mission()])
+    const result = await importCoordination(missions, { envelope: requestWithTask("req-1"), fromAgentId: "agent-a", trustOfSource: "stranger" })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("unreachable")
+    expect(result.status).toBe("untrusted_source")
+    const stored = await missions.get("m-local-uuid")
+    expect(stored!.importedDelegations).toBeUndefined()
+  })
+
+  it("the requestId is preserved on the imported record so the eventual result can correlate", async () => {
+    const missions = new MemoryMissionStore([mission()])
+    await importCoordination(missions, { envelope: requestWithTask("correlate-me"), fromAgentId: "agent-a", trustOfSource: "friend" })
+    const stored = await missions.get("m-local-uuid")
+    expect(Object.keys(stored!.importedDelegations!["agent-a"])).toContain("correlate-me")
+  })
+
+  it("replay of the same (agentId, requestId) task-spec does not double-land (idempotent)", async () => {
+    const missions = new MemoryMissionStore([mission()])
+    await importCoordination(missions, { envelope: requestWithTask("req-1", { issuedAt: NOW }), fromAgentId: "agent-a", trustOfSource: "friend" })
+    const afterFirst = await missions.get("m-local-uuid")
+    const firstLanded = afterFirst!.importedDelegations!["agent-a"]["req-1"]
+    // replay the identical envelope
+    await importCoordination(missions, { envelope: requestWithTask("req-1", { issuedAt: NOW }), fromAgentId: "agent-a", trustOfSource: "friend" })
+    const afterReplay = await missions.get("m-local-uuid")
+    expect(Object.keys(afterReplay!.importedDelegations!["agent-a"])).toHaveLength(1)
+    // the landed entry is unchanged on replay (same importedAt — not re-stamped)
+    expect(afterReplay!.importedDelegations!["agent-a"]["req-1"].provenance.importedAt).toBe(firstLanded.provenance.importedAt)
+  })
+
+  it("a plain request with NO task behaves exactly as today (no importedDelegations)", async () => {
+    const missions = new MemoryMissionStore([mission()])
+    const result = await importCoordination(missions, { envelope: envelope({ intent: "request" }), fromAgentId: "agent-a", trustOfSource: "friend" })
+    expect(result.ok).toBe(true)
+    const stored = await missions.get("m-local-uuid")
+    expect(stored!.importedDelegations).toBeUndefined()
+    // the request is still logged (today's behavior)
+    expect(stored!.coordination!.log.some((e) => e.intent === "request")).toBe(true)
+  })
+
+  it("two DIFFERENT requestIds from the same agent coexist under importedDelegations[agentId]", async () => {
+    const missions = new MemoryMissionStore([mission()])
+    await importCoordination(missions, { envelope: requestWithTask("req-1", { issuedAt: NOW }), fromAgentId: "agent-a", trustOfSource: "friend" })
+    await importCoordination(missions, { envelope: requestWithTask("req-2", { issuedAt: LATER }), fromAgentId: "agent-a", trustOfSource: "friend" })
+    const stored = await missions.get("m-local-uuid")
+    expect(Object.keys(stored!.importedDelegations!["agent-a"]).sort()).toEqual(["req-1", "req-2"])
+  })
 })

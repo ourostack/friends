@@ -352,8 +352,48 @@ function applyIncomingIntent(
     return { record: { ...record, coordination, updatedAt: now }, assigned: isLater }
   }
 
+  // gap-1: a request carrying a task lands the task-spec QUARANTINED under
+  // importedDelegations[fromAgentId][requestId] (attributed, imported), NEVER touching
+  // first-party `delegations`/`learnings`/`notes`/`status`. Idempotent per (agentId,
+  // requestId): an existing entry is preserved (never re-stamped).
+  const importedDelegations =
+    envelope.intent === "request" && envelope.task !== undefined
+      ? mergeImportedDelegation(record, envelope.task, fromAgentId, now)
+      : record.importedDelegations
+
   // request / offer / decline / handoff → log only; assignee untouched.
-  return { record: { ...record, coordination: withLog, updatedAt: now }, assigned: false }
+  return {
+    record: {
+      ...record,
+      coordination: withLog,
+      ...(importedDelegations ? { importedDelegations } : {}),
+      updatedAt: now,
+    },
+    assigned: false,
+  }
+}
+
+/** Land one imported task-spec under `importedDelegations[fromAgentId][requestId]`,
+ * returning a NEW namespace (never mutates the input). First-party `delegations` are NOT
+ * passed in and stay physically untouched. Idempotent per (agentId, requestId): an entry
+ * that already exists is preserved unchanged (never re-stamped with a new importedAt). */
+function mergeImportedDelegation(
+  record: MissionRecord,
+  task: MissionTaskSpec,
+  fromAgentId: string,
+  now: string,
+): NonNullable<MissionRecord["importedDelegations"]> {
+  const existing = record.importedDelegations ?? {}
+  const forAgent = existing[fromAgentId] ?? {}
+  // Idempotent: keep the existing entry for this requestId (do not re-stamp on replay).
+  if (forAgent[task.requestId]) return existing as NonNullable<MissionRecord["importedDelegations"]>
+  return {
+    ...existing,
+    [fromAgentId]: {
+      ...forAgent,
+      [task.requestId]: { task, provenance: { origin: "imported", assertedBy: { agentId: fromAgentId }, importedAt: now } },
+    },
+  }
 }
 
 /** Create a freshly-seeded mission for a previously-unknown key, carrying the
