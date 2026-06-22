@@ -29,7 +29,9 @@
 //   • return (result-return)         — B's MissionResult crosses kind:"mission_result"; A imports it
 //                                       quarantined under importedResults, attributed to B, correlated
 //   • every safety invariant         — no UUID on the wire, first-party inviolable, trust cap bites,
-//                                       orphan-result rejected, replay inert, no third-party leak
+//                                       orphan-result rejected, a TRUSTED non-assignee's result for a
+//                                       real requestId rejected (assignee honesty, inc-2 finding 1),
+//                                       replay inert, no third-party leak
 //
 // Run it:  npm run example:cross-agent-delegation
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
@@ -574,6 +576,28 @@ async function main(): Promise<void> {
     assert.equal(orphanImport.payload.status, "no_delegation", "the rejection reason is no_delegation (correlation honesty)")
     ok("an ORPHAN result (requestId A never delegated) → REJECTED (no_delegation) — A only accepts results for work it delegated")
 
+    // (v-bis) CROSS-DELEGATION INJECTION (security-review inc-2 finding 1) — a TRUSTED peer
+    // that is NOT the assignee, submitting a result for the REAL requestId A delegated to B,
+    // is REJECTED. The delegation persists its assignee (B); the import requires the result's
+    // SOURCE to equal it. agent-c is family-trusted (above the cap) AND uses the correct
+    // requestId — the ONLY thing stopping the forged result is the assignee check. This is the
+    // exact vector the earlier battery missed: requestId-correlation alone is not enough.
+    const AGENT_C_ID = "agent-c"
+    const nonAssigneeResult = {
+      subject: { missionKey: MISSION_KEY, title: "Ship the delegation brick" },
+      fromAgentId: AGENT_C_ID,
+      requestId, // the REAL requestId A delegated to B — but C is not the assignee
+      result: { requestId, summary: "forged deliverable from a trusted non-assignee" },
+      issuedAt: new Date().toISOString(),
+    }
+    const nonAssigneeImport = await agentA.tool("import_result", { envelope: nonAssigneeResult, fromAgentId: AGENT_C_ID, trustOfSource: "family" })
+    assert.equal(nonAssigneeImport.payload.ok, false, "a trusted non-assignee result (even with the right requestId) must be rejected")
+    assert.equal(nonAssigneeImport.payload.status, "assignee_mismatch", "the rejection reason is assignee_mismatch (assignee honesty)")
+    const aAfterNonAssignee = (await agentA.tool("get_mission", { missionId: missionInA })).payload
+    assert.equal(aAfterNonAssignee.importedResults[AGENT_C_ID], undefined, "the trusted non-assignee wrote NOTHING to importedResults")
+    assert.deepEqual(Object.keys(aAfterNonAssignee.importedResults), [AGENT_B_ID], "only the actual assignee B's deliverable is present")
+    ok("a TRUSTED NON-ASSIGNEE returning a result for the REAL requestId → REJECTED (assignee_mismatch), wrote nothing")
+
     // (vi) REPLAY-INERT — re-importing the SAME result envelope is idempotent.
     const replayImport = await agentA.tool("import_result", { envelope: resReady!.envelope, fromAgentId: AGENT_B_ID, trustOfSource: "family" })
     assert.equal(replayImport.payload.ok, true, "a replayed result import still returns ok (idempotent)")
@@ -601,8 +625,9 @@ async function main(): Promise<void> {
     console.log("    A delegated a task → B performed it → B returned the deliverable →")
     console.log("    A imported it. Every invariant held: missionKey-not-UUID on the wire,")
     console.log("    first-party inviolable, non-transitive, trust-capped (stranger wrote")
-    console.log("    nothing), orphan-result rejected, replay-inert, no third-party leak.")
-    console.log("    The own-fleet delegation mechanism works end-to-end.")
+    console.log("    nothing), orphan-result rejected, a TRUSTED non-assignee's result for")
+    console.log("    the real requestId rejected (assignee honesty), replay-inert, no")
+    console.log("    third-party leak. The own-fleet delegation mechanism works end-to-end.")
     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
   } finally {
     agentA?.kill()
