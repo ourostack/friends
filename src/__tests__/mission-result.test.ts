@@ -323,6 +323,154 @@ describe("prepareMissionResult — producer", () => {
   })
 })
 
+// ════════════════════════════════════════════════════════════════════════════
+// CONSUMER — importMissionResult (A imports B's deliverable)
+// ════════════════════════════════════════════════════════════════════════════
+
+describe("importMissionResult — consumer (the non-clobbering merge)", () => {
+  it("a trusted, correlated result lands under importedResults[agentId][requestId], attributed + imported-stamped", async () => {
+    const missions = new MemoryMissionStore([missionOnA("req-1")])
+    const result = await importMissionResult(missions, { envelope: resultEnvelope(), fromAgentId: "agent-b", trustOfSource: "friend" })
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error("unreachable")
+    expect(result.status).toBe("imported")
+    const stored = await missions.get("m-on-a")
+    const landed = stored!.importedResults!["agent-b"]!["req-1"]
+    expect(landed).toBeDefined()
+    expect(landed.requestId).toBe("req-1")
+    expect(landed.summary).toBe("Auth module audited — 2 findings")
+    expect(landed.provenance!.origin).toBe("imported")
+    expect(landed.provenance!.assertedBy).toEqual({ agentId: "agent-b" })
+    expect(typeof landed.provenance!.importedAt).toBe("string")
+  })
+
+  it("carries the artifact + outputs through onto the imported result", async () => {
+    const missions = new MemoryMissionStore([missionOnA("req-1")])
+    await importMissionResult(
+      missions,
+      { envelope: resultEnvelope({ result: { requestId: "req-1", summary: "done", artifact: "BODY", outputs: { k: "v" } } }), fromAgentId: "agent-b", trustOfSource: "friend" },
+    )
+    const stored = await missions.get("m-on-a")
+    const landed = stored!.importedResults!["agent-b"]["req-1"]
+    expect(landed.artifact).toBe("BODY")
+    expect(landed.outputs).toEqual({ k: "v" })
+  })
+
+  it("a STRANGER source writes NOTHING (untrusted_source) — checked BEFORE correlation", async () => {
+    const missions = new MemoryMissionStore([missionOnA("req-1")])
+    const result = await importMissionResult(missions, { envelope: resultEnvelope(), fromAgentId: "agent-b", trustOfSource: "stranger" })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("unreachable")
+    expect(result.status).toBe("untrusted_source")
+    const stored = await missions.get("m-on-a")
+    expect(stored!.importedResults).toBeUndefined()
+    expect(missions.putCalls).toBe(0)
+  })
+
+  it("respects a custom minTrustToAccept (an acquaintance is refused when the floor is friend)", async () => {
+    const missions = new MemoryMissionStore([missionOnA("req-1")])
+    const result = await importMissionResult(missions, { envelope: resultEnvelope(), fromAgentId: "agent-b", trustOfSource: "acquaintance" }, { minTrustToAccept: "friend" })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("unreachable")
+    expect(result.status).toBe("untrusted_source")
+  })
+
+  it("an UNKNOWN mission → no_mission (a result NEVER seeds a mission)", async () => {
+    const missions = new MemoryMissionStore() // empty — no mission by that key
+    const result = await importMissionResult(missions, { envelope: resultEnvelope(), fromAgentId: "agent-b", trustOfSource: "friend" })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("unreachable")
+    expect(result.status).toBe("no_mission")
+    expect(missions.putCalls).toBe(0)
+  })
+
+  it("an ORPHAN result (requestId not in A's first-party delegations) → no_delegation, writes nothing", async () => {
+    // A's mission has a delegation for req-1, but the result correlates to req-UNKNOWN.
+    const missions = new MemoryMissionStore([missionOnA("req-1")])
+    const result = await importMissionResult(missions, { envelope: resultEnvelope({ requestId: "req-UNKNOWN", result: { requestId: "req-UNKNOWN", summary: "x" } }), fromAgentId: "agent-b", trustOfSource: "friend" })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("unreachable")
+    expect(result.status).toBe("no_delegation")
+    const stored = await missions.get("m-on-a")
+    expect(stored!.importedResults).toBeUndefined()
+    expect(missions.putCalls).toBe(0)
+  })
+
+  it("a known mission with NO delegations at all → no_delegation (A delegated nothing here)", async () => {
+    const noDelegations = missionOnA("req-1")
+    delete noDelegations.delegations
+    const missions = new MemoryMissionStore([noDelegations])
+    const result = await importMissionResult(missions, { envelope: resultEnvelope(), fromAgentId: "agent-b", trustOfSource: "friend" })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("unreachable")
+    expect(result.status).toBe("no_delegation")
+  })
+
+  it("NEVER touches first-party learnings/notes/status/delegations/results (first-party inviolable, non-transitive)", async () => {
+    const missions = new MemoryMissionStore([
+      missionOnA("req-1", {
+        results: { "own-result": { requestId: "own-result", summary: "A's own produced result", provenance: { origin: "first_party" } } },
+      }),
+    ])
+    await importMissionResult(missions, { envelope: resultEnvelope(), fromAgentId: "agent-b", trustOfSource: "friend" })
+    const stored = await missions.get("m-on-a")
+    // status + first-party learnings untouched
+    expect(stored!.status).toBe("active")
+    expect(stored!.learnings.gotcha.value).toBe("A's own learning")
+    // first-party delegations + results untouched (the imported result is a SEPARATE namespace)
+    expect(stored!.delegations!["req-1"].task.summary).toBe("Audit the auth module")
+    expect(stored!.results!["own-result"].summary).toBe("A's own produced result")
+    expect(stored!.results!["own-result"].provenance!.origin).toBe("first_party")
+    // the imported result did NOT leak into first-party results
+    expect(stored!.results!["req-1"]).toBeUndefined()
+  })
+
+  it("is idempotent on replay — the same (agentId, requestId) does not double-land or re-stamp", async () => {
+    const missions = new MemoryMissionStore([missionOnA("req-1")])
+    await importMissionResult(missions, { envelope: resultEnvelope(), fromAgentId: "agent-b", trustOfSource: "friend" })
+    const afterFirst = await missions.get("m-on-a")
+    const firstImportedAt = afterFirst!.importedResults!["agent-b"]["req-1"].provenance!.importedAt
+    // replay
+    const replay = await importMissionResult(missions, { envelope: resultEnvelope(), fromAgentId: "agent-b", trustOfSource: "friend" })
+    expect(replay.ok).toBe(true)
+    if (replay.ok) expect(replay.status).toBe("imported")
+    const afterReplay = await missions.get("m-on-a")
+    expect(Object.keys(afterReplay!.importedResults!["agent-b"])).toHaveLength(1)
+    expect(afterReplay!.importedResults!["agent-b"]["req-1"].provenance!.importedAt).toBe(firstImportedAt)
+  })
+
+  it("two DIFFERENT requestIds from B coexist under importedResults[B] (each correlated to its own delegation)", async () => {
+    const twoDelegations = missionOnA("req-1", {
+      delegations: {
+        "req-1": { task: { requestId: "req-1", summary: "task 1" }, provenance: { origin: "first_party" } },
+        "req-2": { task: { requestId: "req-2", summary: "task 2" }, provenance: { origin: "first_party" } },
+      },
+    })
+    const missions = new MemoryMissionStore([twoDelegations])
+    await importMissionResult(missions, { envelope: resultEnvelope({ requestId: "req-1", result: { requestId: "req-1", summary: "r1" } }), fromAgentId: "agent-b", trustOfSource: "friend" })
+    await importMissionResult(missions, { envelope: resultEnvelope({ requestId: "req-2", result: { requestId: "req-2", summary: "r2" } }), fromAgentId: "agent-b", trustOfSource: "friend" })
+    const stored = await missions.get("m-on-a")
+    expect(Object.keys(stored!.importedResults!["agent-b"]).sort()).toEqual(["req-1", "req-2"])
+  })
+
+  it("refuses when the verifier rejects authentication (untrusted_source), even from a friend", async () => {
+    const rejectingVerifier: AgentVerifier = { verify: () => false }
+    const missions = new MemoryMissionStore([missionOnA("req-1")])
+    const result = await importMissionResult(missions, { envelope: resultEnvelope({ proof: "bad" }), fromAgentId: "agent-b", trustOfSource: "friend" }, { verifier: rejectingVerifier })
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("unreachable")
+    expect(result.status).toBe("untrusted_source")
+  })
+
+  it("surfaces a missions.put failure (does not swallow it)", async () => {
+    const missions = new MemoryMissionStore([missionOnA("req-1")])
+    missions.failPut = true
+    await expect(
+      importMissionResult(missions, { envelope: resultEnvelope(), fromAgentId: "agent-b", trustOfSource: "friend" }),
+    ).rejects.toThrow("missions.put boom")
+  })
+})
+
 // Type-level: the PINNED shapes exist.
 const _r: MissionResult = { requestId: "x", summary: "y" }
 const _imp: ImportMissionResultResult = { ok: false, status: "no_delegation" }
