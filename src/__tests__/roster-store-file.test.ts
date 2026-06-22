@@ -4,7 +4,7 @@ import { tmpdir } from "os"
 import { join } from "path"
 import * as fsPromises from "fs/promises"
 
-import { FileRosterStore, rostersDirFor } from "../index"
+import { FileRosterStore, rostersDirFor, MemoryRosterStore } from "../index"
 import type { AccountRoster, RosterPin } from "../index"
 
 const NOW = "2026-03-14T18:00:00.000Z"
@@ -105,5 +105,23 @@ describe("FileRosterStore", () => {
     await store.putPin(pin())
     expect(existsSync(join(rostersPath, "acct-1.roster.json"))).toBe(true)
     expect(existsSync(join(rostersPath, "acct-1.pin.json"))).toBe(true)
+  })
+})
+
+describe("MemoryRosterStore", () => {
+  it("round-trips a roster and returns null for a missing accountId", async () => {
+    const store = new MemoryRosterStore()
+    expect(await store.getRoster("acct-1")).toBeNull()
+    await store.putRoster(roster({ epoch: 9 }))
+    expect((await store.getRoster("acct-1"))?.epoch).toBe(9)
+    expect(await store.getRoster("nope")).toBeNull()
+  })
+
+  it("round-trips a pin and returns null for a missing accountId", async () => {
+    const store = new MemoryRosterStore()
+    expect(await store.getPin("acct-1")).toBeNull()
+    await store.putPin(pin({ rosterKey: "mem-key" }))
+    expect((await store.getPin("acct-1"))?.rosterKey).toBe("mem-key")
+    expect(await store.getPin("nope")).toBeNull()
   })
 })

@@ -37,11 +37,47 @@ export interface AccountMembershipResult {
 export async function evaluateAccountMembership(
   input: EvaluateAccountMembershipInput,
 ): Promise<AccountMembershipResult> {
-  // RED stub: always not_member so the family/unverified/mismatch/pin assertions
-  // fail behaviorally. Implemented GREEN in Unit 8b. References keep the imports
-  // wired for the real body.
-  void input.store
-  void DEFAULT_ROSTER_VERIFIER
-  void emitNervesEvent
-  return { decision: "not_member" }
+  const { roster, candidateDid, rosterKey, store } = input
+  const accountId = roster.accountId
+
+  // 1) Roster-key pin (TOFU). First contact pins the key; an EXISTING pin for a
+  // DIFFERENT key HARD-FAILS (no silent re-pin); a matching pin proceeds.
+  const existingPin = await store.getPin(accountId)
+  if (!existingPin) {
+    await store.putPin({ accountId, rosterKey, pinnedAt: new Date().toISOString() })
+  } else if (existingPin.rosterKey !== rosterKey) {
+    const result: AccountMembershipResult = {
+      decision: "roster_key_mismatch",
+      reason: "presented roster key does not match the pinned key",
+    }
+    emit(result.decision, accountId)
+    return result
+  }
+
+  // 2) Authenticity: the injected verifier (or the identity default) must accept
+  // the roster under the pinned/presented key.
+  const verifier = input.verifier ?? DEFAULT_ROSTER_VERIFIER
+  if (!verifier.verify(roster, rosterKey)) {
+    const result: AccountMembershipResult = { decision: "unverified", reason: "roster signature did not verify" }
+    emit(result.decision, accountId)
+    return result
+  }
+
+  // 3) Membership: the candidate's did must be in the verified roster.
+  const isMember = roster.members.some((m) => m.did === candidateDid)
+  const result: AccountMembershipResult = isMember
+    ? { decision: "family_same_account" }
+    : { decision: "not_member", reason: "candidate did is not in the roster" }
+  emit(result.decision, accountId)
+  return result
+}
+
+/** Emit the membership-evaluated nerves event. */
+function emit(decision: AccountMembershipDecision, accountId: string): void {
+  emitNervesEvent({
+    component: "friends",
+    event: "friends.account_membership_evaluated",
+    message: "evaluated account-roster membership",
+    meta: { accountId, decision },
+  })
 }
