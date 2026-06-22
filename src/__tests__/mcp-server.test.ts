@@ -1715,13 +1715,13 @@ describe("mission tools/call dispatch", () => {
     const missionWithDelegation = missionOf({ delegations: { "req-1": { task: { requestId: "req-1", summary: "Audit auth" }, provenance: { origin: "first_party" } } } })
     const missions = makeMissionStore([missionWithDelegation])
     start(ownerStore(), undefined, missions)
-    const envelope = JSON.stringify({ subject: { missionKey: "PROJ-1234", title: "Ship it" }, fromAgentId: "agent-b", requestId: "req-1", result: { requestId: "req-1", summary: "Auth audited — 2 findings" }, issuedAt: NOW })
+    const envelope = JSON.stringify({ subject: { missionKey: "PROJ-1234", title: "Ship it" }, fromAgentId: "agent-b", requestId: "req-1", result: { requestId: "req-1", summary: "Auth audited - 2 findings" }, issuedAt: NOW })
     const r = await h.tool("import_result", { envelope, fromAgentId: "agent-b", trustOfSource: "friend" })
     expect(r.isError).toBe(false)
     const payload = r.payload as { ok: boolean; status: string; record: MissionRecord }
     expect(payload.ok).toBe(true)
     expect(payload.status).toBe("imported")
-    expect(payload.record.importedResults!["agent-b"]["req-1"].summary).toBe("Auth audited — 2 findings")
+    expect(payload.record.importedResults!["agent-b"]["req-1"].summary).toBe("Auth audited - 2 findings")
   })
 
   it("import_result: no_delegation when the result correlates to no prior delegation (isError true)", async () => {

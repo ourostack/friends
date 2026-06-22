@@ -418,5 +418,33 @@ export function getToolSchemas(): McpToolSchema[] {
         required: ["missionId"],
       },
     },
+    {
+      name: "send_result",
+      description: "Producer (gap-2 — the result-return): B returns its DELIVERABLE for a delegation, attributed to B (from whoami) + correlated to A's task-spec by requestId, named by the mission's missionKey (never the local uuid). Consent-gated via the identity-tier 'coordinate' scope (a result is B answering A's own delegation — trust ≥ friend suffices; NO new scope). Records the result first-party on B's own mission. Returns { ok, envelope } or { ok:false, status: not_found|no_consent }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          missionId: { type: "string", description: "the local mission B is returning a result for (its local uuid id)" },
+          toAgentId: { type: "string", description: "the recipient agent's join-key agentId — A, the delegator" },
+          requestId: { type: "string", description: "the delegation correlation key (the task-spec's requestId)" },
+          result: { type: "object", description: "B's deliverable { summary, artifact?, outputs? }" },
+          proof: { type: "string", description: "optional opaque proof to stamp on the envelope (for a non-TOFU recipient verifier)" },
+        },
+        required: ["missionId", "toAgentId", "requestId", "result"],
+      },
+    },
+    {
+      name: "import_result",
+      description: "Consumer (gap-2, non-clobbering merge): A imports B's result-return. Resolves the mission by missionKey; lands B's deliverable QUARANTINED + attributed under importedResults WITHOUT touching first-party; source trust caps acceptance (checked before correlation); a result whose requestId matches no prior first-party delegation is REJECTED (no_delegation — A only accepts results for work it delegated); an unknown mission is no_mission (a result never seeds a mission); never recomputes status/participants. Returns { ok, status, record } or { ok:false, status: untrusted_source|no_mission|no_delegation|invalid }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          envelope: { type: "object", description: "the MissionResultEnvelope to import" },
+          fromAgentId: { type: "string", description: "the agent the envelope arrived from (join-key agentId) — B" },
+          trustOfSource: { type: "string", enum: ["family", "friend", "acquaintance", "stranger"], description: "this agent's resolved trust in the source agent — the acceptance cap" },
+        },
+        required: ["envelope", "fromAgentId", "trustOfSource"],
+      },
+    },
   ]
 }

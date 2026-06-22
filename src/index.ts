@@ -215,6 +215,25 @@ export type {
   ImportCoordinationStatus,
 } from "./coordination"
 
+// -- Result-return / delegation deliverable (gap-2, p11 inc2): B returns its result --
+// prepareMissionResult (producer) / importMissionResult (consumer) carry B's actual
+// produced deliverable back to A — attributed to B, correlated to A's delegation via
+// missionKey + requestId, consent-gated via the existing "coordinate" scope, lands
+// quarantined + attributed on import, trust-capped, non-transitive, first-party-inviolable.
+// `MissionTaskSpec` (gap-1) rides the CoordinationEnvelope; the new MissionRecord fields
+// (delegations / importedDelegations / results / importedResults) are additive.
+export { prepareMissionResult, importMissionResult } from "./mission-result"
+export type {
+  PrepareMissionResultInput,
+  PrepareMissionResultResult,
+  PrepareMissionResultStatus,
+  ImportMissionResultInput,
+  ImportMissionResultOptions,
+  ImportMissionResultResult,
+  ImportMissionResultStatus,
+} from "./mission-result"
+export type { MissionTaskSpec, MissionResult, MissionResultEnvelope } from "./types"
+
 export { grantShare, revokeShare, listShares, isGrantEffective } from "./grants"
 
 // -- Observability seam --

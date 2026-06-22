@@ -39,6 +39,8 @@ import { isCoordinationIntent } from "../types"
 import { connectAgents } from "../connect"
 import type { SenseType } from "../types"
 import type { AccountMembershipResult } from "../account-roster"
+import { prepareMissionResult, importMissionResult } from "../mission-result"
+import type { MissionResultEnvelope } from "../types"
 
 type Args = Record<string, unknown>
 
@@ -571,6 +573,41 @@ export async function dispatchTool(
         return { result: { ok: false, status: "not_found", message: "mission record not found" }, isError: true }
       }
       return { result: record.coordination ?? { assignee: undefined, log: [] }, isError: false }
+    }
+
+    case "send_result": {
+      // Producer (gap-2): B returns its deliverable. Self identity comes from whoami
+      // (the dispatch is store-only); the mission is named by its missionKey inside the
+      // library. Gated on BOTH a GrantStore (consent via the "coordinate" scope) and a
+      // MissionStore — exactly like share_mission.
+      if (!missions || !grants) return { result: NO_MISSION_STORE, isError: true }
+      const self = await whoami(store)
+      const selfAgentId = self.selfFriendId ?? ""
+      const result = await prepareMissionResult(missions, store, grants, {
+        missionId: coerceString(args.missionId),
+        toAgentId: coerceString(args.toAgentId),
+        requestId: coerceString(args.requestId),
+        result: parseMaybeJson<{ summary: string; artifact?: string; outputs?: Record<string, string> }>(args.result) ?? { summary: "" },
+        selfAgentId,
+        proof: coerceOptionalString(args.proof),
+      })
+      return { result, isError: result.ok === false }
+    }
+
+    case "import_result": {
+      // Consumer (gap-2): A imports B's deliverable. Gated on the MissionStore, like
+      // import_mission. An invalid/malformed envelope is a clean `invalid` result.
+      if (!missions) return { result: NO_MISSION_STORE, isError: true }
+      const envelope = parseMaybeJson<MissionResultEnvelope>(args.envelope)
+      if (!envelope || typeof envelope !== "object") {
+        return { result: { ok: false, status: "invalid", message: "an envelope object is required" }, isError: true }
+      }
+      const result = await importMissionResult(missions, {
+        envelope,
+        fromAgentId: coerceString(args.fromAgentId),
+        trustOfSource: coerceString(args.trustOfSource) as TrustLevel,
+      })
+      return { result, isError: result.ok === false }
     }
 
     default: {
