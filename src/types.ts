@@ -214,6 +214,48 @@ export interface MissionTaskSpec {
   inputs?: Record<string, string>
 }
 
+// -- Mission Result --
+// B's DELIVERABLE on a delegation (gap-2, p11 inc2) — the honest north-star result-
+// return channel. NOT a `mission_share` of outcomes/learnings: this is B's actual
+// produced artifact, attributed to B, correlated to A's delegation via `requestId`. A
+// result is B answering A's OWN delegation request, so it rides the `"coordinate"`
+// identity-tier consent scope (no third-party content; A is the very delegator) — NO new
+// ShareScope, NO new content grant. `provenance` is first_party on B's side, imported on
+// A's. Additive; lands first-party under `MissionRecord.results[requestId]` on B and
+// quarantined under `importedResults[agentId][requestId]` on A.
+export interface MissionResult {
+  /** Correlates to the gap-1 task-spec's requestId (PINNED) — A only accepts a result
+   * for a requestId it actually delegated. */
+  requestId: string
+  /** The headline deliverable — what B produced. */
+  summary: string
+  /** Optional larger produced artifact body. */
+  artifact?: string
+  /** Optional structured outputs. */
+  outputs?: Record<string, string>
+  /** first_party on B's side; imported (attributed to B) on A's. */
+  provenance?: NoteProvenance
+}
+
+// -- Mission Result Envelope --
+// The cross-agent result-return envelope (gap-2). Names the mission by JOIN KEY
+// (`missionKey`) — NEVER a local UUID — and carries B's attribution (`fromAgentId`) + the
+// delegation correlation key (`requestId`) + the `MissionResult`. A SIBLING of
+// `MissionShareEnvelope`/`CoordinationEnvelope` (per-kind compiler-enforced type safety),
+// not a widening. Rides the mailbox under the new `kind:"mission_result"`.
+export interface MissionResultEnvelope {
+  /** The mission, named by its join key — `missionKey` + a human title. */
+  subject: { missionKey: string; title: string }
+  /** The agent that produced this result (B's join-key agentId) — the attribution. */
+  fromAgentId: string
+  /** The delegation correlation key (matches the gap-1 task-spec's requestId). */
+  requestId: string
+  result: MissionResult
+  /** Opaque, verifier-specific proof slot. The TOFU verifier ignores it. */
+  proof?: string
+  issuedAt: string
+}
+
 // -- Coordination Intent --
 // The coordination verb set (brick 5) — five leaves of one closed union, mirroring
 // how `ShareScope` and the transport `kind` are closed unions with a guard. A
@@ -307,6 +349,16 @@ export interface MissionRecord {
   // structurally apart from first-party `delegations` so an import can never masquerade as
   // a delegation THIS agent issued. Additive — absent until something is imported.
   importedDelegations?: Record<string, Record<string, { task: MissionTaskSpec; provenance: NoteProvenance }>>
+  // first-party results this agent PRODUCED on this mission (gap-2, p11 inc2), keyed by
+  // the delegation `requestId`. B's own deliverables, stamped first_party. Additive —
+  // absent until this agent produces a result. NEVER touched by an import.
+  results?: Record<string, MissionResult>
+  // results IMPORTED from a peer (gap-2) — B's deliverable landing on A — in a
+  // QUARANTINED namespace keyed by the asserting agentId then by `requestId` (mirroring
+  // `importedLearnings`). Stamped origin:"imported" + assertedBy + importedAt. Kept
+  // structurally apart from first-party `results` so an imported deliverable can never
+  // masquerade as one this agent produced. Additive — absent until something is imported.
+  importedResults?: Record<string, Record<string, MissionResult>>
   createdAt: string                                // ISO date
   updatedAt: string
   schemaVersion: number
