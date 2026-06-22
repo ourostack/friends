@@ -203,6 +203,27 @@ describe("setFriendTrust — Bug B: control-plane audit", () => {
     expect(sink.list()[0].targetDid).toBe("did:key:zPeer")
   })
 
+  // Unit 5a coupling: targetDid is now identity-aware. A record carrying the durable
+  // identity.did (and NO legacy a2a.did) must still surface it on the audit record.
+  it("derives targetDid from the durable identity.did (identity-aware, Unit 5b)", async () => {
+    const agentWithIdentity = friend({
+      id: "f-id",
+      kind: "agent",
+      externalIds: [{ provider: "a2a-agent" as IdentityProvider, externalId: "did:key:zHome", linkedAt: NOW }],
+      agentMeta: {
+        bundleName: "peer",
+        familiarity: 0,
+        sharedMissions: [],
+        outcomes: [],
+        identity: { did: "did:key:zHome" },
+      },
+    })
+    const store = new MemoryStore([agentWithIdentity])
+    const sink = new MemoryAuditSink()
+    await setFriendTrust(store, "f-id", "friend", { sink })
+    expect(sink.list()[0].targetDid).toBe("did:key:zHome")
+  })
+
   it("still emits the friends.trust_set nerves event on a mutation", async () => {
     const seen: NervesEvent[] = []
     setNervesEmitter((e) => seen.push(e))

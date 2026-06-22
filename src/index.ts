@@ -136,6 +136,9 @@ export { upsertAgentPeer } from "./agent-peer"
 export { resolveAgentIdentity, withMigratedIdentity } from "./identity"
 export type { ResolvedAgentIdentity } from "./identity"
 
+// did-aware friend lookup (the durable cross-agent primary key is the DID).
+export { findFriendByDid } from "./friend-lookup"
+
 export { recordRelationshipOutcome } from "./outcomes"
 
 export { recordMission } from "./missions"
