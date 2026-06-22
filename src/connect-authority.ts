@@ -53,7 +53,19 @@ export type ConnectAuthorization =
  * pre-computed `membership`); any other decision — or no membership at all — downgrades
  * (NEVER a blanket allow on `closed`). An `open` sense (anyone can reach it) never
  * commits inline regardless of membership. `internal` is the agent's inner dialog —
- * not a management surface at all. Every non-commit is a structured downgrade RETURN. */
+ * not a management surface at all. Every non-commit is a structured downgrade RETURN.
+ *
+ * ┌─ PRE-CONDITION before any non-local / networked `controlContext` is ever wired ──────┐
+ * │ (security review inc-2 findings 2-3): this gate authenticates the CALLER's           │
+ * │ sense/membership but places NO constraint on the TARGET, and connectAgents defaults  │
+ * │ the introduce trust to `family`. Both are correct + safe ONLY because the path is     │
+ * │ owner-only stdio today (every wire supplies `senseType: "local"`; no wire constructs  │
+ * │ a non-`local` controlContext). The `connect` commit MUST add target-side roster      │
+ * │ verification (the target did must ALSO be roster-checked, not just TOFU-upserted)     │
+ * │ AND validate the caller-supplied `trustLevel` against the authority decision BEFORE   │
+ * │ any non-`local`/networked controlContext is wired. The current `family` default +     │
+ * │ unconstrained target are safe only for the owner-only-stdio path.                     │
+ * └──────────────────────────────────────────────────────────────────────────────────────┘ */
 export function authorizeConnect(input: AuthorizeConnectInput): ConnectAuthorization {
   const result = decide(input)
   emitNervesEvent({

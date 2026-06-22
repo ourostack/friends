@@ -168,6 +168,18 @@ export async function connectAgents(
   // 3) The introduce effect — upsert the peer as an agent-peer at the linked trust.
   // Own-fleet linked agents default to family; the level is overridable. Pass any
   // existing a2a coords through so the upsert preserves them (incl. a legacy a2a.did).
+  //
+  // ┌─ PRE-CONDITION before any non-local / networked `controlContext` is ever wired ──────┐
+  // │ (security review inc-2 findings 2-3): the `family` DEFAULT here, and the fact that    │
+  // │ the TARGET is upserted with no roster constraint (TOFU — see resolvePeer above),      │
+  // │ are correct + safe ONLY because the authority gate (authorizeConnect) only COMMITs    │
+  // │ on the owner-only `local` stdio sense today (no wire constructs a non-`local`         │
+  // │ controlContext). BEFORE any non-`local`/networked controlContext is ever wired, the   │
+  // │ `connect` commit MUST add target-side roster verification (the target did must ALSO   │
+  // │ be roster-checked, not just TOFU-upserted) AND validate the caller-supplied           │
+  // │ `trustLevel` against the authority decision. The current `family` default +           │
+  // │ unconstrained target are safe only for the owner-only-stdio path.                     │
+  // └──────────────────────────────────────────────────────────────────────────────────────┘
   const trustLevel: TrustLevel = input.trustLevel ?? "family"
   const a2a: AgentMeta["a2a"] | undefined = resolved.existing?.agentMeta?.a2a
   const record = await upsertAgentPeer(store, {

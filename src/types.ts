@@ -246,7 +246,11 @@ export interface MissionResult {
 export interface MissionResultEnvelope {
   /** The mission, named by its join key — `missionKey` + a human title. */
   subject: { missionKey: string; title: string }
-  /** The agent that produced this result (B's join-key agentId) — the attribution. */
+  /** The agent that produced this result (B's join-key agentId) — the attribution.
+   * NOTE (security review inc-2 finding 5, by-design): this is SELF-ASSERTED and is
+   * vestigial on import — importMissionResult attributes + enforces against the
+   * TRANSPORT-supplied `ImportMissionResultInput.fromAgentId` (the authenticated channel
+   * identity), never this envelope field, so a forged value here changes nothing. */
   fromAgentId: string
   /** The delegation correlation key (matches the gap-1 task-spec's requestId). */
   requestId: string
