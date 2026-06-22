@@ -509,11 +509,100 @@ async function main(): Promise<void> {
     ok(`A imported B's deliverable under importedResults[${AGENT_B_ID}][${requestId}] — attributed to B, quarantined, correlated to A's delegation`)
 
     // ════════════════════════════════════════════════════════════════════════
+    // STEP 5 — The full hard-assert INVARIANT BATTERY (the safety surface). Every
+    // delegation/result guarantee that makes this safe, asserted; any violation throws.
+    // ════════════════════════════════════════════════════════════════════════
+    step("Invariant battery — first-party inviolable, trust cap, orphan-reject, replay-inert, no UUID/third-party leak")
+
+    // (i) NO local mission UUID on ANY wire byte — walk every message in the mailbox.
+    const allMail = mailboxEnumerate(mailboxDir)
+    assert.ok(allMail.length >= 2, "the mailbox carried the request + the result")
+    for (const file of allMail) {
+      assert.equal(file.bytes.includes(missionInA), false, `${file.relativePath} must not leak A's local mission UUID`)
+      assert.equal(file.bytes.includes(missionInB), false, `${file.relativePath} must not leak B's local mission UUID`)
+      assert.ok(file.bytes.includes(MISSION_KEY), `${file.relativePath} names the mission by missionKey`)
+    }
+    ok(`walked ${allMail.length} wire messages — missionKey only, NO local UUID leaked`)
+
+    // (ii) NO third-party / reputation field on any delegation or result wire byte.
+    for (const file of allMail) {
+      for (const banned of ['"standing"', '"tier"', '"familiarity"', '"totalTokens"']) {
+        assert.equal(file.bytes.includes(banned), false, `${file.relativePath} must not carry ${banned}`)
+      }
+    }
+    ok(`no standing/tier/third-party field on any delegation or result wire byte`)
+
+    // (iii) FIRST-PARTY INVIOLABLE / non-transitive — after BOTH imports, A's + B's
+    // first-party learnings + status are byte-untouched.
+    const aMissionFinal = (await agentA.tool("get_mission", { missionId: missionInA })).payload
+    const bMissionFinal = (await agentB.tool("get_mission", { missionId: missionInB })).payload
+    assert.equal(aMissionFinal.status, "active", "A's mission status is untouched by the result import (non-transitive)")
+    assert.equal(aMissionFinal.learnings.gotcha.value, "rebase, never merge", "A's first-party learnings are physically untouched")
+    assert.equal(bMissionFinal.status, "active", "B's mission status is untouched by the delegation import")
+    assert.equal(bMissionFinal.learnings.gotcha.value, "rebase, never merge", "B's first-party learnings are physically untouched")
+    // the imported result lives ONLY in the quarantined namespace, never in first-party results.
+    assert.equal(aMissionFinal.results, undefined, "A produced no first-party results (B's deliverable is quarantined, not first-party)")
+    ok("first-party learnings + status byte-untouched on BOTH sides; B's deliverable stays quarantined (non-transitive)")
+
+    // (iv) TRUST CAP — a STRANGER returning a "result" for A's delegation writes NOTHING.
+    const strangerResult = {
+      subject: { missionKey: MISSION_KEY, title: "Ship the delegation brick" },
+      fromAgentId: "agent-evil",
+      requestId, // even with the RIGHT correlation id, a stranger is refused at the cap
+      result: { requestId, summary: "malicious injected deliverable" },
+      issuedAt: new Date().toISOString(),
+    }
+    const strangerImport = await agentA.tool("import_result", { envelope: strangerResult, fromAgentId: "agent-evil", trustOfSource: "stranger" })
+    assert.equal(strangerImport.payload.ok, false, "a stranger result must be refused")
+    assert.equal(strangerImport.payload.status, "untrusted_source", "the refusal reason is untrusted_source (trust cap)")
+    const aAfterStranger = (await agentA.tool("get_mission", { missionId: missionInA })).payload
+    assert.equal(aAfterStranger.importedResults["agent-evil"], undefined, "the stranger wrote NOTHING to importedResults")
+    assert.deepEqual(Object.keys(aAfterStranger.importedResults), [AGENT_B_ID], "only B's legitimate deliverable is present")
+    ok("a STRANGER returning a result (even with the right requestId) → REFUSED (untrusted_source), wrote nothing")
+
+    // (v) ORPHAN result — a result whose requestId matches NO prior delegation is rejected.
+    const orphanReq = "req-never-delegated"
+    const orphanResult = {
+      subject: { missionKey: MISSION_KEY, title: "Ship the delegation brick" },
+      fromAgentId: AGENT_B_ID,
+      requestId: orphanReq,
+      result: { requestId: orphanReq, summary: "result for work A never delegated" },
+      issuedAt: new Date().toISOString(),
+    }
+    const orphanImport = await agentA.tool("import_result", { envelope: orphanResult, fromAgentId: AGENT_B_ID, trustOfSource: "family" })
+    assert.equal(orphanImport.payload.ok, false, "an orphan result (no prior delegation) must be rejected")
+    assert.equal(orphanImport.payload.status, "no_delegation", "the rejection reason is no_delegation (correlation honesty)")
+    ok("an ORPHAN result (requestId A never delegated) → REJECTED (no_delegation) — A only accepts results for work it delegated")
+
+    // (vi) REPLAY-INERT — re-importing the SAME result envelope is idempotent.
+    const replayImport = await agentA.tool("import_result", { envelope: resReady!.envelope, fromAgentId: AGENT_B_ID, trustOfSource: "family" })
+    assert.equal(replayImport.payload.ok, true, "a replayed result import still returns ok (idempotent)")
+    const aAfterReplay = (await agentA.tool("get_mission", { missionId: missionInA })).payload
+    assert.equal(Object.keys(aAfterReplay.importedResults[AGENT_B_ID]).length, 1, "replay did NOT double-land the deliverable")
+    assert.equal(
+      aAfterReplay.importedResults[AGENT_B_ID][requestId].provenance.importedAt,
+      aMissionFinal.importedResults[AGENT_B_ID][requestId].provenance.importedAt,
+      "replay did NOT re-stamp the importedAt (the original landing is preserved)",
+    )
+    ok("REPLAY of the result envelope is inert (idempotent — no double-land, no re-stamp)")
+
+    // (vii) the connect_to audit record carries action:"connect" + actor + originSense (re-assert).
+    const connectAudit = readAuditRecords(dirA).find((r) => r.action === "connect")
+    assert.ok(connectAudit && connectAudit.action === "connect" && connectAudit.actor === "owner:stdio" && connectAudit.originSense === "stdio", "the connect_to audit carries action:connect + actor + originSense")
+    ok(`connect_to control-plane audit verified: action="connect", actor="owner:stdio", originSense="stdio"`)
+
+    void markSeen
+
+    // ════════════════════════════════════════════════════════════════════════
     console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    console.log("✅  DELEGATION PROOF (through STEP 4) — the NORTH STAR round-trip:")
-    console.log("    A delegated a task (task-spec) → B performed it → B returned the")
-    console.log("    deliverable → A imported it (attributed to B, quarantined, correlated).")
-    console.log("    (the full hard-assert invariant battery lands in the next unit.)")
+    console.log("✅  CROSS-AGENT OWN-FLEET DELEGATION PROVEN — two of the owner's own")
+    console.log("    agents on separate stores, recognized as same-account FAMILY via a")
+    console.log("    signed roster, LINKED by the owner via connect_to (audited), then:")
+    console.log("    A delegated a task → B performed it → B returned the deliverable →")
+    console.log("    A imported it. Every invariant held: missionKey-not-UUID on the wire,")
+    console.log("    first-party inviolable, non-transitive, trust-capped (stranger wrote")
+    console.log("    nothing), orphan-result rejected, replay-inert, no third-party leak.")
+    console.log("    The own-fleet delegation mechanism works end-to-end.")
     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
   } finally {
     agentA?.kill()
