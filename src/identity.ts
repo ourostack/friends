@@ -28,6 +28,13 @@ export function resolveAgentIdentity(meta: AgentMeta | undefined): ResolvedAgent
   // a partial identity ({ did } only) doesn't surface undefined keys. SECURITY
   // (finding 6, LOW): an empty-string did is NOT a did — omit it so it can never be a
   // matchable identity key (ties to findFriendByDid's falsy-did guard, finding 4).
+  //
+  // NOTE (finding 5-D): when BOTH meta.identity.did and a legacy meta.a2a.did are
+  // present and DIVERGE, the durable home silently wins here. That divergence can be a
+  // tampering signal (a record's legacy hint disagreeing with its pinned identity).
+  // We don't warn from this hot path (resolveAgentIdentity runs per-record in the
+  // findFriendByDid scan and per-audit-derivation); a divergence audit belongs in a
+  // write-time reconciliation (e.g. withMigratedIdentity / the onboard path), not here.
   if (meta.identity) {
     const { did, pinnedKey, handle, pinnedAt } = meta.identity
     return {

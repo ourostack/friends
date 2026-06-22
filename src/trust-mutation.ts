@@ -55,6 +55,13 @@ export async function setFriendTrust(
   // `targetDid` is the record's durable identity DID (identity.did, falling back to
   // the migrated a2a.did via resolveAgentIdentity). `actor` defaults to the literal
   // "unknown" when the caller threads no context. No sink ⇒ a clean no-op.
+  //
+  // NOTE (finding 6-B): the append runs AFTER store.put, so it is best-effort with
+  // respect to the mutation — if the sink append throws/crashes, the trust change is
+  // already persisted but the audit line may be missing. We keep this ordering on
+  // purpose (the mutation is the source of truth; the audit is an observability log,
+  // not a 2-phase-commit participant). A throwing sink rejects this call so the caller
+  // still sees the failure; it does not roll back the already-applied mutation.
   if (ctx?.sink) {
     const targetDid = resolveAgentIdentity(current.agentMeta).did
     const record: ControlPlaneAuditRecord = {
