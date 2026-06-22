@@ -7,6 +7,7 @@
 // legacy-field handling. `withMigratedIdentity` backfills `identity.did` from
 // `a2a.did` so the next `put` persists it forward (migrate-on-write), matching the
 // resolver's local-id migration + the grant subjectFriendId→subjectKey pattern.
+import { emitNervesEvent } from "./observability"
 import type { AgentMeta } from "./types"
 
 /** The resolved durable identity of an agent peer — independent of which on-disk
@@ -21,9 +22,21 @@ export interface ResolvedAgentIdentity {
 /** Read an agent's durable identity, preferring `meta.identity` and lifting the
  * legacy `meta.a2a.did` on a miss (migrate-on-read). Returns `{}` for a did-less
  * or absent meta. (Unit 4a stub — not implemented.) */
-export function resolveAgentIdentity(_meta: AgentMeta | undefined): ResolvedAgentIdentity {
-  // RED stub: deliberately wrong (always empty) so the suite fails behaviorally,
-  // not on a missing symbol. Implemented GREEN in Unit 4b.
+export function resolveAgentIdentity(meta: AgentMeta | undefined): ResolvedAgentIdentity {
+  if (!meta) return {}
+  // Durable home wins (authoritative). Spread only the present optional fields so
+  // a partial identity ({ did } only) doesn't surface undefined keys.
+  if (meta.identity) {
+    const { did, pinnedKey, handle, pinnedAt } = meta.identity
+    return {
+      did,
+      ...(pinnedKey !== undefined ? { pinnedKey } : {}),
+      ...(handle !== undefined ? { handle } : {}),
+      ...(pinnedAt !== undefined ? { pinnedAt } : {}),
+    }
+  }
+  // Migrate-on-read: lift the legacy a2a.did hint when the durable home is absent.
+  if (meta.a2a?.did !== undefined) return { did: meta.a2a.did }
   return {}
 }
 
@@ -31,6 +44,17 @@ export function resolveAgentIdentity(_meta: AgentMeta | undefined): ResolvedAgen
  * home is absent (migrate-on-write); a meta already carrying `identity` is returned
  * unchanged (no clobber). Absent meta is returned as-is. (Unit 4a stub.) */
 export function withMigratedIdentity(meta: AgentMeta | undefined): AgentMeta | undefined {
-  // RED stub: identity-passthrough (no backfill) so the backfill test fails.
-  return meta
+  if (!meta) return undefined
+  // Already carries the durable home → no clobber.
+  if (meta.identity) return meta
+  // Nothing to migrate from → unchanged.
+  if (meta.a2a?.did === undefined) return meta
+  // Backfill identity.did from the legacy a2a.did so the next put persists forward.
+  emitNervesEvent({
+    component: "friends",
+    event: "friends.identity_migrated",
+    message: "backfilled AgentMeta.identity.did from legacy a2a.did",
+    meta: { did: meta.a2a.did },
+  })
+  return { ...meta, identity: { did: meta.a2a.did } }
 }
