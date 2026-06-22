@@ -132,6 +132,17 @@ export { linkExternalId, unlinkExternalId } from "./link-identity"
 
 export { upsertAgentPeer } from "./agent-peer"
 
+// -- connect_to (brick 8, p11 inc2): the owner links one of their OWN agents into the
+// fleet, gated to a management sense (local/closed) — `local` commits; an `open` sense
+// downgrades to a confirm-prompt; `closed` is gated by a roster/membership check (never a
+// blanket allow); a bare name with no resolvable handle/DID returns needs_handle (never
+// fabricated). Writes one `action:"connect"` control-plane audit. `authorizeConnect` is the
+// pure authority predicate (consumes a pre-computed AccountMembershipResult — core-clean).
+export { connectAgents } from "./connect"
+export type { ConnectPeer, ConnectAgentsInput, ConnectAgentsDeps, ConnectResult, ConnectStatus } from "./connect"
+export { authorizeConnect } from "./connect-authority"
+export type { AuthorizeConnectInput, ConnectAuthorization } from "./connect-authority"
+
 // -- Agent identity (p11 Item 2 — DID re-key): durable home + migrate-on-read --
 export { resolveAgentIdentity, withMigratedIdentity } from "./identity"
 export type { ResolvedAgentIdentity } from "./identity"

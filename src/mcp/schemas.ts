@@ -1,13 +1,17 @@
 // MCP tool schemas for the friends server.
 //
-// 29 tools — a thin 1:1 surface over the friends library (D7): the original 14,
+// 32 tools — a thin 1:1 surface over the friends library (D7): the original 14,
 // the cross-agent moat surface (resolve_room, import_profile, grant_share,
 // revoke_share, list_shares; share_profile is de-stubbed in place), the brick-3
 // mission ledger (record_mission, get_mission, list_missions, share_mission,
 // import_mission), the brick-4 earned-standing lenses (assess_standing,
 // explain_standing — read-only, advisory; never write trust, never on the wire),
-// and the brick-5 coordination verbs (coordinate, import_coordination,
-// get_coordination — negotiate WHO does a mission; advisory assignment metadata).
+// the brick-5 coordination verbs (coordinate, import_coordination,
+// get_coordination — negotiate WHO does a mission; advisory assignment metadata),
+// and the p11-inc2 own-fleet delegation surface (connect_to — the management-sense
+// control plane that links two own agents + audits action:"connect"; send_result,
+// import_result — the result-return / delegation deliverable channel that carries
+// B's produced artifact back to A, attributed + correlated + quarantined on import).
 // Each schema follows JSON Schema for
 // `inputSchema` as required by MCP. The shape mirrors the harness's McpToolSchema
 // so the same client tooling consumes both.
