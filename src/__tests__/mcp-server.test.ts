@@ -158,13 +158,14 @@ function seedOwner(store: FriendStore): FriendRecord {
 }
 
 describe("getToolSchemas", () => {
-  it("returns exactly the 29 tools with object input schemas", () => {
+  it("returns exactly the 30 tools with object input schemas", () => {
     const schemas = getToolSchemas()
     const names = schemas.map((s) => s.name).sort()
     expect(names).toEqual(
       [
         "assess_standing",
         "channel_caps",
+        "connect_to",
         "coordinate",
         "describe_trust",
         "explain_standing",
@@ -194,7 +195,7 @@ describe("getToolSchemas", () => {
         "whoami",
       ].sort(),
     )
-    expect(schemas).toHaveLength(29)
+    expect(schemas).toHaveLength(30)
     for (const s of schemas) {
       expect(s.inputSchema.type).toBe("object")
       expect(typeof s.description).toBe("string")
@@ -925,6 +926,127 @@ describe("tools/call dispatch — control-plane audit wiring (finding 3)", () =>
     const r = await h.tool("set_trust", { friendId: "missing", trustLevel: "friend" })
     expect(r.isError).toBe(true)
     expect(audit.list()).toHaveLength(0)
+  })
+})
+
+// ── connect_to dispatch (p11 inc2, brick 8) — the management-sense control plane ──
+// The stdio path is owner-only ⇒ a `local` management sense (controlContext.senseType
+// ?? "local"), so the gate COMMITS; a network transport that constructs the server with
+// controlContext.senseType = "open" (or "closed") drives the downgrade / membership path.
+describe("tools/call dispatch — connect_to (p11 inc2)", () => {
+  let h: Harness
+  beforeEach(() => {
+    h = new Harness()
+  })
+  afterEach(() => {
+    h.stdin.destroy()
+    h.stdout.destroy()
+  })
+
+  function start(store: FriendStore, audit?: MemoryAuditSink, controlContext?: { actor?: string; originSense?: string; senseType?: "open" | "closed" | "local" | "internal"; membership?: { decision: string } }) {
+    const server = createFriendsMcpServer({ store, audit, controlContext, stdin: h.stdin, stdout: h.stdout })
+    server.start()
+    return server
+  }
+
+  it("default stdio path (no controlContext) gets a LOCAL management sense → COMMITS, links + audits action:'connect'", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    const audit = new MemoryAuditSink()
+    start(store, audit)
+    const r = await h.tool("connect_to", { agentId: "peer-1", name: "Peer One" })
+    expect(r.isError).toBe(false)
+    const payload = r.payload as { ok: boolean; status: string; record: FriendRecord }
+    expect(payload.ok).toBe(true)
+    expect(payload.status).toBe("connected")
+    expect(payload.record.trustLevel).toBe("family") // own-fleet default
+    const records = audit.list()
+    expect(records).toHaveLength(1)
+    expect(records[0]).toMatchObject({ action: "connect", level: "family", originSense: "stdio", actor: "owner:stdio" })
+  })
+
+  it("honors an explicit trustLevel arg on the link", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    const audit = new MemoryAuditSink()
+    start(store, audit)
+    const r = await h.tool("connect_to", { agentId: "peer-2", trustLevel: "friend" })
+    const payload = r.payload as { ok: boolean; record: FriendRecord }
+    expect(payload.record.trustLevel).toBe("friend")
+    expect((audit.list()[0] as ControlPlaneAuditRecord).level).toBe("friend")
+  })
+
+  it("an injected senseType:'open' controlContext yields the DOWNGRADED result (isError true), NO link, NO audit", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    const audit = new MemoryAuditSink()
+    start(store, audit, { senseType: "open" })
+    const r = await h.tool("connect_to", { agentId: "peer-3" })
+    expect(r.isError).toBe(true)
+    const payload = r.payload as { ok: boolean; status: string; downgrade?: { decision: string; reason: string } }
+    expect(payload.ok).toBe(false)
+    expect(payload.status).toBe("downgraded")
+    expect(payload.downgrade).toEqual({ decision: "downgrade", reason: "open_sense_needs_confirmation" })
+    expect(audit.list()).toHaveLength(0)
+  })
+
+  it("an injected senseType:'closed' WITHOUT a family membership downgrades (closed_sense_not_member)", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    const audit = new MemoryAuditSink()
+    start(store, audit, { senseType: "closed" })
+    const r = await h.tool("connect_to", { agentId: "peer-4" })
+    expect(r.isError).toBe(true)
+    const payload = r.payload as { ok: boolean; status: string; downgrade?: { reason: string } }
+    expect(payload.status).toBe("downgraded")
+    expect(payload.downgrade?.reason).toBe("closed_sense_not_member")
+    expect(audit.list()).toHaveLength(0)
+  })
+
+  it("an injected senseType:'closed' WITH a family_same_account membership COMMITS", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    const audit = new MemoryAuditSink()
+    start(store, audit, { senseType: "closed", membership: { decision: "family_same_account" } })
+    const r = await h.tool("connect_to", { agentId: "peer-5", name: "Peer Five" })
+    expect(r.isError).toBe(false)
+    const payload = r.payload as { ok: boolean; status: string }
+    expect(payload.ok).toBe(true)
+    expect(payload.status).toBe("connected")
+    expect(audit.list()).toHaveLength(1)
+  })
+
+  it("a bare name with no record hit → needs_handle_or_introduction (isError true), NO audit", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    const audit = new MemoryAuditSink()
+    start(store, audit)
+    const r = await h.tool("connect_to", { name: "Nobody Known" })
+    expect(r.isError).toBe(true)
+    const payload = r.payload as { ok: boolean; status: string }
+    expect(payload.ok).toBe(false)
+    expect(payload.status).toBe("needs_handle_or_introduction")
+    expect(audit.list()).toHaveLength(0)
+  })
+
+  it("a did arg is threaded to the library (a did with no record → needs_handle_or_introduction)", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    start(store)
+    const r = await h.tool("connect_to", { did: "did:key:zUnknownPeer" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("needs_handle_or_introduction")
+  })
+
+  it("works with NO audit sink wired (the link is made; no audit appended)", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    const server = createFriendsMcpServer({ store, stdin: h.stdin, stdout: h.stdout })
+    server.start()
+    const r = await h.tool("connect_to", { agentId: "peer-nosink" })
+    expect(r.isError).toBe(false)
+    expect((r.payload as { ok: boolean }).ok).toBe(true)
+    server.stop()
   })
 })
 
