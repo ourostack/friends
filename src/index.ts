@@ -143,6 +143,11 @@ export { findFriendByDid } from "./friend-lookup"
 export { FileRosterStore, rostersDirFor } from "./roster-store-file"
 export type { RosterStore, AccountRoster, RosterPin } from "./roster-store"
 
+// -- RosterVerifier seam (Q1): core declares the interface + identity-only default;
+// the a2a-client provides the Ed25519 impl (host-injected). Core stays crypto-free.
+export { identityRosterVerifier, DEFAULT_ROSTER_VERIFIER } from "./roster-verifier"
+export type { RosterVerifier } from "./roster-verifier"
+
 export { recordRelationshipOutcome } from "./outcomes"
 
 export { recordMission } from "./missions"

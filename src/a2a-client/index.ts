@@ -74,6 +74,9 @@ export type { A2ACapabilities, A2ASkill, FriendsAgentCard } from "./agent-card"
 export { resolveReachability } from "./reachability"
 export type { ReachabilityPlan } from "./reachability"
 
+// ── account-roster Ed25519 verify (the RosterVerifier seam's crypto impl) ──
+export { ed25519RosterVerifier, signRoster } from "./roster-verify"
+
 // ── send / receive adapter ──
 export { receiveShare, sendShare } from "./adapter"
 export type {
