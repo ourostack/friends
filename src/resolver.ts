@@ -8,6 +8,26 @@ import type { FriendStore } from "./store"
 import type { IdentityProvider, FriendRecord, ResolvedContext, ExternalId } from "./types"
 import { getChannelCapabilities } from "./channel"
 import { emitNervesEvent } from "./observability"
+import type { RosterStore } from "./roster-store"
+import type { RosterVerifier } from "./roster-verifier"
+// NOTE (Unit 9a→9b): `evaluateAccountMembership` is imported + wired into the
+// create-new branch in 9b (GREEN). In 9a the roster context is accepted but not yet
+// consulted (the RED state), so the value import is deferred to keep noUnusedLocals
+// happy while the tests are RED.
+
+/** Optional roster context for a cold-contact resolution (Bug C). When supplied AND
+ * the candidate's `did` is a key-verified member of the pinned account roster, the
+ * resolver seats `family` (attributable to `same_account`) even when the peer is on
+ * a different OS user. Constructor-injected (not a `resolve()` arg) so existing
+ * `new FriendResolver(store, params)` call sites stay source-compatible. The
+ * resolver stays core-clean: the Ed25519 `verifier` arrives via the seam — never an
+ * a2a-client import. */
+export interface FriendResolverRosterContext {
+  store: RosterStore
+  accountId: string
+  candidateDid: string
+  verifier?: RosterVerifier
+}
 
 export interface FriendResolverParams {
   provider: IdentityProvider
@@ -57,10 +77,12 @@ export function isLocalMachineOwnerIdentity(
 export class FriendResolver {
   private readonly store: FriendStore
   private readonly params: FriendResolverParams
+  private readonly roster?: FriendResolverRosterContext
 
-  constructor(store: FriendStore, params: FriendResolverParams) {
+  constructor(store: FriendStore, params: FriendResolverParams, roster?: FriendResolverRosterContext) {
     this.store = store
     this.params = params
+    this.roster = roster
   }
 
   async resolve(): Promise<ResolvedContext> {
@@ -147,6 +169,11 @@ export class FriendResolver {
 
     const isFirstImprint = !hasAnyFriends
     const isA2AAgent = this.params.provider === "a2a-agent"
+    // Unit 9a RED state: the roster context is accepted but NOT yet consulted (the
+    // create-new branch still uses the OS-owner + cold-A2A default unchanged). 9b
+    // wires `evaluateAccountMembership` here. The `void` keeps the field "read" so
+    // the stub compiles while the roster-awareness tests are RED.
+    void this.roster
     // The local friend that names the OS user running the daemon is the machine
     // owner (family) — they own the agent + its bundle. Usually this friend already
     // exists as a family/primary hatch imprint; this covers the un-imprinted boss

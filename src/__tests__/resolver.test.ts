@@ -9,8 +9,11 @@ import {
   isLocalMachineOwnerIdentity,
   machineOwnerUsername,
   _setMachineOwnerUsernameForTest,
+  MemoryRosterStore,
 } from "../index"
-import type { FriendRecord } from "../index"
+import type { FriendRecord, AccountRoster } from "../index"
+import { ed25519RosterVerifier, signRoster } from "../a2a-client/roster-verify"
+import { readySodium } from "./_sodium"
 
 function tmpStore(): { store: FileFriendStore; dir: string } {
   const dir = mkdtempSync(join(tmpdir(), "friends-resolver-"))
@@ -329,5 +332,119 @@ describe("FriendResolver against a temp FileFriendStore", () => {
       expect(ctx.channel.availableIntegrations).toEqual([])
       expect(ctx.channel.supportsStreaming).toBe(false)
     })
+  })
+})
+
+// Bug C — resolver roster-awareness. A cold a2a peer on a DIFFERENT OS user whose
+// did is a key-verified member of the owner's pinned roster is recognized as
+// family; a non-member stays stranger; no-roster-context is byte-for-byte
+// unchanged. The resolver consults the pinned roster via the injected RosterStore
+// (the caller seeds putRoster + putPin); it stays core-clean (the Ed25519 verifier
+// arrives via the seam — never an a2a-client import in resolver.ts).
+describe("FriendResolver — Bug C: roster-aware family", () => {
+  const dirs: string[] = []
+  afterEach(() => {
+    _setMachineOwnerUsernameForTest(undefined)
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
+  })
+
+  const MEMBER_DID = "did:key:zRosterMember"
+  const ACCOUNT_ID = "acct-owner"
+
+  async function seededRosterContext(opts: { memberDid?: string; pin?: boolean; tamper?: boolean; pinKeyOverride?: string } = {}) {
+    const sodium = await readySodium()
+    const kp = sodium.crypto_sign_keypair()
+    const rosterKey = sodium.to_base64(kp.publicKey, sodium.base64_variants.ORIGINAL)
+    const members = [{ handle: "alice", did: opts.memberDid ?? MEMBER_DID }]
+    const body = { accountId: ACCOUNT_ID, members, epoch: 1 }
+    const sig = signRoster({ sodium, accountKeyPriv: kp.privateKey, roster: body })
+    let roster: AccountRoster = { ...body, sig }
+    if (opts.tamper) roster = { ...roster, members: [{ handle: "alice", did: MEMBER_DID }, { handle: "evil", did: "did:key:zEvil" }] }
+    const store = new MemoryRosterStore()
+    await store.putRoster(roster)
+    if (opts.pin !== false) {
+      await store.putPin({ accountId: ACCOUNT_ID, rosterKey: opts.pinKeyOverride ?? rosterKey, pinnedAt: "2026-01-01T00:00:00.000Z" })
+    }
+    return { store, verifier: ed25519RosterVerifier(sodium), candidateDid: MEMBER_DID, accountId: ACCOUNT_ID }
+  }
+
+  it("seats family for a roster member on a DIFFERENT OS user", async () => {
+    _setMachineOwnerUsernameForTest("alice-os")
+    const { store, dir } = tmpStore()
+    dirs.push(dir)
+    // Populate the bundle so this is NOT the first-imprint family path.
+    await new FriendResolver(store, { provider: "local", externalId: "alice-os", displayName: "Owner", channel: "cli" }).resolve()
+
+    const roster = await seededRosterContext()
+    const ctx = await new FriendResolver(
+      store,
+      { provider: "a2a-agent", externalId: MEMBER_DID, displayName: "Sibling Bot", channel: "a2a" },
+      roster,
+    ).resolve()
+
+    expect(ctx.friend.trustLevel).toBe("family")
+    expect(ctx.friend.role).toBe("family")
+  })
+
+  it("keeps a non-member cold a2a peer at stranger (roster-awareness does not loosen the default)", async () => {
+    const { store, dir } = tmpStore()
+    dirs.push(dir)
+    const roster = await seededRosterContext()
+    const ctx = await new FriendResolver(
+      store,
+      { provider: "a2a-agent", externalId: "did:key:zNotInRoster", displayName: "Cold Bot", channel: "a2a" },
+      { ...roster, candidateDid: "did:key:zNotInRoster" },
+    ).resolve()
+    expect(ctx.friend.trustLevel).toBe("stranger")
+  })
+
+  it("does NOT seat family when the roster fails to verify (tampered)", async () => {
+    const { store, dir } = tmpStore()
+    dirs.push(dir)
+    const roster = await seededRosterContext({ tamper: true })
+    const ctx = await new FriendResolver(
+      store,
+      { provider: "a2a-agent", externalId: MEMBER_DID, displayName: "Bot", channel: "a2a" },
+      roster,
+    ).resolve()
+    expect(ctx.friend.trustLevel).toBe("stranger")
+  })
+
+  it("does NOT seat family on a roster-key mismatch (hard-fail path)", async () => {
+    const { store, dir } = tmpStore()
+    dirs.push(dir)
+    // Pin a DIFFERENT key than the roster was signed with → mismatch hard-fail.
+    const roster = await seededRosterContext({ pinKeyOverride: "K1-different" })
+    const ctx = await new FriendResolver(
+      store,
+      { provider: "a2a-agent", externalId: MEMBER_DID, displayName: "Bot", channel: "a2a" },
+      roster,
+    ).resolve()
+    expect(ctx.friend.trustLevel).toBe("stranger")
+  })
+
+  it("is byte-for-byte unchanged with NO roster context (regression-lock the existing matrix)", async () => {
+    // cold a2a ⇒ stranger
+    const a = tmpStore(); dirs.push(a.dir)
+    const coldA2A = await new FriendResolver(a.store, { provider: "a2a-agent", externalId: "did:key:zCold", displayName: "Cold", channel: "a2a" }).resolve()
+    expect(coldA2A.friend.trustLevel).toBe("stranger")
+
+    // first imprint ⇒ family
+    const b = tmpStore(); dirs.push(b.dir)
+    const imprint = await new FriendResolver(b.store, { provider: "aad", externalId: "first", displayName: "First", channel: "teams" }).resolve()
+    expect(imprint.friend.trustLevel).toBe("family")
+
+    // local machine owner ⇒ family
+    _setMachineOwnerUsernameForTest("owner")
+    const c = tmpStore(); dirs.push(c.dir)
+    await new FriendResolver(c.store, { provider: "aad", externalId: "seed", displayName: "Seed", channel: "teams" }).resolve()
+    const owner = await new FriendResolver(c.store, { provider: "local", externalId: "owner", displayName: "Owner", channel: "cli" }).resolve()
+    expect(owner.friend.trustLevel).toBe("family")
+
+    // ordinary stranger ⇒ stranger
+    const d = tmpStore(); dirs.push(d.dir)
+    await new FriendResolver(d.store, { provider: "aad", externalId: "seed2", displayName: "Seed", channel: "teams" }).resolve()
+    const stranger = await new FriendResolver(d.store, { provider: "aad", externalId: "rando", displayName: "Rando", channel: "teams" }).resolve()
+    expect(stranger.friend.trustLevel).toBe("stranger")
   })
 })
