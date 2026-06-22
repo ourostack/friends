@@ -95,16 +95,22 @@ describe("findFriendByDid", () => {
   })
 
   it("on a duplicate did, returns the record with the LOWEST createdAt (stable tie-break)", async () => {
-    const earlier = agent(
+    const earliest = agent(
       { id: "f-early", createdAt: "2026-01-01T00:00:00.000Z" },
       { bundleName: "p", familiarity: 0, sharedMissions: [], outcomes: [], identity: { did: "did:key:zDup" } },
     )
-    const later = agent(
-      { id: "f-late", createdAt: "2026-02-01T00:00:00.000Z" },
+    const middle = agent(
+      { id: "f-mid", createdAt: "2026-02-01T00:00:00.000Z" },
       { bundleName: "p", familiarity: 0, sharedMissions: [], outcomes: [], identity: { did: "did:key:zDup" } },
     )
-    // Insert later-first to prove the tie-break is by createdAt, not storage order.
-    const store = new MemoryStore([later, earlier])
+    const latest = agent(
+      { id: "f-late", createdAt: "2026-03-01T00:00:00.000Z" },
+      { bundleName: "p", familiarity: 0, sharedMissions: [], outcomes: [], identity: { did: "did:key:zDup" } },
+    )
+    // Order: latest, earliest, middle — exercises BOTH comparison arms (a later
+    // record that beats the current best, AND a later record that does NOT), and
+    // proves the tie-break is by createdAt, not storage order.
+    const store = new MemoryStore([latest, earliest, middle])
     const found = await findFriendByDid(store, "did:key:zDup")
     expect(found?.id).toBe("f-early")
   })

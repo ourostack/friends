@@ -9,6 +9,7 @@ import type { FriendRecord, TrustLevel } from "./types"
 import type { FriendOpResult } from "./results"
 import type { AuditSink, ControlPlaneAuditRecord } from "./audit"
 import type { TrustBasis } from "./trust-explanation"
+import { resolveAgentIdentity } from "./identity"
 
 /** Optional control-plane context for a trust mutation (Bug B). When a `sink` is
  * supplied, a successful mutation appends one append-only control-plane audit
@@ -51,11 +52,11 @@ export async function setFriendTrust(
   await store.put(friendId, updated)
 
   // Bug B — append one control-plane audit record on the successful mutation. The
-  // `targetDid` is derived from the record's DID hint (Unit 5b upgrades this to the
-  // identity-aware resolver). `actor` defaults to the literal "unknown" when the
-  // caller threads no context. No sink ⇒ a clean no-op.
+  // `targetDid` is the record's durable identity DID (identity.did, falling back to
+  // the migrated a2a.did via resolveAgentIdentity). `actor` defaults to the literal
+  // "unknown" when the caller threads no context. No sink ⇒ a clean no-op.
   if (ctx?.sink) {
-    const targetDid = current.agentMeta?.a2a?.did
+    const targetDid = resolveAgentIdentity(current.agentMeta).did
     const record: ControlPlaneAuditRecord = {
       action: "set_trust",
       targetId: friendId,
