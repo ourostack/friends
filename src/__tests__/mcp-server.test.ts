@@ -237,7 +237,7 @@ describe("protocol layer", () => {
     const server = createFriendsMcpServer({ store: makeStore(), stdin: h.stdin, stdout: h.stdout })
     server.start()
     const res = await h.call({ jsonrpc: "2.0", id: 2, method: "tools/list" })
-    expect((res.result as { tools: unknown[] }).tools).toHaveLength(29)
+    expect((res.result as { tools: unknown[] }).tools).toHaveLength(30)
     server.stop()
   })
 

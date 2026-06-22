@@ -36,6 +36,9 @@ import type { MissionShareEnvelope } from "../mission-share"
 import { prepareCoordination, importCoordination } from "../coordination"
 import type { CoordinationEnvelope } from "../coordination"
 import { isCoordinationIntent } from "../types"
+import { connectAgents } from "../connect"
+import type { SenseType } from "../types"
+import type { AccountMembershipResult } from "../account-roster"
 
 type Args = Record<string, unknown>
 
@@ -49,6 +52,19 @@ export interface DispatchResult {
 export interface ControlPlaneContext {
   actor?: string
   originSense?: string
+  /** The management SENSE the gate evaluates for `connect_to` (p11 inc2, brick 8).
+   * The stdio path is owner-only, so this defaults to `local` (`?? "local"`) — a
+   * `local` management sense COMMITS. A network/multi-tenant transport that constructs
+   * the server MUST pass its real senseType (`open` ⇒ confirm-prompt downgrade; `closed`
+   * ⇒ gated by `membership`). Distinct from `originSense` (a free-form audit string like
+   * "stdio"); this is the typed SenseType the authority predicate consumes. */
+  senseType?: SenseType
+  /** The PRE-COMPUTED account-roster membership for a `closed`-sense `connect_to`
+   * (p11 inc2). The stdio `local` path never consults it (left `undefined`); a `closed`
+   * network transport supplies the membership it already evaluated against the roster.
+   * The boundary stays thin — it forwards this to the library, computing no membership
+   * itself (the MCP `resolve_party` path does not wire a roster context). */
+  membership?: AccountMembershipResult
 }
 
 /** SECURITY (finding 3-A): the friends MCP server speaks JSON-RPC over **stdio**, and
@@ -309,6 +325,36 @@ export async function dispatchTool(
         await audit.append(auditRecord)
       }
       return { result: record, isError: false }
+    }
+
+    case "connect_to": {
+      // The management-sense control plane (p11 inc2, brick 8). The boundary stays
+      // thin — coerce the peer handles + level, resolve the gate's management sense
+      // (the stdio path is owner-only ⇒ `local`), and forward to the library, which
+      // owns the authority gate + disambiguation + introduce + audit. `isError` reflects
+      // ok===false (a `downgraded` / `needs_handle_or_introduction` result is an error
+      // result like the other mutation cases).
+      const result = await connectAgents(
+        store,
+        {
+          peer: {
+            agentId: coerceOptionalString(args.agentId),
+            did: coerceOptionalString(args.did),
+            name: coerceOptionalString(args.name),
+          },
+          // The stdio default is `local` (owner-only); a network transport supplies its
+          // real senseType via controlContext. The proof's stdio path commits.
+          senseType: controlContext?.senseType ?? "local",
+          ...(controlContext?.membership ? { membership: controlContext.membership } : {}),
+          trustLevel: coerceOptionalString(args.trustLevel) as TrustLevel | undefined,
+        },
+        {
+          ...(audit ? { audit } : {}),
+          actor: auditActor,
+          originSense: auditOriginSense,
+        },
+      )
+      return { result, isError: result.ok === false }
     }
 
     case "whoami": {

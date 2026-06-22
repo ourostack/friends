@@ -206,6 +206,20 @@ export function getToolSchemas(): McpToolSchema[] {
       },
     },
     {
+      name: "connect_to",
+      description: "Management-sense control plane (brick 8): the owner links one of their OWN agents into this agent's fleet — introduce a peer by agentId/did/name at a trust level (default family for own-fleet). Authority-gated: commits inline ONLY from a local (owner-only stdio) or roster-verified same-account closed sense; an open sense never commits inline (it downgrades to a confirm-prompt); a bare name with no resolvable handle/DID and no record hit returns needs_handle_or_introduction (never fabricates a target). Writes one control-plane audit record (action:'connect') through the wired sink. Returns { ok:true, status:'connected', record } or { ok:false, status:'downgraded'|'needs_handle_or_introduction', downgrade? }.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          agentId: { type: "string", description: "the peer agent's join-key agentId (an owner-supplied handle)" },
+          did: { type: "string", description: "the peer's DID (an alternative handle; must resolve to an existing record)" },
+          name: { type: "string", description: "the peer's colloquial name (resolves ONLY by matching an existing record — never fabricated)" },
+          trustLevel: { type: "string", enum: ["family", "friend", "acquaintance", "stranger"], description: "the trust to link at (default family for own-fleet linked agents)" },
+          proof: { type: "string", description: "optional opaque proof slot (reserved; the TOFU path ignores it)" },
+        },
+      },
+    },
+    {
       name: "whoami",
       description: "Resolve who the machine owner is and which friend record represents the self.",
       inputSchema: {
