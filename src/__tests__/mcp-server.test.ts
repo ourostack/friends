@@ -601,6 +601,26 @@ describe("tools/call dispatch", () => {
     expect(rec.agentMeta?.mailbox).toEqual({ repo: "/m/mailbox", selfOutboxAgentId: "agent-a" })
   })
 
+  // Bug A (MCP path): onboard_agent with no trustLevel passes undefined straight
+  // through to upsertAgentPeer, so the safe (stranger) default must land.
+  it("onboard_agent: defaults a cold peer to stranger when no trustLevel is given", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    start(store)
+    const r = await h.tool("onboard_agent", { name: "PeerBot", agentId: "peer-cold" })
+    const rec = r.payload as FriendRecord
+    expect(rec.trustLevel).toBe("stranger")
+  })
+
+  it("onboard_agent: an explicit trustLevel still wins over the stranger default", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    start(store)
+    const r = await h.tool("onboard_agent", { name: "PeerBot", agentId: "peer-acq", trustLevel: "acquaintance" })
+    const rec = r.payload as FriendRecord
+    expect(rec.trustLevel).toBe("acquaintance")
+  })
+
   it("whoami: reports the machine owner self", async () => {
     const store = makeStore()
     seedOwner(store)
