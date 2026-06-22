@@ -836,4 +836,22 @@ describe("importCoordination — consumer (the non-clobbering merge)", () => {
     const stored = await missions.get("m-local-uuid")
     expect(Object.keys(stored!.importedDelegations!["agent-a"]).sort()).toEqual(["req-1", "req-2"])
   })
+
+  it("the SAME (agentId, requestId) arriving with a DIFFERENT issuedAt does not re-stamp the delegation (delegation-level idempotency beyond the log dedupe)", async () => {
+    // A new issuedAt makes the LOG entry new (alreadyLogged does NOT short-circuit), but
+    // the delegation namespace must still be idempotent per (agentId, requestId): the
+    // existing imported task-spec is preserved, not re-stamped with a new importedAt.
+    const missions = new MemoryMissionStore([mission()])
+    await importCoordination(missions, { envelope: requestWithTask("req-dup", { issuedAt: NOW }), fromAgentId: "agent-a", trustOfSource: "friend" })
+    const afterFirst = await missions.get("m-local-uuid")
+    const firstImportedAt = afterFirst!.importedDelegations!["agent-a"]["req-dup"].provenance.importedAt
+    // re-send the SAME requestId with a LATER issuedAt (a fresh log entry, a duplicate delegation)
+    await importCoordination(missions, { envelope: requestWithTask("req-dup", { issuedAt: LATER }), fromAgentId: "agent-a", trustOfSource: "friend" })
+    const afterSecond = await missions.get("m-local-uuid")
+    // still exactly one delegation under that requestId, importedAt unchanged (not re-stamped)
+    expect(Object.keys(afterSecond!.importedDelegations!["agent-a"])).toHaveLength(1)
+    expect(afterSecond!.importedDelegations!["agent-a"]["req-dup"].provenance.importedAt).toBe(firstImportedAt)
+    // but the log DID grow (two distinct request entries with different issuedAt)
+    expect(afterSecond!.coordination!.log.filter((e) => e.intent === "request")).toHaveLength(2)
+  })
 })
