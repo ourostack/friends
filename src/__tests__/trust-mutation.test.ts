@@ -174,13 +174,33 @@ describe("setFriendTrust — Bug B: control-plane audit", () => {
     expect(result.status).toBe("updated")
   })
 
-  it("populates targetDid verbatim from ctx when supplied (Unit 2 self-contained)", async () => {
+  it("omits targetDid when the record carries no DID hint", async () => {
     const store = new MemoryStore([friend()])
     const sink = new MemoryAuditSink()
-    // Note: the identity.did-derived targetDid lands in Unit 5b; here it is ctx-only.
     await setFriendTrust(store, "f-1", "friend", { sink, originSense: "x" })
-    // With no identity.did on the record and no ctx-supplied did, targetDid is absent.
+    // With no DID on the record, targetDid is absent (the ?:{} false arm).
     expect(sink.list()[0].targetDid).toBeUndefined()
+  })
+
+  it("derives targetDid from the record's DID hint when present", async () => {
+    // Unit 2b derives targetDid from the record's a2a.did; Unit 5b upgrades the
+    // source to the identity-aware resolver (preferring identity.did).
+    const agentWithDid = friend({
+      id: "f-did",
+      kind: "agent",
+      externalIds: [{ provider: "a2a-agent" as IdentityProvider, externalId: "did:key:zPeer", linkedAt: NOW }],
+      agentMeta: {
+        bundleName: "peer",
+        familiarity: 0,
+        sharedMissions: [],
+        outcomes: [],
+        a2a: { agentId: "did:key:zPeer", did: "did:key:zPeer" },
+      },
+    })
+    const store = new MemoryStore([agentWithDid])
+    const sink = new MemoryAuditSink()
+    await setFriendTrust(store, "f-did", "friend", { sink })
+    expect(sink.list()[0].targetDid).toBe("did:key:zPeer")
   })
 
   it("still emits the friends.trust_set nerves event on a mutation", async () => {

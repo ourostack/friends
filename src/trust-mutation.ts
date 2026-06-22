@@ -7,7 +7,7 @@ import { emitNervesEvent } from "./observability"
 import type { FriendStore } from "./store"
 import type { FriendRecord, TrustLevel } from "./types"
 import type { FriendOpResult } from "./results"
-import type { AuditSink } from "./audit"
+import type { AuditSink, ControlPlaneAuditRecord } from "./audit"
 import type { TrustBasis } from "./trust-explanation"
 
 /** Optional control-plane context for a trust mutation (Bug B). When a `sink` is
@@ -25,10 +25,7 @@ export async function setFriendTrust(
   store: FriendStore,
   friendId: string,
   level: TrustLevel,
-  // RED stub (Unit 2a): the param exists so tests compile, but the audit write is
-  // not wired yet (that lands GREEN in Unit 2b). Prefixed `_` to satisfy
-  // noUnusedParameters until then.
-  _ctx?: SetFriendTrustContext,
+  ctx?: SetFriendTrustContext,
 ): Promise<FriendOpResult> {
   emitNervesEvent({
     component: "friends",
@@ -39,15 +36,38 @@ export async function setFriendTrust(
 
   const current = await store.get(friendId)
   if (!current) {
+    // not_found is an early return BEFORE any mutation — and so writes NO audit
+    // record. The control-plane log captures actual standing changes only.
     return { ok: false, status: "not_found", message: "friend record not found" }
   }
 
+  const updatedAt = new Date().toISOString()
   const updated: FriendRecord = {
     ...current,
     trustLevel: level,
     role: level,
-    updatedAt: new Date().toISOString(),
+    updatedAt,
   }
   await store.put(friendId, updated)
+
+  // Bug B — append one control-plane audit record on the successful mutation. The
+  // `targetDid` is derived from the record's DID hint (Unit 5b upgrades this to the
+  // identity-aware resolver). `actor` defaults to the literal "unknown" when the
+  // caller threads no context. No sink ⇒ a clean no-op.
+  if (ctx?.sink) {
+    const targetDid = current.agentMeta?.a2a?.did
+    const record: ControlPlaneAuditRecord = {
+      action: "set_trust",
+      targetId: friendId,
+      ...(targetDid !== undefined ? { targetDid } : {}),
+      level,
+      ...(ctx.basis !== undefined ? { basis: ctx.basis } : {}),
+      actor: ctx.actor ?? "unknown",
+      ...(ctx.originSense !== undefined ? { originSense: ctx.originSense } : {}),
+      ts: updatedAt,
+    }
+    await ctx.sink.append(record)
+  }
+
   return { ok: true, status: "updated", record: updated }
 }

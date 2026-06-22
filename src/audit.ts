@@ -6,6 +6,10 @@
 // seam and the GrantStore/FileGrantStore split. `setFriendTrust` writes one record
 // on a successful mutation; the host wires a `FileAuditSink` (or its own) to
 // persist it. With no sink injected, the mutation is unchanged (no-op audit).
+import * as fs from "fs"
+import * as fsPromises from "fs/promises"
+import * as path from "path"
+import { emitNervesEvent } from "./observability"
 import type { TrustBasis } from "./trust-explanation"
 import type { TrustLevel } from "./types"
 
@@ -38,5 +42,33 @@ export class MemoryAuditSink implements AuditSink {
   }
   list(): ControlPlaneAuditRecord[] {
     return [...this.records]
+  }
+}
+
+/** The append-only control-plane log file for a given friends directory:
+ * `<friendsDir>/_audit/control.jsonl`. A reserved `_`-prefixed sibling (like
+ * `_grants/`) so one `--dir` covers it; JSONL so appends never rewrite history. */
+export function auditPathFor(friendsDir: string): string {
+  return path.join(friendsDir, "_audit", "control.jsonl")
+}
+
+/** Filesystem AuditSink — appends each record as one JSON line to
+ * `_audit/control.jsonl`. mkdir-on-construct, mirroring FileGrantStore. */
+export class FileAuditSink implements AuditSink {
+  private readonly filePath: string
+
+  constructor(filePath: string) {
+    this.filePath = filePath
+    fs.mkdirSync(path.dirname(filePath), { recursive: true })
+    emitNervesEvent({
+      component: "friends",
+      event: "friends.audit_sink_init",
+      message: "file audit sink initialized",
+      meta: {},
+    })
+  }
+
+  async append(record: ControlPlaneAuditRecord): Promise<void> {
+    await fsPromises.appendFile(this.filePath, JSON.stringify(record) + "\n", "utf-8")
   }
 }

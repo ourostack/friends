@@ -125,7 +125,7 @@ export { setFriendTrust } from "./trust-mutation"
 export type { SetFriendTrustContext } from "./trust-mutation"
 
 // -- Control-plane audit (Bug B): append-only record of trust mutations --
-export { MemoryAuditSink } from "./audit"
+export { MemoryAuditSink, FileAuditSink, auditPathFor } from "./audit"
 export type { AuditSink, ControlPlaneAuditRecord } from "./audit"
 
 export { linkExternalId, unlinkExternalId } from "./link-identity"
