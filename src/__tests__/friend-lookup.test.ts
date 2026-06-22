@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 
-import { findFriendByDid } from "../index"
-import type { FriendStore, FriendRecord } from "../index"
+import { findFriendByDid, setNervesEmitter } from "../index"
+import type { FriendStore, FriendRecord, NervesEvent } from "../index"
 
 const NOW = "2026-03-14T18:00:00.000Z"
 
@@ -94,25 +94,101 @@ describe("findFriendByDid", () => {
     expect(await findFriendByDid(store, "did:key:zNope")).toBeNull()
   })
 
-  it("on a duplicate did, returns the record with the LOWEST createdAt (stable tie-break)", async () => {
-    const earliest = agent(
-      { id: "f-early", createdAt: "2026-01-01T00:00:00.000Z" },
+  // SECURITY (finding 5, MEDIUM): a duplicate did is an anomaly, and the tie-break
+  // must NOT reward back-dating. The old rule (lowest createdAt wins) let an attacker
+  // mint a duplicate-did record with an earlier createdAt to silently shadow a legit
+  // record. The new rule: warn loudly, prefer a trust-relevant signal (a pinned/
+  // verified record), and use a STABLE non-temporal tie-break (lowest id) otherwise.
+  it("on a duplicate did, prefers the pinned/verified record even when an attacker back-dates createdAt", async () => {
+    // Attacker record: NO pinnedKey, but a back-dated (earlier) createdAt to try to win.
+    const attacker = agent(
+      { id: "f-attacker", createdAt: "2020-01-01T00:00:00.000Z" },
       { bundleName: "p", familiarity: 0, sharedMissions: [], outcomes: [], identity: { did: "did:key:zDup" } },
     )
-    const middle = agent(
-      { id: "f-mid", createdAt: "2026-02-01T00:00:00.000Z" },
-      { bundleName: "p", familiarity: 0, sharedMissions: [], outcomes: [], identity: { did: "did:key:zDup" } },
+    // Legit record: a TOFU-pinned key (the trust-relevant signal), later createdAt.
+    const legit = agent(
+      { id: "f-legit", createdAt: "2026-03-01T00:00:00.000Z" },
+      { bundleName: "p", familiarity: 0, sharedMissions: [], outcomes: [], identity: { did: "did:key:zDup", pinnedKey: "k-pinned" } },
     )
-    const latest = agent(
-      { id: "f-late", createdAt: "2026-03-01T00:00:00.000Z" },
-      { bundleName: "p", familiarity: 0, sharedMissions: [], outcomes: [], identity: { did: "did:key:zDup" } },
-    )
-    // Order: latest, earliest, middle — exercises BOTH comparison arms (a later
-    // record that beats the current best, AND a later record that does NOT), and
-    // proves the tie-break is by createdAt, not storage order.
-    const store = new MemoryStore([latest, earliest, middle])
+    const store = new MemoryStore([attacker, legit])
     const found = await findFriendByDid(store, "did:key:zDup")
-    expect(found?.id).toBe("f-early")
+    // The pinned record wins despite the attacker's earlier createdAt.
+    expect(found?.id).toBe("f-legit")
+  })
+
+  it("emits a loud (warn-level) anomaly warning when a duplicate did is detected", async () => {
+    const seen: NervesEvent[] = []
+    setNervesEmitter((e) => seen.push(e))
+    try {
+      const a = agent({ id: "f-a" }, { bundleName: "p", familiarity: 0, sharedMissions: [], outcomes: [], identity: { did: "did:key:zDup" } })
+      const b = agent({ id: "f-b" }, { bundleName: "p", familiarity: 0, sharedMissions: [], outcomes: [], identity: { did: "did:key:zDup" } })
+      const store = new MemoryStore([a, b])
+      await findFriendByDid(store, "did:key:zDup")
+      const warns = seen.filter((e) => e.level === "warn" && e.event === "friends.duplicate_did")
+      expect(warns).toHaveLength(1)
+      expect(warns[0].meta?.did).toBe("did:key:zDup")
+    } finally {
+      setNervesEmitter(null)
+    }
+  })
+
+  it("does NOT warn for a unique did (no anomaly)", async () => {
+    const seen: NervesEvent[] = []
+    setNervesEmitter((e) => seen.push(e))
+    try {
+      const store = new MemoryStore([
+        agent({ id: "f-1" }, { bundleName: "p", familiarity: 0, sharedMissions: [], outcomes: [], identity: { did: "did:key:zSolo" } }),
+      ])
+      await findFriendByDid(store, "did:key:zSolo")
+      expect(seen.filter((e) => e.event === "friends.duplicate_did")).toHaveLength(0)
+    } finally {
+      setNervesEmitter(null)
+    }
+  })
+
+  it("uses a stable lowest-id tie-break (not createdAt) when neither duplicate is pinned", async () => {
+    // Both unpinned: createdAt must NOT decide it. f-aaa has a LATER createdAt but a
+    // lower id, and still wins — proving the tie-break is non-temporal (back-date-proof).
+    const lowerId = agent(
+      { id: "f-aaa", createdAt: "2026-12-01T00:00:00.000Z" },
+      { bundleName: "p", familiarity: 0, sharedMissions: [], outcomes: [], identity: { did: "did:key:zDup" } },
+    )
+    const higherId = agent(
+      { id: "f-zzz", createdAt: "2020-01-01T00:00:00.000Z" },
+      { bundleName: "p", familiarity: 0, sharedMissions: [], outcomes: [], identity: { did: "did:key:zDup" } },
+    )
+    // Storage order: higherId first, then lowerId — exercises both comparison arms.
+    const store = new MemoryStore([higherId, lowerId])
+    const found = await findFriendByDid(store, "did:key:zDup")
+    expect(found?.id).toBe("f-aaa")
+  })
+
+  it("keeps the pinned record when it appears AFTER an unpinned duplicate in storage order", async () => {
+    // Storage order: unpinned first, pinned second — exercises the 'replace current
+    // best because the candidate is pinned' arm.
+    const unpinned = agent({ id: "f-unpinned" }, { bundleName: "p", familiarity: 0, sharedMissions: [], outcomes: [], identity: { did: "did:key:zDup" } })
+    const pinned = agent({ id: "f-pinned" }, { bundleName: "p", familiarity: 0, sharedMissions: [], outcomes: [], identity: { did: "did:key:zDup", pinnedKey: "k" } })
+    const store = new MemoryStore([unpinned, pinned])
+    const found = await findFriendByDid(store, "did:key:zDup")
+    expect(found?.id).toBe("f-pinned")
+  })
+
+  it("keeps the first pinned record when a SECOND, lower-id pinned duplicate appears (pinned ties break by id)", async () => {
+    const pinnedHigh = agent({ id: "f-pinned-z" }, { bundleName: "p", familiarity: 0, sharedMissions: [], outcomes: [], identity: { did: "did:key:zDup", pinnedKey: "k1" } })
+    const pinnedLow = agent({ id: "f-pinned-a" }, { bundleName: "p", familiarity: 0, sharedMissions: [], outcomes: [], identity: { did: "did:key:zDup", pinnedKey: "k2" } })
+    // pinnedHigh first, then pinnedLow — both pinned, so the lower id wins.
+    const store = new MemoryStore([pinnedHigh, pinnedLow])
+    const found = await findFriendByDid(store, "did:key:zDup")
+    expect(found?.id).toBe("f-pinned-a")
+  })
+
+  it("does not replace a pinned best with a later unpinned duplicate (pinned beats unpinned regardless of order/id)", async () => {
+    const pinned = agent({ id: "f-pinned-z" }, { bundleName: "p", familiarity: 0, sharedMissions: [], outcomes: [], identity: { did: "did:key:zDup", pinnedKey: "k" } })
+    // Lower id but unpinned, appears second → must NOT win over the pinned record.
+    const unpinnedLowId = agent({ id: "f-aaa" }, { bundleName: "p", familiarity: 0, sharedMissions: [], outcomes: [], identity: { did: "did:key:zDup" } })
+    const store = new MemoryStore([pinned, unpinnedLowId])
+    const found = await findFriendByDid(store, "did:key:zDup")
+    expect(found?.id).toBe("f-pinned-z")
   })
 
   it("returns null for a store with no listAll method", async () => {
