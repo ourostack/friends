@@ -1,7 +1,7 @@
 import type { Channel, FriendRecord, TrustLevel } from "./types"
 import { emitNervesEvent } from "./observability"
 
-export type TrustBasis = "direct" | "shared_group" | "unknown"
+export type TrustBasis = "direct" | "shared_group" | "unknown" | "same_account"
 
 export interface TrustExplanation {
   level: TrustLevel
@@ -25,6 +25,12 @@ export function describeTrustContext(input: {
   friend: FriendRecord
   channel: Channel
   isGroupChat?: boolean
+  /** When the relationship is `family` AND this hint is `"same_account"`, the
+   * explanation attributes the family trust to the signed account roster
+   * (`basis: "same_account"`) instead of the generic `direct`. Ignored for any
+   * non-family level. Absent ⇒ existing behavior byte-for-byte. (Unit 3a stub:
+   * accepted but not yet honored — implemented GREEN in Unit 3b.) */
+  basisHint?: TrustBasis
 }): TrustExplanation {
   const level = resolveLevel(input.friend)
   const relatedGroupId = findRelatedGroupId(input.friend)
