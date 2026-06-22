@@ -1690,6 +1690,36 @@ describe("mission tools/call dispatch", () => {
     expect((r.payload as { status: string }).status).toBe("not_found")
   })
 
+  it("send_result: self id is empty when whoami resolves no self (no owner/family)", async () => {
+    const missions = makeMissionStore([missionOf()])
+    // No owner/family record → whoami returns no self → selfAgentId "". A friend recipient
+    // for agent-a so the coordinate scope consents at the identity tier.
+    const store = makeStore([
+      { ...ownerRecord(), id: "rec-a", name: "Delegator", role: "agent-peer", kind: "agent", trustLevel: "friend", externalIds: [{ provider: "a2a-agent", externalId: "agent-a", linkedAt: NOW }] },
+    ])
+    start(store, makeGrantStore(), missions)
+    const r = await h.tool("send_result", { missionId: "m-1", toAgentId: "agent-a", requestId: "req-1", result: JSON.stringify({ summary: "done" }) })
+    expect(r.isError).toBe(false)
+    const payload = r.payload as { ok: boolean; envelope: { fromAgentId: string } }
+    expect(payload.ok).toBe(true)
+    expect(payload.envelope.fromAgentId).toBe("")
+  })
+
+  it("send_result: a missing/malformed result arg defaults to an empty-summary deliverable", async () => {
+    const missions = makeMissionStore([missionOf()])
+    const store = makeStore([
+      ownerRecord(),
+      { ...ownerRecord(), id: "rec-a", name: "Delegator", role: "agent-peer", kind: "agent", trustLevel: "friend", externalIds: [{ provider: "a2a-agent", externalId: "agent-a", linkedAt: NOW }] },
+    ])
+    start(store, makeGrantStore(), missions)
+    // no `result` arg → parseMaybeJson undefined → defaults to { summary: "" }
+    const r = await h.tool("send_result", { missionId: "m-1", toAgentId: "agent-a", requestId: "req-1" })
+    expect(r.isError).toBe(false)
+    const payload = r.payload as { ok: boolean; envelope: { result: { summary: string } } }
+    expect(payload.ok).toBe(true)
+    expect(payload.envelope.result.summary).toBe("")
+  })
+
   // ── import_result (gap-2: importMissionResult) ──
 
   it("import_result: reports unsupported with no mission store", async () => {
