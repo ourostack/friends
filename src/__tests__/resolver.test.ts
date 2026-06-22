@@ -410,10 +410,19 @@ describe("FriendResolver — Bug C: roster-aware family", () => {
     expect(ctx.friend.trustLevel).toBe("stranger")
   })
 
-  it("does NOT seat family on a roster-key mismatch (hard-fail path)", async () => {
+  // finding 7 (LOW): this exercises the `unverified` branch, NOT the
+  // `roster_key_mismatch` branch. The resolver reads the pinned key and passes it
+  // straight back to evaluateAccountMembership (rosterKey: pin.rosterKey), so the
+  // presented key ALWAYS equals the pinned key — the resolver path can never fire the
+  // mismatch guard and never re-pins. A wrong pinned key instead makes the roster sig
+  // fail to verify under that key → `unverified` → no family. (The true
+  // roster_key_mismatch branch is covered directly in account-roster.test.ts, where a
+  // caller presents a key that differs from an existing pin.)
+  it("does NOT seat family when the pinned key does not match the signing key (verification fails → unverified)", async () => {
     const { store, dir } = tmpStore()
     dirs.push(dir)
-    // Pin a DIFFERENT key than the roster was signed with → mismatch hard-fail.
+    // Pin a DIFFERENT key than the roster was signed with. The resolver passes this
+    // pinned key back to the membership check, so the sig fails to verify under it.
     const roster = await seededRosterContext({ pinKeyOverride: "K1-different" })
     const ctx = await new FriendResolver(
       store,
