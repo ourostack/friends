@@ -41,7 +41,7 @@ import { randomUUID } from "node:crypto"
 
 import { buildOutgoing, readIncoming, markSeen } from "../src/mailbox"
 import type { SeenLedger } from "../src/mailbox"
-import { evaluateAccountMembership, verifiedCandidate, MemoryRosterStore } from "../src"
+import { evaluateAccountMembership, verifiedCandidate, MemoryRosterStore, machineOwnerUsername } from "../src"
 import type { AccountRoster } from "../src"
 import { ready, signRoster, ed25519RosterVerifier, ed25519PubToDidKey } from "../src/a2a-client"
 
@@ -170,15 +170,25 @@ function seedMission(dir: string, record: Record<string, unknown>): void {
   writeFileSync(join(missionsDir, `${record.id}.json`), JSON.stringify(record, null, 2), "utf-8")
 }
 
-/** An owner/self record whose `id` IS its routing agentId. `family` so whoami's
- * family-fallback resolves it deterministically regardless of the host OS user. */
+/** An owner/self record whose `id` IS its routing agentId. Its `local` externalId is
+ * the REAL OS user so whoami resolves it by the PRIMARY local-id match — deterministic
+ * even after connect_to adds `family` peer records (the family-fallback alone would be
+ * ambiguous once two family records exist). `family` too (the owner is never a stranger).
+ * `ownerExternalId` is kept as a second local id for provenance/readability. */
 function ownerRecord(agentId: string, ownerExternalId: string, now: string): Record<string, unknown> {
+  const osUser = machineOwnerUsername()
+  const localIds = [{ provider: "local", externalId: ownerExternalId, linkedAt: now }]
+  // Add the real OS user as a local id so whoami's isLocalMachineOwnerIdentity match
+  // finds THIS record first (independent of the family-fallback ordering).
+  if (osUser && osUser !== ownerExternalId) {
+    localIds.push({ provider: "local", externalId: osUser, linkedAt: now })
+  }
   return {
     id: agentId,
     name: `Owner ${agentId}`,
     role: "primary",
     trustLevel: "family",
-    externalIds: [{ provider: "local", externalId: ownerExternalId, linkedAt: now }],
+    externalIds: localIds,
     tenantMemberships: [],
     toolPreferences: {},
     notes: {},
@@ -402,17 +412,108 @@ async function main(): Promise<void> {
     )
     ok("A↔B are now linked own-fleet family peers (the introduce effect persisted)")
 
-    void buildOutgoing
-    void readIncoming
-    void markSeen
-    void ({} as SeenLedger)
+    // ════════════════════════════════════════════════════════════════════════
+    // STEP 4 — The NORTH STAR: A delegates a task to B → B performs it → B returns
+    // the result to A. The task-spec rides a coordination `request` (kind:"coordination");
+    // the deliverable rides a result-return (kind:"mission_result"). Both cross the
+    // in-repo mailbox. Each import lands QUARANTINED + attributed; the result correlates
+    // to A's delegation by missionKey + requestId.
+    // ════════════════════════════════════════════════════════════════════════
+    step("A delegates (task-spec) → B performs → B returns the result → A imports it")
+
+    // (1) A DELEGATES — a coordinate request carrying a task. The producer mints the
+    // requestId and records the delegation first-party under A's delegations[requestId].
+    const delegateOut = await agentA.tool("coordinate", {
+      missionId: missionInA,
+      toAgentId: AGENT_B_ID,
+      intent: "request",
+      note: "please audit the auth module",
+      task: JSON.stringify({ summary: "Audit the auth module", details: "focus on the token path", inputs: { repo: "friends", pr: "12" } }),
+    })
+    assert.equal(delegateOut.isError, false, "A's delegation request must be consented (B is family)")
+    const reqEnvelope = delegateOut.payload.envelope
+    assert.ok(reqEnvelope.task, "the coordination request carries a task-spec")
+    const requestId = reqEnvelope.task.requestId as string
+    assert.ok(requestId && requestId.length > 0, "the producer minted a requestId")
+    assert.equal(reqEnvelope.subject.missionKey, MISSION_KEY, "the request names the mission by missionKey")
+    assert.equal(JSON.stringify(reqEnvelope).includes(missionInA), false, "A's local mission UUID must NOT be on the wire")
+    ok(`A delegated task ${requestId} (mission named by missionKey, no local UUID on the wire)`)
+
+    // A holds the delegation FIRST-PARTY (the correlation anchor the result-import checks).
+    const aMissionAfterDelegate = (await agentA.tool("get_mission", { missionId: missionInA })).payload
+    assert.ok(aMissionAfterDelegate.delegations && aMissionAfterDelegate.delegations[requestId], "A records the delegation first-party under delegations[requestId]")
+    assert.equal(aMissionAfterDelegate.delegations[requestId].provenance.origin, "first_party", "A's delegation is first-party")
+    ok(`A holds the delegation first-party under delegations[${requestId}] (the result-correlation anchor)`)
+
+    // The request crosses the mailbox as kind:"coordination"; B reads + imports it.
+    const reqMsg = buildOutgoing({ envelope: reqEnvelope, fromAgentId: AGENT_A_ID, toAgentId: AGENT_B_ID, kind: "coordination" })
+    mailboxWrite(mailboxDir, reqMsg.relativePath, reqMsg.bytes)
+    const reqFiles = mailboxEnumerate(mailboxDir, AGENT_B_ID)
+    const reqReady = readIncoming({ files: reqFiles, selfAgentId: AGENT_B_ID, seen: { seen: {} } }).ready.find((m) => m.messageId === reqMsg.messageId)
+    assert.ok(reqReady, "the coordination request is ready for B")
+    assert.equal(reqReady!.kind, "coordination", "the request rides kind:coordination")
+    const importDeleg = await agentB.tool("import_coordination", { envelope: reqReady!.envelope, fromAgentId: AGENT_A_ID, trustOfSource: "family" })
+    assert.equal(importDeleg.payload.ok, true, "B imports A's delegation request")
+
+    // B's store lands the task-spec QUARANTINED under importedDelegations[A][requestId].
+    const bMissionAfterImport = (await agentB.tool("get_mission", { missionId: missionInB })).payload
+    const landedTask = bMissionAfterImport.importedDelegations?.[AGENT_A_ID]?.[requestId]
+    assert.ok(landedTask, "B lands the task-spec under importedDelegations[A][requestId] (quarantined)")
+    assert.equal(landedTask.task.summary, "Audit the auth module", "the imported task carries B's brief")
+    assert.equal(landedTask.provenance.origin, "imported", "the imported task is stamped origin:imported")
+    assert.equal(landedTask.provenance.assertedBy.agentId, AGENT_A_ID, "the imported task is attributed to A")
+    // B's first-party learnings are untouched by the import.
+    assert.equal(bMissionAfterImport.learnings.gotcha.value, "rebase, never merge", "B's first-party learnings are untouched by the delegation import")
+    ok(`B imported the task quarantined under importedDelegations[${AGENT_A_ID}][${requestId}] (attributed to A, first-party untouched)`)
+
+    // (2) B PERFORMS it — the example FABRICATES B's deliverable (the proof is the
+    // MECHANISM, not real work). B returns it via send_result, attributed to B,
+    // correlated by missionKey + requestId.
+    const sendOut = await agentB.tool("send_result", {
+      missionId: missionInB,
+      toAgentId: AGENT_A_ID,
+      requestId,
+      result: JSON.stringify({ summary: "Auth module audited: 2 findings (token replay, weak nonce)", outputs: { findings: "2", severity: "high" } }),
+    })
+    assert.equal(sendOut.isError, false, "B's result-return must be consented (A is family)")
+    const resultEnvelope = sendOut.payload.envelope
+    assert.equal(resultEnvelope.fromAgentId, AGENT_B_ID, "the result is attributed to B (fromAgentId)")
+    assert.equal(resultEnvelope.requestId, requestId, "the result correlates to A's delegation by requestId")
+    assert.equal(resultEnvelope.subject.missionKey, MISSION_KEY, "the result names the mission by missionKey")
+    assert.equal(JSON.stringify(resultEnvelope).includes(missionInB), false, "B's local mission UUID must NOT be on the wire")
+    ok(`B performed + returned result for ${requestId} (attributed to B, correlated, no local UUID on the wire)`)
+
+    // (3) B RETURNS — the result crosses the mailbox as kind:"mission_result"; A reads it.
+    const resMsg = buildOutgoing({ envelope: resultEnvelope, fromAgentId: AGENT_B_ID, toAgentId: AGENT_A_ID, kind: "mission_result" })
+    mailboxWrite(mailboxDir, resMsg.relativePath, resMsg.bytes)
+    const resFiles = mailboxEnumerate(mailboxDir, AGENT_A_ID)
+    const resReady = readIncoming({ files: resFiles, selfAgentId: AGENT_A_ID, seen: { seen: {} } }).ready.find((m) => m.messageId === resMsg.messageId)
+    assert.ok(resReady, "the result is ready for A")
+    assert.equal(resReady!.kind, "mission_result", "the result rides kind:mission_result on the wire")
+    ok(`B's result crossed the mailbox as kind:"mission_result"`)
+
+    // A IMPORTS it — lands QUARANTINED under importedResults[B][requestId], attributed to B.
+    const importRes = await agentA.tool("import_result", { envelope: resReady!.envelope, fromAgentId: AGENT_B_ID, trustOfSource: "family" })
+    assert.equal(importRes.isError, false, "A imports B's result")
+    assert.equal(importRes.payload.status, "imported", "the result import status is imported")
+
+    const aMissionAfterResult = (await agentA.tool("get_mission", { missionId: missionInA })).payload
+    const landedResult = aMissionAfterResult.importedResults?.[AGENT_B_ID]?.[requestId]
+    assert.ok(landedResult, "A's store holds B's deliverable under importedResults[B][requestId]")
+    assert.ok(landedResult.summary.includes("2 findings"), "the deliverable summary value is present")
+    assert.equal(landedResult.provenance.origin, "imported", "the imported result is stamped origin:imported")
+    assert.equal(landedResult.provenance.assertedBy.agentId, AGENT_B_ID, "the imported result is attributed to B")
+    assert.equal(landedResult.requestId, requestId, "the imported result's requestId matches A's original delegation")
+    // and it's correlated to A's first-party delegation.
+    assert.ok(aMissionAfterResult.delegations[requestId], "A still holds the original first-party delegation the result correlates to")
+    ok(`A imported B's deliverable under importedResults[${AGENT_B_ID}][${requestId}] — attributed to B, quarantined, correlated to A's delegation`)
 
     // ════════════════════════════════════════════════════════════════════════
     console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    console.log("✅  DELEGATION PROOF (through STEP 3) — two own-fleet agents on")
-    console.log("    separate stores, same-account FAMILY (signed roster), LINKED by")
-    console.log("    the owner via connect_to (action:\"connect\" audited on both sides).")
-    console.log("    (delegate→perform→return lands in the next unit.)")
+    console.log("✅  DELEGATION PROOF (through STEP 4) — the NORTH STAR round-trip:")
+    console.log("    A delegated a task (task-spec) → B performed it → B returned the")
+    console.log("    deliverable → A imported it (attributed to B, quarantined, correlated).")
+    console.log("    (the full hard-assert invariant battery lands in the next unit.)")
     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
   } finally {
     agentA?.kill()

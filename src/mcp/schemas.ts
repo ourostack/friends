@@ -389,6 +389,7 @@ export function getToolSchemas(): McpToolSchema[] {
           intent: { type: "string", enum: ["request", "offer", "accept", "decline", "handoff"], description: "the coordination verb: request (will you take this?) / offer (I'll take this) / accept (yes, I'm on it — sets assignee=self) / decline (no) / handoff (it's yours now — you must hold the assignment; proposes a new assignee)" },
           note: { type: "string", description: "optional free text carried on the message + logged" },
           proposedAssignee: { type: "object", description: "the proposed new assignee { agentId?, agentName? } — meaningful ONLY on intent=handoff" },
+          task: { type: "object", description: "optional delegation task-spec { summary, details?, inputs? } — meaningful ONLY on intent=request (gap-2); the producer mints a requestId, stamps it on the envelope, and records the delegation first-party for the result-return to correlate against" },
           proof: { type: "string", description: "optional opaque proof to stamp on the envelope (for a non-TOFU recipient verifier)" },
         },
         required: ["missionId", "toAgentId", "intent"],

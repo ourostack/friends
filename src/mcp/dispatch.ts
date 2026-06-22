@@ -545,6 +545,9 @@ export async function dispatchTool(
         note: coerceOptionalString(args.note),
         proposedAssignee: parseMaybeJson<AgentAttribution>(args.proposedAssignee),
         selfAgentId,
+        // gap-1 (p11 inc2): an optional task-spec, meaningful only on a `request`. The
+        // library mints the requestId + records the delegation first-party.
+        task: parseMaybeJson<{ summary: string; details?: string; inputs?: Record<string, string> }>(args.task),
         proof: coerceOptionalString(args.proof),
       })
       return { result, isError: result.ok === false }

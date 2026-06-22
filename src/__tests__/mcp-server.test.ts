@@ -1853,6 +1853,33 @@ describe("coordination tools/call dispatch (brick 5)", () => {
     expect(payload.envelope.note).toBe("take the API side?")
   })
 
+  it("coordinate: threads a string-encoded task-spec onto a request (gap-1) — mints a requestId, records the delegation", async () => {
+    const missions = makeMissionStore([missionOf()])
+    start(ownerAndFriendPeer(), makeGrantStore(), missions)
+    const r = await h.tool("coordinate", { missionId: "m-1", toAgentId: "agent-b", intent: "request", task: JSON.stringify({ summary: "Audit auth", details: "token path" }) })
+    expect(r.isError).toBe(false)
+    const payload = r.payload as { ok: boolean; envelope: { task?: { requestId: string; summary: string; details?: string } } }
+    expect(payload.ok).toBe(true)
+    expect(payload.envelope.task).toBeDefined()
+    expect(typeof payload.envelope.task!.requestId).toBe("string")
+    expect(payload.envelope.task!.requestId.length).toBeGreaterThan(0)
+    expect(payload.envelope.task!.summary).toBe("Audit auth")
+    expect(payload.envelope.task!.details).toBe("token path")
+    // the delegation is recorded first-party on the producer's mission
+    const stored = await (missions.get("m-1"))
+    expect(stored!.delegations![payload.envelope.task!.requestId].task.summary).toBe("Audit auth")
+  })
+
+  it("coordinate: a task on a non-request intent is ignored (no task on the offer envelope)", async () => {
+    const missions = makeMissionStore([missionOf()])
+    start(ownerAndFriendPeer(), makeGrantStore(), missions)
+    const r = await h.tool("coordinate", { missionId: "m-1", toAgentId: "agent-b", intent: "offer", task: JSON.stringify({ summary: "ignored" }) })
+    expect(r.isError).toBe(false)
+    const payload = r.payload as { ok: boolean; envelope: Record<string, unknown> }
+    expect(payload.ok).toBe(true)
+    expect("task" in payload.envelope).toBe(false)
+  })
+
   it("coordinate: self id is empty when whoami resolves no self (no owner/family)", async () => {
     // No owner/family record → whoami returns no self → selfAgentId "" (the ?? "" arm).
     // The recipient peer is still a friend, so the identity-tier scope consents.

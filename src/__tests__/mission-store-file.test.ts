@@ -212,4 +212,40 @@ describe("FileMissionStore", () => {
     expect(loaded?.coordination?.assignedAt).toBe(NOW)
     expect(loaded?.coordination?.log[0].intent).toBe("accept")
   })
+
+  it("normalize: preserves first-party delegations through a round-trip (gap-1)", async () => {
+    dir = mkdtempSync(join(tmpdir(), "friends-missions-"))
+    const store = new FileMissionStore(missionsDirFor(dir))
+    await store.put("m-1", mission({ delegations: { "req-1": { task: { requestId: "req-1", summary: "Audit auth" }, provenance: { origin: "first_party" } } } }))
+    const loaded = await store.get("m-1")
+    expect(loaded?.delegations?.["req-1"].task.summary).toBe("Audit auth")
+    expect(loaded?.delegations?.["req-1"].provenance.origin).toBe("first_party")
+  })
+
+  it("normalize: preserves imported delegations through a round-trip (gap-1)", async () => {
+    dir = mkdtempSync(join(tmpdir(), "friends-missions-"))
+    const store = new FileMissionStore(missionsDirFor(dir))
+    await store.put("m-1", mission({ importedDelegations: { "agent-a": { "req-1": { task: { requestId: "req-1", summary: "theirs" }, provenance: { origin: "imported", assertedBy: { agentId: "agent-a" }, importedAt: NOW } } } } }))
+    const loaded = await store.get("m-1")
+    expect(loaded?.importedDelegations?.["agent-a"]["req-1"].task.summary).toBe("theirs")
+    expect(loaded?.importedDelegations?.["agent-a"]["req-1"].provenance.origin).toBe("imported")
+  })
+
+  it("normalize: preserves first-party results through a round-trip (gap-2)", async () => {
+    dir = mkdtempSync(join(tmpdir(), "friends-missions-"))
+    const store = new FileMissionStore(missionsDirFor(dir))
+    await store.put("m-1", mission({ results: { "req-1": { requestId: "req-1", summary: "B's deliverable", provenance: { origin: "first_party" } } } }))
+    const loaded = await store.get("m-1")
+    expect(loaded?.results?.["req-1"].summary).toBe("B's deliverable")
+    expect(loaded?.results?.["req-1"].provenance?.origin).toBe("first_party")
+  })
+
+  it("normalize: preserves imported results through a round-trip (gap-2)", async () => {
+    dir = mkdtempSync(join(tmpdir(), "friends-missions-"))
+    const store = new FileMissionStore(missionsDirFor(dir))
+    await store.put("m-1", mission({ importedResults: { "agent-b": { "req-1": { requestId: "req-1", summary: "their deliverable", provenance: { origin: "imported", assertedBy: { agentId: "agent-b" }, importedAt: NOW } } } } }))
+    const loaded = await store.get("m-1")
+    expect(loaded?.importedResults?.["agent-b"]["req-1"].summary).toBe("their deliverable")
+    expect(loaded?.importedResults?.["agent-b"]["req-1"].provenance?.origin).toBe("imported")
+  })
 })

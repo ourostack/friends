@@ -107,6 +107,14 @@ export class FileMissionStore implements MissionStore {
       // present iff the record carries one, so a legacy mission with no coordination
       // round-trips unchanged (absent ⇒ unclaimed).
       ...(raw.coordination && typeof raw.coordination === "object" ? { coordination: raw.coordination } : {}),
+      // The delegation/result namespaces (gap-1 + gap-2, p11 inc2) pass through the same
+      // way: present iff the record carries one, so a legacy mission round-trips unchanged
+      // (absent ⇒ none). Without these, a FILE-backed store would silently drop them,
+      // breaking the result-return correlation (which reads first-party `delegations`).
+      ...(raw.delegations && typeof raw.delegations === "object" ? { delegations: raw.delegations } : {}),
+      ...(raw.importedDelegations && typeof raw.importedDelegations === "object" ? { importedDelegations: raw.importedDelegations } : {}),
+      ...(raw.results && typeof raw.results === "object" ? { results: raw.results } : {}),
+      ...(raw.importedResults && typeof raw.importedResults === "object" ? { importedResults: raw.importedResults } : {}),
       createdAt: typeof raw.createdAt === "string" ? raw.createdAt : new Date().toISOString(),
       updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : new Date().toISOString(),
       schemaVersion: typeof raw.schemaVersion === "number" ? raw.schemaVersion : 1,
