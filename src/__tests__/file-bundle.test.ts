@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, existsSync } from "fs"
 import { tmpdir } from "os"
 import { join } from "path"
 
-import { openFileBundle, FileFriendStore, FileGrantStore, FileMissionStore, grantsDirFor, missionsDirFor } from "../index"
+import { openFileBundle, FileFriendStore, FileGrantStore, FileMissionStore, FileAuditSink, grantsDirFor, missionsDirFor, auditPathFor } from "../index"
 import type { FileBundle } from "../index"
 import type { FriendRecord, ShareGrant, MissionRecord } from "../index"
 
@@ -66,13 +66,18 @@ describe("openFileBundle", () => {
     expect(bundle.store).toBeInstanceOf(FileFriendStore)
     expect(bundle.grants).toBeInstanceOf(FileGrantStore)
     expect(bundle.missions).toBeInstanceOf(FileMissionStore)
+    // finding 3: the bundle also wires the control-plane audit sink so the live MCP
+    // path can write Bug B records end-to-end.
+    expect(bundle.audit).toBeInstanceOf(FileAuditSink)
     expect(bundle.friendsDir).toBe(friendsDir)
     expect(bundle.grantsDir).toBe(grantsDirFor(friendsDir))
     expect(bundle.missionsDir).toBe(missionsDirFor(friendsDir))
-    // All three directories are created on construction.
+    expect(bundle.auditPath).toBe(auditPathFor(friendsDir))
+    // All directories are created on construction (the audit sink mkdirs _audit/).
     expect(existsSync(bundle.friendsDir)).toBe(true)
     expect(existsSync(bundle.grantsDir)).toBe(true)
     expect(existsSync(bundle.missionsDir)).toBe(true)
+    expect(existsSync(join(friendsDir, "_audit"))).toBe(true)
   })
 
   it("round-trips a friend through .store, a grant through .grants, a mission through .missions", async () => {

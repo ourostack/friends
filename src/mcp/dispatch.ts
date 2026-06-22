@@ -7,6 +7,8 @@ import { emitNervesEvent } from "../observability"
 import type { FriendStore } from "../store"
 import type { GrantStore } from "../grant-store"
 import type { MissionStore } from "../mission-store"
+import type { AuditSink, ControlPlaneAuditRecord } from "../audit"
+import { resolveAgentIdentity } from "../identity"
 import type { IdentityProvider, TrustLevel, NoteProvenance, AgentMeta, ShareScope, AgentAttribution } from "../types"
 import { isShareScope } from "../types"
 import { FriendResolver } from "../resolver"
@@ -41,6 +43,26 @@ export interface DispatchResult {
   result: unknown
   isError: boolean
 }
+
+/** WHO/WHENCE context stamped onto a control-plane audit record (finding 3). The MCP
+ * server passes the local owner/sense it was constructed with. */
+export interface ControlPlaneContext {
+  actor?: string
+  originSense?: string
+}
+
+/** SECURITY (finding 3-A): the friends MCP server speaks JSON-RPC over **stdio**, and
+ * stdio is an owner-only channel — the local user who launched the process is the only
+ * actor. So when no explicit controlContext is wired, audited mutations are attributed
+ * to the stdio owner boundary rather than the generic "unknown". A network/multi-tenant
+ * transport MUST pass its own authenticated actor instead of relying on these. */
+const STDIO_OWNER_ACTOR = "owner:stdio"
+const STDIO_ORIGIN_SENSE = "stdio"
+
+/** Whether wiring an AuditSink should also stamp a record for an `onboard_agent` trust
+ * seat: only when the owner explicitly set a trustLevel (a deliberate trust decision).
+ * A cold contact with no trustLevel lands at the safe `stranger` default (Bug A) and is
+ * NOT an owner trust mutation, so it is not audited. */
 
 export function coerceBool(v: unknown): boolean {
   return v === true || v === "true"
@@ -90,6 +112,8 @@ export async function dispatchTool(
   args: Args,
   grants?: GrantStore,
   missions?: MissionStore,
+  audit?: AuditSink,
+  controlContext?: ControlPlaneContext,
 ): Promise<DispatchResult> {
   emitNervesEvent({
     component: "clients",
@@ -97,6 +121,12 @@ export async function dispatchTool(
     message: "dispatching friends mcp tool",
     meta: { tool: name },
   })
+
+  // SECURITY (finding 3 / 3-A): resolve the WHO/WHENCE for an audited mutation. With
+  // no explicit context, attribute to the stdio owner boundary (the only actor on an
+  // owner-only stdio channel) rather than the generic "unknown".
+  const auditActor = controlContext?.actor ?? STDIO_OWNER_ACTOR
+  const auditOriginSense = controlContext?.originSense ?? STDIO_ORIGIN_SENSE
 
   switch (name) {
     case "resolve_party": {
@@ -223,7 +253,14 @@ export async function dispatchTool(
     }
 
     case "set_trust": {
-      const result = await setFriendTrust(store, coerceString(args.friendId), coerceString(args.trustLevel) as TrustLevel)
+      // SECURITY (finding 3): thread the audit sink + owner/sense context so the LIVE
+      // trust mutation actually writes a control-plane record. With no sink wired,
+      // setFriendTrust treats the ctx as a no-op (back-compat).
+      const result = await setFriendTrust(store, coerceString(args.friendId), coerceString(args.trustLevel) as TrustLevel, {
+        ...(audit ? { sink: audit } : {}),
+        actor: auditActor,
+        originSense: auditOriginSense,
+      })
       return { result, isError: result.ok === false }
     }
 
@@ -245,14 +282,32 @@ export async function dispatchTool(
     }
 
     case "onboard_agent": {
+      const explicitTrustLevel = coerceOptionalString(args.trustLevel) as TrustLevel | undefined
       const record = await upsertAgentPeer(store, {
         name: coerceString(args.name),
         agentId: coerceString(args.agentId),
-        trustLevel: coerceOptionalString(args.trustLevel) as TrustLevel | undefined,
+        trustLevel: explicitTrustLevel,
         a2a: parseMaybeJson<AgentMeta["a2a"]>(args.a2a),
         mailbox: parseMaybeJson<{ repo: string; selfOutboxAgentId: string }>(args.mailbox),
         bundleName: coerceOptionalString(args.bundleName),
       })
+      // SECURITY (finding 3): an owner-initiated trust SEAT (an explicit trustLevel) is
+      // a control-plane trust mutation, so audit it through the wired sink. A cold
+      // contact with no trustLevel falls to the safe `stranger` default (Bug A) — not
+      // an owner trust decision — so it is left unaudited.
+      if (audit && explicitTrustLevel !== undefined) {
+        const targetDid = resolveAgentIdentity(record.agentMeta).did
+        const auditRecord: ControlPlaneAuditRecord = {
+          action: "set_trust",
+          targetId: record.id,
+          ...(targetDid !== undefined ? { targetDid } : {}),
+          level: explicitTrustLevel,
+          actor: auditActor,
+          originSense: auditOriginSense,
+          ts: record.updatedAt,
+        }
+        await audit.append(auditRecord)
+      }
       return { result: record, isError: false }
     }
 
