@@ -3,8 +3,9 @@ import { mkdtempSync, rmSync } from "fs"
 import { tmpdir } from "os"
 import { join } from "path"
 
-import { setFriendTrust, FileFriendStore } from "../index"
+import { setFriendTrust, FileFriendStore, MemoryAuditSink, setNervesEmitter } from "../index"
 import type { FriendStore, FriendRecord, IdentityProvider, TrustLevel } from "../index"
+import type { NervesEvent } from "../index"
 
 const NOW = "2026-03-14T18:00:00.000Z"
 
@@ -102,6 +103,95 @@ describe("setFriendTrust", () => {
       expect(reloaded?.role).toBe("family")
     } finally {
       rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
+
+// Bug B — every successful trust mutation writes one append-only control-plane
+// audit record through an injected sink. No sink ⇒ unchanged (no-op audit). The
+// not_found early-return writes NOTHING. Self-contained: `targetDid` is ctx-only
+// here; the identity.did-derived path is asserted in Unit 5b.
+describe("setFriendTrust — Bug B: control-plane audit", () => {
+  it("appends exactly one record on a successful mutation, with the supplied fields", async () => {
+    const store = new MemoryStore([friend()])
+    const sink = new MemoryAuditSink()
+    const result = await setFriendTrust(store, "f-1", "friend", {
+      actor: "owner-cli",
+      originSense: "management",
+      basis: "same_account",
+      sink,
+    })
+    expect(result.ok).toBe(true)
+    const records = sink.list()
+    expect(records).toHaveLength(1)
+    expect(records[0]).toMatchObject({
+      action: "set_trust",
+      targetId: "f-1",
+      level: "friend",
+      actor: "owner-cli",
+      originSense: "management",
+      basis: "same_account",
+    })
+    expect(typeof records[0].ts).toBe("string")
+  })
+
+  it("is append-only: two sequential mutations leave two records in order (no overwrite)", async () => {
+    const store = new MemoryStore([friend()])
+    const sink = new MemoryAuditSink()
+    await setFriendTrust(store, "f-1", "acquaintance", { actor: "a1", sink })
+    await setFriendTrust(store, "f-1", "friend", { actor: "a2", sink })
+    const records = sink.list()
+    expect(records.map((r) => r.level)).toEqual(["acquaintance", "friend"])
+    expect(records.map((r) => r.actor)).toEqual(["a1", "a2"])
+  })
+
+  it("writes NO audit record on the not_found path (audit fires only on a real mutation)", async () => {
+    const store = new MemoryStore()
+    const sink = new MemoryAuditSink()
+    const result = await setFriendTrust(store, "missing", "friend", { actor: "a1", sink })
+    expect(result.status).toBe("not_found")
+    expect(sink.list()).toHaveLength(0)
+  })
+
+  it("defaults actor to the literal 'unknown' when none is supplied", async () => {
+    const store = new MemoryStore([friend()])
+    const sink = new MemoryAuditSink()
+    await setFriendTrust(store, "f-1", "friend", { sink })
+    expect(sink.list()[0].actor).toBe("unknown")
+  })
+
+  it("does not throw and still returns updated when called 3-arg (no ctx) — back-compat", async () => {
+    const store = new MemoryStore([friend()])
+    const result = await setFriendTrust(store, "f-1", "friend")
+    expect(result.ok).toBe(true)
+    expect(result.status).toBe("updated")
+  })
+
+  it("does not throw when a ctx is supplied with no sink", async () => {
+    const store = new MemoryStore([friend()])
+    const result = await setFriendTrust(store, "f-1", "friend", { actor: "a1" })
+    expect(result.ok).toBe(true)
+    expect(result.status).toBe("updated")
+  })
+
+  it("populates targetDid verbatim from ctx when supplied (Unit 2 self-contained)", async () => {
+    const store = new MemoryStore([friend()])
+    const sink = new MemoryAuditSink()
+    // Note: the identity.did-derived targetDid lands in Unit 5b; here it is ctx-only.
+    await setFriendTrust(store, "f-1", "friend", { sink, originSense: "x" })
+    // With no identity.did on the record and no ctx-supplied did, targetDid is absent.
+    expect(sink.list()[0].targetDid).toBeUndefined()
+  })
+
+  it("still emits the friends.trust_set nerves event on a mutation", async () => {
+    const seen: NervesEvent[] = []
+    setNervesEmitter((e) => seen.push(e))
+    try {
+      const store = new MemoryStore([friend()])
+      await setFriendTrust(store, "f-1", "friend", { actor: "a1", sink: new MemoryAuditSink() })
+      expect(seen.some((e) => e.event === "friends.trust_set")).toBe(true)
+    } finally {
+      setNervesEmitter(null)
     }
   })
 })
