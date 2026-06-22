@@ -302,6 +302,101 @@ describe("connectAgents — the introduce effect + the action:'connect' audit", 
   })
 })
 
+describe("connectAgents — resolution edge/error branches (coverage)", () => {
+  afterEach(() => setNervesEmitter(null))
+
+  it("resolves a did-matched record whose agentId comes ONLY from the a2a-agent externalId (no a2a.agentId)", async () => {
+    // The record matches by did (identity.did) but its agentMeta.a2a has NO agentId —
+    // agentIdOf falls back to the a2a-agent externalId.
+    const rec = agentRecord(
+      { id: "rec-ext-only", externalIds: [{ provider: "a2a-agent", externalId: "peer-ext", linkedAt: NOW }] },
+      { identity: { did: "did:key:zExtOnly" }, a2a: { did: "did:key:zExtOnly" } }, // a2a has did but NO agentId
+    )
+    const store = new MemoryStore([rec])
+    const result = await connectAgents(
+      store,
+      { peer: { did: "did:key:zExtOnly" }, senseType: "local" },
+      { actor: "owner:stdio", originSense: "stdio" },
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error("unreachable")
+    // re-keyed under the externalId-derived agentId
+    expect(result.record.externalIds.some((e) => e.provider === "a2a-agent" && e.externalId === "peer-ext")).toBe(true)
+  })
+
+  it("a did-matched record with NO resolvable agentId (no a2a.agentId, no a2a-agent externalId) → needs_handle_or_introduction", async () => {
+    // A human-ish record that resolves by did but names no agent handle.
+    const rec: FriendRecord = {
+      id: "rec-human-did",
+      name: "Did Human",
+      trustLevel: "friend",
+      externalIds: [{ provider: "local", externalId: "someone", linkedAt: NOW }], // NOT a2a-agent
+      tenantMemberships: [],
+      toolPreferences: {},
+      notes: {},
+      totalTokens: 0,
+      createdAt: NOW,
+      updatedAt: NOW,
+      schemaVersion: 1,
+      kind: "agent",
+      agentMeta: { bundleName: "Did Human", familiarity: 0, sharedMissions: [], outcomes: [], identity: { did: "did:key:zHumanDID" } },
+    }
+    const store = new MemoryStore([rec])
+    const result = await connectAgents(
+      store,
+      { peer: { did: "did:key:zHumanDID" }, senseType: "local" },
+      { actor: "owner:stdio", originSense: "stdio" },
+    )
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("unreachable")
+    expect(result.status).toBe("needs_handle_or_introduction")
+  })
+
+  it("a NAME-matched record with NO resolvable agentId → needs_handle_or_introduction", async () => {
+    const rec: FriendRecord = {
+      id: "rec-human-name",
+      name: "Plain Human",
+      trustLevel: "friend",
+      externalIds: [{ provider: "local", externalId: "plain", linkedAt: NOW }], // no a2a-agent
+      tenantMemberships: [],
+      toolPreferences: {},
+      notes: {},
+      totalTokens: 0,
+      createdAt: NOW,
+      updatedAt: NOW,
+      schemaVersion: 1,
+      kind: "human",
+    }
+    const store = new MemoryStore([rec])
+    const result = await connectAgents(
+      store,
+      { peer: { name: "Plain Human" }, senseType: "local" },
+      { actor: "owner:stdio", originSense: "stdio" },
+    )
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("unreachable")
+    expect(result.status).toBe("needs_handle_or_introduction")
+  })
+
+  it("a NAME peer against a store with NO listAll → needs_handle_or_introduction (best-effort, never throws)", async () => {
+    // A minimal store WITHOUT listAll — findByName yields null.
+    const noListStore: FriendStore = {
+      async get() { return null },
+      async put() {},
+      async delete() {},
+      async findByExternalId() { return null },
+    }
+    const result = await connectAgents(
+      noListStore,
+      { peer: { name: "Anyone" }, senseType: "local" },
+      { actor: "owner:stdio", originSense: "stdio" },
+    )
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error("unreachable")
+    expect(result.status).toBe("needs_handle_or_introduction")
+  })
+})
+
 // Type-level: the result shape is the PINNED discriminated union.
 const _typecheck: ConnectResult = { ok: true, status: "connected", record: {} as FriendRecord }
 void _typecheck
