@@ -1,12 +1,20 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import { PassThrough } from "node:stream"
-import { existsSync, rmSync } from "fs"
+import { existsSync, rmSync, readFileSync } from "fs"
 import { tmpdir } from "os"
 import { join } from "path"
 
 import { runMain } from "../mcp/run-main"
 
-const flush = () => new Promise((r) => setImmediate(r))
+// Yield through a real timer tick (timers phase), not just setImmediate. The
+// server dispatches via `void handleRequest(...)`, which awaits the store; a
+// FileFriendStore resolves a lookup — and the audit sink appends — with real
+// fs/promises I/O. A tight setImmediate-only poll loop runs in the check phase
+// and can starve those pending I/O callbacks on a loaded runner (e.g. CI), so
+// the response/audit write never lands within the budget. A setTimeout(0)
+// sequences after the poll phase and lets the awaited fs chain settle
+// deterministically. (Mirrors the harness in mcp-server.test.ts.)
+const flush = () => new Promise((r) => setTimeout(r, 0))
 
 interface Captured {
   out: string
@@ -60,6 +68,37 @@ describe("runMain", () => {
     for (let i = 0; i < 50 && !cap.out.includes("protocolVersion"); i++) await flush()
     expect(cap.out).toContain("protocolVersion")
     expect(cap.out).toContain("friends-mcp-server")
+    server!.stop()
+    stdin.destroy()
+    stdout.destroy()
+  })
+
+  it("wires the control-plane audit sink end-to-end: a live set_trust writes one record to _audit/control.jsonl (finding 3)", async () => {
+    const { stdin, stdout, cap } = harness()
+    const dir = tmpDir("audit")
+    const server = runMain(["node", "bin.js", "--dir", dir], {}, { stdin, stdout, onError })
+    expect(server).not.toBeNull()
+
+    // Onboard an agent peer (so there is a friend to mutate), then set its trust.
+    stdin.write(frame({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "onboard_agent", arguments: { name: "Bot", agentId: "peer-1" } } }))
+    for (let i = 0; i < 50 && !cap.out.includes("\"id\":1"); i++) await flush()
+    const onboardRes = cap.out.match(/\{"jsonrpc":"2\.0","id":1.*?\}\}(?=Content-Length|$)/s)
+    expect(onboardRes).not.toBeNull()
+    const friendId = JSON.parse(JSON.parse(onboardRes![0]).result.content[0].text).id as string
+
+    cap.out = ""
+    stdin.write(frame({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "set_trust", arguments: { friendId, trustLevel: "friend" } } }))
+    for (let i = 0; i < 50 && !cap.out.includes("\"id\":2"); i++) await flush()
+
+    // The append is best-effort after store.put; give the fs/promises chain a beat.
+    const auditFile = join(dir, "_audit", "control.jsonl")
+    for (let i = 0; i < 50 && !existsSync(auditFile); i++) await flush()
+    expect(existsSync(auditFile)).toBe(true)
+    const lines = readFileSync(auditFile, "utf-8").trim().split("\n").filter(Boolean)
+    expect(lines).toHaveLength(1)
+    const rec = JSON.parse(lines[0]) as { action: string; targetId: string; level: string; actor: string; originSense: string }
+    expect(rec).toMatchObject({ action: "set_trust", targetId: friendId, level: "friend", actor: "owner:stdio", originSense: "stdio" })
+
     server!.stop()
     stdin.destroy()
     stdout.destroy()

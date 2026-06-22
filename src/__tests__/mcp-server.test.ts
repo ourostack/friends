@@ -6,8 +6,8 @@ import { join } from "path"
 
 import { createFriendsMcpServer, getToolSchemas } from "../mcp"
 import { coerceBool, coerceInt, coerceString, coerceOptionalString } from "../mcp/dispatch"
-import { FileFriendStore } from "../index"
-import type { FriendStore, FriendRecord, IdentityProvider, GrantStore, ShareGrant, MissionStore, MissionRecord } from "../index"
+import { FileFriendStore, MemoryAuditSink } from "../index"
+import type { FriendStore, FriendRecord, IdentityProvider, GrantStore, ShareGrant, MissionStore, MissionRecord, ControlPlaneAuditRecord } from "../index"
 
 // ── In-memory JSON-RPC/stdio harness ──
 // The server processes `data` synchronously in its listener, so after writing a
@@ -601,6 +601,26 @@ describe("tools/call dispatch", () => {
     expect(rec.agentMeta?.mailbox).toEqual({ repo: "/m/mailbox", selfOutboxAgentId: "agent-a" })
   })
 
+  // Bug A (MCP path): onboard_agent with no trustLevel passes undefined straight
+  // through to upsertAgentPeer, so the safe (stranger) default must land.
+  it("onboard_agent: defaults a cold peer to stranger when no trustLevel is given", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    start(store)
+    const r = await h.tool("onboard_agent", { name: "PeerBot", agentId: "peer-cold" })
+    const rec = r.payload as FriendRecord
+    expect(rec.trustLevel).toBe("stranger")
+  })
+
+  it("onboard_agent: an explicit trustLevel still wins over the stranger default", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    start(store)
+    const r = await h.tool("onboard_agent", { name: "PeerBot", agentId: "peer-acq", trustLevel: "acquaintance" })
+    const rec = r.payload as FriendRecord
+    expect(rec.trustLevel).toBe("acquaintance")
+  })
+
   it("whoami: reports the machine owner self", async () => {
     const store = makeStore()
     seedOwner(store)
@@ -786,6 +806,125 @@ describe("dispatch + server defensive branches", () => {
     const result = res.result as { content: Array<{ text: string }>; isError: boolean }
     expect(result.isError).toBe(true)
     server.stop()
+  })
+})
+
+// ── SECURITY (finding 3, MEDIUM): the audit sink is wired into the LIVE dispatch
+// path. Bug B's control-plane audit only lands end-to-end if the server threads a
+// real AuditSink (+ actor/originSense) into set_trust / onboard_agent. Without this
+// wiring the live trust mutations were silently unaudited. ──
+describe("tools/call dispatch — control-plane audit wiring (finding 3)", () => {
+  let h: Harness
+  beforeEach(() => {
+    h = new Harness()
+  })
+  afterEach(() => {
+    h.stdin.destroy()
+    h.stdout.destroy()
+  })
+
+  function startAudited(store: FriendStore, audit: MemoryAuditSink, controlContext?: { actor?: string; originSense?: string }) {
+    const server = createFriendsMcpServer({ store, audit, controlContext, stdin: h.stdin, stdout: h.stdout })
+    server.start()
+    return server
+  }
+
+  it("set_trust through dispatch writes exactly one audit record", async () => {
+    const store = makeStore()
+    const owner = seedOwner(store)
+    const audit = new MemoryAuditSink()
+    startAudited(store, audit)
+    const r = await h.tool("set_trust", { friendId: owner.id, trustLevel: "friend" })
+    expect((r.payload as { record: FriendRecord }).record.trustLevel).toBe("friend")
+    const records = audit.list()
+    expect(records).toHaveLength(1)
+    expect(records[0]).toMatchObject({ action: "set_trust", targetId: owner.id, level: "friend" })
+  })
+
+  it("threads the supplied actor + originSense onto the audit record", async () => {
+    const store = makeStore()
+    const owner = seedOwner(store)
+    const audit = new MemoryAuditSink()
+    startAudited(store, audit, { actor: "operator-alias", originSense: "management" })
+    await h.tool("set_trust", { friendId: owner.id, trustLevel: "acquaintance" })
+    expect(audit.list()[0]).toMatchObject({ actor: "operator-alias", originSense: "management" })
+  })
+
+  it("defaults the actor/originSense to the stdio owner boundary when no controlContext is given (finding 3-A)", async () => {
+    const store = makeStore()
+    const owner = seedOwner(store)
+    const audit = new MemoryAuditSink()
+    startAudited(store, audit)
+    await h.tool("set_trust", { friendId: owner.id, trustLevel: "friend" })
+    const rec = audit.list()[0]
+    // The stdio transport is owner-only (finding 3-A): default actor/originSense
+    // reflect the local owner driving the CLI rather than the literal "unknown".
+    expect(rec.actor).toBe("owner:stdio")
+    expect(rec.originSense).toBe("stdio")
+  })
+
+  it("onboard_agent with an explicit trust seat writes one audit record (live trust mutation)", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    const audit = new MemoryAuditSink()
+    startAudited(store, audit)
+    // Pass an explicit a2a.did so the audit record's targetDid is resolvable (the bare
+    // agentId is not surfaced by resolveAgentIdentity, mirroring set_trust semantics).
+    const r = await h.tool("onboard_agent", {
+      name: "PeerBot",
+      agentId: "peer-acq",
+      trustLevel: "acquaintance",
+      a2a: JSON.stringify({ did: "did:key:zPeerAcq" }),
+    })
+    expect((r.payload as FriendRecord).trustLevel).toBe("acquaintance")
+    const records = audit.list()
+    expect(records).toHaveLength(1)
+    expect(records[0]).toMatchObject({ action: "set_trust", level: "acquaintance" })
+    // targetId is the freshly-minted record id; targetDid is the peer's durable did.
+    expect(records[0].targetId).toBe((r.payload as FriendRecord).id)
+    expect(records[0].targetDid).toBe("did:key:zPeerAcq")
+  })
+
+  it("onboard_agent trust seat omits targetDid when the peer carries no resolvable did (only a bare agentId)", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    const audit = new MemoryAuditSink()
+    startAudited(store, audit)
+    const r = await h.tool("onboard_agent", { name: "PeerBot", agentId: "peer-nodid", trustLevel: "friend" })
+    const records = audit.list()
+    expect(records).toHaveLength(1)
+    expect(records[0].targetId).toBe((r.payload as FriendRecord).id)
+    // No identity.did / a2a.did hint → targetDid is absent (the ?:{} false arm).
+    expect(records[0].targetDid).toBeUndefined()
+  })
+
+  it("onboard_agent WITHOUT an explicit trust seat does NOT audit (cold contact is the safe default, not an owner trust decision)", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    const audit = new MemoryAuditSink()
+    startAudited(store, audit)
+    await h.tool("onboard_agent", { name: "PeerBot", agentId: "peer-cold" })
+    expect(audit.list()).toHaveLength(0)
+  })
+
+  it("set_trust through dispatch with NO audit sink wired is a clean no-op (back-compat)", async () => {
+    const store = makeStore()
+    const owner = seedOwner(store)
+    const server = createFriendsMcpServer({ store, stdin: h.stdin, stdout: h.stdout })
+    server.start()
+    const r = await h.tool("set_trust", { friendId: owner.id, trustLevel: "friend" })
+    expect((r.payload as { record: FriendRecord }).record.trustLevel).toBe("friend")
+    server.stop()
+  })
+
+  it("a not_found set_trust writes no audit record (audit fires only on a real mutation)", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    const audit = new MemoryAuditSink()
+    startAudited(store, audit)
+    const r = await h.tool("set_trust", { friendId: "missing", trustLevel: "friend" })
+    expect(r.isError).toBe(true)
+    expect(audit.list()).toHaveLength(0)
   })
 })
 

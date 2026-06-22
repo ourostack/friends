@@ -15,6 +15,9 @@ export default defineConfig({
         // Pure interface module (mirrors the harness, which excludes the
         // FriendStore interface from its coverage gate).
         "src/store.ts",
+        // Pure interface module (RosterStore + AccountRoster/RosterPin shapes; no
+        // logic), excluded for the same reason as src/store.ts.
+        "src/roster-store.ts",
         // Thin shebang entrypoint: all logic lives in run-main.ts (covered).
         // Its only uncovered lines are the process.* wiring (D6).
         "src/mcp/bin.ts",

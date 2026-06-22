@@ -46,11 +46,14 @@ export function runMain(
     meta: { source },
   })
 
-  // The consent-grant + mission collections are sibling `_grants/` + `_missions/`
-  // dirs under the friends dir, so the single `--dir` wires the whole substrate
-  // (friends + consent + missions). `openFileBundle` encapsulates that convention.
-  const { store, grants, missions } = openFileBundle(dir)
-  const server = createFriendsMcpServer({ store, grants, missions, stdin: io.stdin, stdout: io.stdout })
+  // The consent-grant + mission + audit collections are sibling `_grants/`,
+  // `_missions/`, `_audit/` dirs under the friends dir, so the single `--dir` wires the
+  // whole substrate. `openFileBundle` encapsulates that convention.
+  const { store, grants, missions, audit } = openFileBundle(dir)
+  // SECURITY (finding 3 / 3-A): thread the FileAuditSink into the live server so trust
+  // mutations are audited. The `friends-mcp` bin speaks owner-only stdio, so the
+  // default actor/originSense (the stdio owner boundary) is the correct attribution.
+  const server = createFriendsMcpServer({ store, grants, missions, audit, stdin: io.stdin, stdout: io.stdout })
   server.start()
   return server
 }

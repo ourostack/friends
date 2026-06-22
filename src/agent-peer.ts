@@ -30,7 +30,11 @@ export async function upsertAgentPeer(
 
   const existing = await store.findByExternalId("a2a-agent", agentId)
   const now = new Date().toISOString()
-  const trustLevel: TrustLevel = input.trustLevel ?? existing?.trustLevel ?? "acquaintance"
+  // Bug A — cold contact is safe-by-default: a brand-new peer with no explicit
+  // trustLevel and no existing record lands at `stranger`, not `acquaintance`. An
+  // owner-initiated onboard that passes an explicit `trustLevel`, and an existing
+  // record's level, both still win (they precede this fallback).
+  const trustLevel: TrustLevel = input.trustLevel ?? existing?.trustLevel ?? "stranger"
   const baseMeta: AgentMeta = existing?.agentMeta ?? {
     bundleName: bundleName ?? name,
     familiarity: 0,

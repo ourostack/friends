@@ -122,10 +122,43 @@ export { accumulateFriendTokens } from "./tokens"
 export { applyFriendNote } from "./notes"
 
 export { setFriendTrust } from "./trust-mutation"
+export type { SetFriendTrustContext } from "./trust-mutation"
+
+// -- Control-plane audit (Bug B): append-only record of trust mutations --
+export { MemoryAuditSink, FileAuditSink, auditPathFor } from "./audit"
+export type { AuditSink, ControlPlaneAuditRecord } from "./audit"
 
 export { linkExternalId, unlinkExternalId } from "./link-identity"
 
 export { upsertAgentPeer } from "./agent-peer"
+
+// -- Agent identity (p11 Item 2 — DID re-key): durable home + migrate-on-read --
+export { resolveAgentIdentity, withMigratedIdentity } from "./identity"
+export type { ResolvedAgentIdentity } from "./identity"
+
+// did-aware friend lookup (the durable cross-agent primary key is the DID).
+export { findFriendByDid } from "./friend-lookup"
+
+// -- Account roster (p11 Item 3): pinned roster + TOFU roster-key storage seam --
+export { FileRosterStore, rostersDirFor } from "./roster-store-file"
+export type { RosterStore, AccountRoster, RosterPin } from "./roster-store"
+
+// -- RosterVerifier seam (Q1): core declares the interface + identity-only default;
+// the a2a-client provides the Ed25519 impl (host-injected). Core stays crypto-free.
+export { identityRosterVerifier, DEFAULT_ROSTER_VERIFIER } from "./roster-verifier"
+export type { RosterVerifier } from "./roster-verifier"
+
+export { MemoryRosterStore } from "./roster-store-memory"
+
+// -- Account-roster membership (Item 3 payoff): family via same_account for a
+// key-verified, TOFU-pinned roster member; changed roster key hard-fails. --
+export { evaluateAccountMembership, verifiedCandidate, _resetRosterVerifierWarningForTest } from "./account-roster"
+export type {
+  AccountMembershipDecision,
+  AccountMembershipResult,
+  EvaluateAccountMembershipInput,
+  VerifiedCandidate,
+} from "./account-roster"
 
 export { recordRelationshipOutcome } from "./outcomes"
 

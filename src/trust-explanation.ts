@@ -1,7 +1,7 @@
 import type { Channel, FriendRecord, TrustLevel } from "./types"
 import { emitNervesEvent } from "./observability"
 
-export type TrustBasis = "direct" | "shared_group" | "unknown"
+export type TrustBasis = "direct" | "shared_group" | "unknown" | "same_account"
 
 export interface TrustExplanation {
   level: TrustLevel
@@ -25,11 +25,36 @@ export function describeTrustContext(input: {
   friend: FriendRecord
   channel: Channel
   isGroupChat?: boolean
+  /** When the relationship is `family` AND this hint is `"same_account"`, the
+   * explanation attributes the family trust to the signed account roster
+   * (`basis: "same_account"`) instead of the generic `direct`. Ignored for any
+   * non-family level. Absent ⇒ existing behavior byte-for-byte. (Unit 3a stub:
+   * accepted but not yet honored — implemented GREEN in Unit 3b.) */
+  basisHint?: TrustBasis
 }): TrustExplanation {
   const level = resolveLevel(input.friend)
   const relatedGroupId = findRelatedGroupId(input.friend)
 
-  const explanation: TrustExplanation = level === "family" || level === "friend"
+  // The same-account variant only applies where the relationship is actually
+  // account-derived family: level === "family" AND the caller hints same_account
+  // (the roster path seats it). It keeps the family tier's permits/constraints but
+  // attributes the trust to the signed account roster, not generic direct trust.
+  const isSameAccountFamily = level === "family" && input.basisHint === "same_account"
+
+  const explanation: TrustExplanation = isSameAccountFamily
+    ? {
+        level,
+        basis: "same_account",
+        summary: "same-account family (signed account roster)",
+        why: "this agent is recognized as the same owner's agent via the signed account roster, not through a shared group or cold first contact.",
+        permits: [
+          "local operations when appropriate",
+          "proactive follow-through",
+          "full collaborative problem solving",
+        ],
+        constraints: [],
+      }
+    : level === "family" || level === "friend"
     ? {
         level,
         basis: "direct",

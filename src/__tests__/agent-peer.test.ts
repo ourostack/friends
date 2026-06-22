@@ -3,8 +3,9 @@ import { mkdtempSync, rmSync } from "fs"
 import { tmpdir } from "os"
 import { join } from "path"
 
-import { upsertAgentPeer, FileFriendStore } from "../index"
+import { upsertAgentPeer, FileFriendStore, setNervesEmitter } from "../index"
 import type { FriendStore, FriendRecord } from "../index"
+import type { NervesEvent } from "../index"
 
 const NOW = "2026-03-14T18:00:00.000Z"
 
@@ -74,7 +75,9 @@ describe("upsertAgentPeer — new peer", () => {
     expect(record.name).toBe("PeerBot")
     expect(record.role).toBe("agent-peer")
     expect(record.kind).toBe("agent")
-    expect(record.trustLevel).toBe("acquaintance")
+    // Bug A: a cold peer with no explicit trustLevel now defaults to stranger
+    // (safe-by-default), not acquaintance.
+    expect(record.trustLevel).toBe("stranger")
     expect(record.agentMeta?.bundleName).toBe("PeerBot")
     expect(record.agentMeta?.familiarity).toBe(0)
     expect(record.agentMeta?.sharedMissions).toEqual([])
@@ -275,5 +278,47 @@ describe("upsertAgentPeer — FileFriendStore end-to-end", () => {
     expect(reloaded?.trustLevel).toBe("friend")
     expect(reloaded?.agentMeta?.bundleName).toBe("DiskPeer")
     expect(reloaded?.agentMeta?.a2a?.agentId).toBe("disk-peer")
+  })
+})
+
+// Bug A — cold A2A contact must be SAFE-BY-DEFAULT (stranger), but every
+// explicit-trust path (an owner-initiated onboard, or an existing record's level)
+// must still win. The fallback was `acquaintance` (too trusting for a cold peer).
+describe("upsertAgentPeer — Bug A: safe-default cold contact", () => {
+  it("defaults a brand-new cold peer (no trustLevel, no existing record) to stranger", async () => {
+    const store = new MemoryStore()
+    const record = await upsertAgentPeer(store, { name: "ColdPeer", agentId: "cold-1" })
+    expect(record.trustLevel).toBe("stranger")
+  })
+
+  it("an explicit trustLevel still wins over the stranger fallback (acquaintance)", async () => {
+    const store = new MemoryStore()
+    const record = await upsertAgentPeer(store, { name: "P", agentId: "p-1", trustLevel: "acquaintance" })
+    expect(record.trustLevel).toBe("acquaintance")
+  })
+
+  it("an explicit family trustLevel survives (owner-initiated onboard path)", async () => {
+    const store = new MemoryStore()
+    const record = await upsertAgentPeer(store, { name: "P", agentId: "p-2", trustLevel: "family" })
+    expect(record.trustLevel).toBe("family")
+  })
+
+  it("an existing record's trustLevel is preserved over the stranger fallback", async () => {
+    const store = new MemoryStore([agentRecord({ trustLevel: "friend" })])
+    const record = await upsertAgentPeer(store, { name: "X", agentId: "peer-1" })
+    expect(record.trustLevel).toBe("friend")
+  })
+
+  it("emits friends.agent_peer_upserted with meta.trustLevel reflecting the resolved (stranger) default", async () => {
+    const seen: NervesEvent[] = []
+    setNervesEmitter((e) => seen.push(e))
+    try {
+      const store = new MemoryStore()
+      await upsertAgentPeer(store, { name: "ColdPeer", agentId: "cold-3" })
+      const upserted = seen.find((e) => e.event === "friends.agent_peer_upserted")
+      expect(upserted?.meta?.trustLevel).toBe("stranger")
+    } finally {
+      setNervesEmitter(null)
+    }
   })
 })

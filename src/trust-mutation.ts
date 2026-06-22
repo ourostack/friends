@@ -7,11 +7,26 @@ import { emitNervesEvent } from "./observability"
 import type { FriendStore } from "./store"
 import type { FriendRecord, TrustLevel } from "./types"
 import type { FriendOpResult } from "./results"
+import type { AuditSink, ControlPlaneAuditRecord } from "./audit"
+import type { TrustBasis } from "./trust-explanation"
+import { resolveAgentIdentity } from "./identity"
+
+/** Optional control-plane context for a trust mutation (Bug B). When a `sink` is
+ * supplied, a successful mutation appends one append-only control-plane audit
+ * record carrying WHO (`actor`), the `basis` and `originSense`, and WHEN. All
+ * fields are optional so the existing 3-arg callers are unaffected. */
+export interface SetFriendTrustContext {
+  actor?: string
+  originSense?: string
+  basis?: TrustBasis
+  sink?: AuditSink
+}
 
 export async function setFriendTrust(
   store: FriendStore,
   friendId: string,
   level: TrustLevel,
+  ctx?: SetFriendTrustContext,
 ): Promise<FriendOpResult> {
   emitNervesEvent({
     component: "friends",
@@ -22,15 +37,45 @@ export async function setFriendTrust(
 
   const current = await store.get(friendId)
   if (!current) {
+    // not_found is an early return BEFORE any mutation — and so writes NO audit
+    // record. The control-plane log captures actual standing changes only.
     return { ok: false, status: "not_found", message: "friend record not found" }
   }
 
+  const updatedAt = new Date().toISOString()
   const updated: FriendRecord = {
     ...current,
     trustLevel: level,
     role: level,
-    updatedAt: new Date().toISOString(),
+    updatedAt,
   }
   await store.put(friendId, updated)
+
+  // Bug B — append one control-plane audit record on the successful mutation. The
+  // `targetDid` is the record's durable identity DID (identity.did, falling back to
+  // the migrated a2a.did via resolveAgentIdentity). `actor` defaults to the literal
+  // "unknown" when the caller threads no context. No sink ⇒ a clean no-op.
+  //
+  // NOTE (finding 6-B): the append runs AFTER store.put, so it is best-effort with
+  // respect to the mutation — if the sink append throws/crashes, the trust change is
+  // already persisted but the audit line may be missing. We keep this ordering on
+  // purpose (the mutation is the source of truth; the audit is an observability log,
+  // not a 2-phase-commit participant). A throwing sink rejects this call so the caller
+  // still sees the failure; it does not roll back the already-applied mutation.
+  if (ctx?.sink) {
+    const targetDid = resolveAgentIdentity(current.agentMeta).did
+    const record: ControlPlaneAuditRecord = {
+      action: "set_trust",
+      targetId: friendId,
+      ...(targetDid !== undefined ? { targetDid } : {}),
+      level,
+      ...(ctx.basis !== undefined ? { basis: ctx.basis } : {}),
+      actor: ctx.actor ?? "unknown",
+      ...(ctx.originSense !== undefined ? { originSense: ctx.originSense } : {}),
+      ts: updatedAt,
+    }
+    await ctx.sink.append(record)
+  }
+
   return { ok: true, status: "updated", record: updated }
 }

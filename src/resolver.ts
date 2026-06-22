@@ -8,6 +8,32 @@ import type { FriendStore } from "./store"
 import type { IdentityProvider, FriendRecord, ResolvedContext, ExternalId } from "./types"
 import { getChannelCapabilities } from "./channel"
 import { emitNervesEvent } from "./observability"
+import type { RosterStore } from "./roster-store"
+import type { RosterVerifier } from "./roster-verifier"
+import { evaluateAccountMembership, verifiedCandidate } from "./account-roster"
+
+/** Optional roster context for a cold-contact resolution (Bug C). When supplied AND
+ * the candidate's `did` is a key-verified member of the pinned account roster, the
+ * resolver seats `family` (attributable to `same_account`) even when the peer is on
+ * a different OS user. Constructor-injected (not a `resolve()` arg) so existing
+ * `new FriendResolver(store, params)` call sites stay source-compatible. The
+ * resolver stays core-clean: the Ed25519 `verifier` arrives via the seam — never an
+ * a2a-client import. */
+export interface FriendResolverRosterContext {
+  store: RosterStore
+  accountId: string
+  /** The peer's did. PRECONDITION (finding 2): the host has already authenticated
+   * that the peer controls this did (the a2a-client sealed-envelope gate runs
+   * `DidVerifier` before resolution). The resolver wraps it in a `VerifiedCandidate`
+   * on the caller's behalf — so only seed this from a verified inbound identity, never
+   * an unauthenticated, peer-claimed string. */
+  candidateDid: string
+  /** PRECONDITION (finding 1): to actually seat family, this MUST be a cryptographic
+   * verifier (`ed25519RosterVerifier`, `grantsFamily: true`). With it absent (the
+   * identity-only default), `evaluateAccountMembership` fails closed and the resolver
+   * keeps the cold-A2A `stranger` default — never family. */
+  verifier?: RosterVerifier
+}
 
 export interface FriendResolverParams {
   provider: IdentityProvider
@@ -57,10 +83,12 @@ export function isLocalMachineOwnerIdentity(
 export class FriendResolver {
   private readonly store: FriendStore
   private readonly params: FriendResolverParams
+  private readonly roster?: FriendResolverRosterContext
 
-  constructor(store: FriendStore, params: FriendResolverParams) {
+  constructor(store: FriendStore, params: FriendResolverParams, roster?: FriendResolverRosterContext) {
     this.store = store
     this.params = params
+    this.roster = roster
   }
 
   async resolve(): Promise<ResolvedContext> {
@@ -147,6 +175,13 @@ export class FriendResolver {
 
     const isFirstImprint = !hasAnyFriends
     const isA2AAgent = this.params.provider === "a2a-agent"
+    // Bug C — roster-awareness. When a roster context is injected AND the candidate's
+    // did is a key-verified member of the pinned account roster, seat `family` (even
+    // on a different OS user). Reuses `evaluateAccountMembership` against the pinned
+    // roster fetched from the injected RosterStore. Absent/unverifiable roster ⇒ the
+    // OS-owner + cold-A2A default below is unchanged. The resolver never imports
+    // a2a-client — the Ed25519 verifier arrives via the injected seam.
+    const isRosterFamily = await this.evaluateRosterFamily()
     // The local friend that names the OS user running the daemon is the machine
     // owner (family) — they own the agent + its bundle. Usually this friend already
     // exists as a family/primary hatch imprint; this covers the un-imprinted boss
@@ -177,8 +212,11 @@ export class FriendResolver {
     const friend: FriendRecord = {
       id: randomUUID(),
       name: this.params.displayName,
-      role: isA2AAgent ? "agent-peer" : isFirstImprint ? "primary" : isLocalMachineOwner ? "family" : "stranger",
-      trustLevel: isA2AAgent ? "stranger" : (isFirstImprint || isLocalMachineOwner) ? "family" : "stranger",
+      // Bug C: a key-verified roster member is family (role + trustLevel), overriding
+      // the cold-A2A `agent-peer`/`stranger` default. Otherwise the matrix is
+      // unchanged: a2a ⇒ agent-peer/stranger; first imprint or machine owner ⇒ family.
+      role: isRosterFamily ? "family" : isA2AAgent ? "agent-peer" : isFirstImprint ? "primary" : isLocalMachineOwner ? "family" : "stranger",
+      trustLevel: isRosterFamily ? "family" : isA2AAgent ? "stranger" : (isFirstImprint || isLocalMachineOwner) ? "family" : "stranger",
       connections: [],
       externalIds: [externalId],
       tenantMemberships,
@@ -214,5 +252,37 @@ export class FriendResolver {
     }
 
     return friend
+  }
+
+  /** Bug C — whether the candidate is family via a key-verified account roster.
+   * Reads the pinned roster + roster key from the injected RosterStore and reuses
+   * `evaluateAccountMembership`. Returns false (no family) when no roster context is
+   * wired, the roster/pin is absent, or membership is anything but
+   * `family_same_account` (unverified / not-member / key-mismatch all stay false). */
+  private async evaluateRosterFamily(): Promise<boolean> {
+    const ctx = this.roster
+    if (!ctx) return false
+    const roster = await ctx.store.getRoster(ctx.accountId)
+    const pin = await ctx.store.getPin(ctx.accountId)
+    // The resolver grants family only against an ALREADY-pinned roster key (the pin
+    // is established during explicit onboarding, never silently at resolve time).
+    if (!roster || !pin) return false
+    const result = await evaluateAccountMembership({
+      roster,
+      // The host authenticated the peer's control of this did upstream (see the
+      // FriendResolverRosterContext.candidateDid precondition); wrap it as verified.
+      candidate: verifiedCandidate(ctx.candidateDid),
+      rosterKey: pin.rosterKey,
+      store: ctx.store,
+      ...(ctx.verifier !== undefined ? { verifier: ctx.verifier } : {}),
+    })
+    if (result.decision !== "family_same_account") return false
+    emitNervesEvent({
+      component: "friends",
+      event: "friends.family_via_roster",
+      message: "seated family via the account roster (same_account)",
+      meta: { accountId: ctx.accountId, candidateDid: ctx.candidateDid },
+    })
+    return true
   }
 }

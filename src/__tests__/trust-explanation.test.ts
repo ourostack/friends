@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest"
 
-import { describeTrustContext } from "../index"
-import type { FriendRecord } from "../index"
+import { describeTrustContext, setNervesEmitter } from "../index"
+import type { FriendRecord, NervesEvent } from "../index"
 
 function friend(overrides: Partial<FriendRecord> = {}): FriendRecord {
   return {
@@ -71,5 +71,54 @@ describe("describeTrustContext", () => {
     const e = describeTrustContext({ friend: friend({ trustLevel: undefined }), channel: "cli" })
     expect(e.level).toBe("stranger")
     expect(e.basis).toBe("unknown")
+  })
+})
+
+// same_account basis — when a family relationship is account-derived (the peer is
+// a key-verified member of the owner's signed roster), the explanation reflects
+// `same_account` rather than the generic `direct`, while keeping the family tier's
+// permits/constraints. The hint ONLY applies where the relationship is family.
+describe("describeTrustContext — same_account basis", () => {
+  it("renders a same_account basis for a family friend when the hint is supplied", () => {
+    const e = describeTrustContext({
+      friend: friend({ trustLevel: "family" }),
+      channel: "cli",
+      basisHint: "same_account",
+    })
+    expect(e.level).toBe("family")
+    expect(e.basis).toBe("same_account")
+    expect(e.summary.toLowerCase()).toContain("account")
+    expect(e.why.toLowerCase()).toContain("roster")
+    // family-tier permits/constraints are unchanged.
+    expect(e.constraints).toEqual([])
+    expect(e.permits.length).toBeGreaterThan(0)
+  })
+
+  it("leaves family as direct (byte-for-byte) when no hint is supplied", () => {
+    const e = describeTrustContext({ friend: friend({ trustLevel: "family" }), channel: "cli" })
+    expect(e.basis).toBe("direct")
+    expect(e.summary).toBe("direct family trust")
+    expect(e.why).toBe("this relationship is directly trusted rather than inferred through a shared group or cold first contact.")
+  })
+
+  it("ignores the same_account hint for a non-family (acquaintance) friend", () => {
+    const e = describeTrustContext({
+      friend: friend({ trustLevel: "acquaintance" }),
+      channel: "teams",
+      basisHint: "same_account",
+    })
+    expect(e.basis).toBe("shared_group")
+  })
+
+  it("emits friends.trust_explained with meta.basis reflecting same_account", () => {
+    const seen: NervesEvent[] = []
+    setNervesEmitter((e) => seen.push(e))
+    try {
+      describeTrustContext({ friend: friend({ trustLevel: "family" }), channel: "cli", basisHint: "same_account" })
+      const explained = seen.find((e) => e.event === "friends.trust_explained")
+      expect(explained?.meta?.basis).toBe("same_account")
+    } finally {
+      setNervesEmitter(null)
+    }
   })
 })
