@@ -6,9 +6,9 @@ import { emitNervesEvent } from "./observability"
 // -- Identity Provider --
 // Closed union: "aad" (Azure AD / Teams), "local" (CLI / OS),
 // "teams-conversation" (fallback), "imessage-handle" (BlueBubbles/iMessage)
-export type IdentityProvider = "aad" | "local" | "teams-conversation" | "imessage-handle" | "email-address" | "a2a-agent"
+export type IdentityProvider = "aad" | "local" | "teams-conversation" | "imessage-handle" | "email-address" | "a2a-agent" | "telegram-user"
 
-const IDENTITY_PROVIDERS: ReadonlySet<string> = new Set<IdentityProvider>(["aad", "local", "teams-conversation", "imessage-handle", "email-address", "a2a-agent"])
+const IDENTITY_PROVIDERS: ReadonlySet<string> = new Set<IdentityProvider>(["aad", "local", "teams-conversation", "imessage-handle", "email-address", "a2a-agent", "telegram-user"])
 
 export function isIdentityProvider(value: unknown): value is IdentityProvider {
   emitNervesEvent({
@@ -22,7 +22,7 @@ export function isIdentityProvider(value: unknown): value is IdentityProvider {
 
 // -- Channel --
 // Closed union: which sense/channel a session belongs to
-export type Channel = "cli" | "teams" | "bluebubbles" | "mail" | "voice" | "a2a" | "inner" | "mcp"
+export type Channel = "cli" | "teams" | "bluebubbles" | "mail" | "voice" | "a2a" | "inner" | "mcp" | "telegram"
 
 // -- Integration --
 // Closed union: which external service an action targets
@@ -462,6 +462,8 @@ export interface ChannelCapabilities {
   senseType: SenseType
   availableIntegrations: Integration[]
   supportsMarkdown: boolean
+  supportsHtml: boolean
+  chatStyle: boolean
   supportsStreaming: boolean
   supportsRichCards: boolean
   maxMessageLength: number
