@@ -9,7 +9,12 @@ import {
 
 describe("getChannelCapabilities", () => {
   it("declares HTML and chat-style behavior explicitly for every existing channel", () => {
-    for (const channel of ["cli", "teams", "bluebubbles", "mail", "voice", "a2a", "inner", "mcp"]) {
+    for (const channel of ["cli", "teams", "voice"]) {
+      const capabilities = getChannelCapabilities(channel)
+      expect(capabilities.supportsHtml, channel).toBe(false)
+      expect(capabilities.chatStyle, channel).toBe(true)
+    }
+    for (const channel of ["bluebubbles", "mail", "a2a", "inner", "mcp"]) {
       const capabilities = getChannelCapabilities(channel)
       expect(capabilities.supportsHtml, channel).toBe(false)
       expect(capabilities.chatStyle, channel).toBe(false)
