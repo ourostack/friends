@@ -1,6 +1,12 @@
 {
   "versions": [
     {
+      "version": "0.1.0-alpha.9",
+      "changes": [
+        "Preserve established CLI, Teams, and Voice chat-style behavior alongside Telegram."
+      ]
+    },
+    {
       "version": "0.1.0-alpha.8",
       "changes": [
         "Add Telegram channel capabilities and Telegram user identity support."
