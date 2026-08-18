@@ -3,8 +3,8 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
 const root = fileURLToPath(new URL("../..", import.meta.url))
-const expectedVersion = "0.1.0-alpha.8"
-const expectedChange = "Add Telegram channel capabilities and Telegram user identity support."
+const expectedVersion = "0.1.0-alpha.9"
+const expectedChange = "Preserve established CLI, Teams, and Voice chat-style behavior alongside Telegram."
 
 describe("Telegram release metadata", () => {
   it("names one exact unused immutable prerelease and its Telegram change", () => {
