@@ -8,6 +8,31 @@ import {
 } from "../index"
 
 describe("getChannelCapabilities", () => {
+  it("declares HTML and chat-style behavior explicitly for every existing channel", () => {
+    for (const channel of ["cli", "teams", "bluebubbles", "mail", "voice", "a2a", "inner", "mcp"]) {
+      const capabilities = getChannelCapabilities(channel)
+      expect(capabilities.supportsHtml, channel).toBe(false)
+      expect(capabilities.chatStyle, channel).toBe(false)
+    }
+  })
+
+  it("returns Telegram capabilities (human-facing, open, HTML chat, non-streaming)", () => {
+    const capabilities = getChannelCapabilities("telegram")
+    expect(capabilities).toMatchObject({
+      channel: "telegram",
+      senseType: "open",
+      availableIntegrations: [],
+      supportsMarkdown: false,
+      supportsHtml: true,
+      chatStyle: true,
+      supportsStreaming: false,
+      supportsRichCards: false,
+      maxMessageLength: 4096,
+    })
+    expect(channelToFacing("telegram")).toBe("human")
+    expect(isRemoteChannel(capabilities)).toBe(true)
+  })
+
   it("returns CLI capabilities (local, streaming, no markdown)", () => {
     const c = getChannelCapabilities("cli")
     expect(c.channel).toBe("cli")
@@ -63,6 +88,8 @@ describe("getChannelCapabilities", () => {
     expect(c.senseType).toBe("local")
     expect(c.availableIntegrations).toEqual([])
     expect(c.supportsStreaming).toBe(false)
+    expect(c.supportsHtml).toBe(false)
+    expect(c.chatStyle).toBe(false)
   })
 })
 
@@ -98,6 +125,6 @@ describe("isRemoteChannel", () => {
 describe("getAlwaysOnSenseNames", () => {
   it("returns only open/closed channels", () => {
     const names = getAlwaysOnSenseNames().sort()
-    expect(names).toEqual(["a2a", "bluebubbles", "mail", "teams"])
+    expect(names).toEqual(["a2a", "bluebubbles", "mail", "teams", "telegram"])
   })
 })

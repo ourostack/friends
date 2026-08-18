@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, expectTypeOf } from "vitest"
 
 import { TRUSTED_LEVELS, IDENTITY_SCOPES, isTrustedLevel, isIdentityProvider, isIntegration, isShareScope, isCoordinationIntent } from "../index"
 import type {
@@ -10,6 +10,7 @@ import type {
   CoordinationIntent,
   CoordinationLogEntry,
   MissionCoordination,
+  IdentityProvider,
 } from "../index"
 
 const NOW = "2026-03-14T18:00:00.000Z"
@@ -33,9 +34,13 @@ describe("TRUSTED_LEVELS / isTrustedLevel", () => {
 
 describe("isIdentityProvider", () => {
   it("accepts every known provider", () => {
-    for (const p of ["aad", "local", "teams-conversation", "imessage-handle", "email-address", "a2a-agent"]) {
+    for (const p of ["aad", "local", "teams-conversation", "imessage-handle", "email-address", "a2a-agent", "telegram-user"]) {
       expect(isIdentityProvider(p)).toBe(true)
     }
+  })
+  it("keeps the provider type closed while admitting Telegram users", () => {
+    expectTypeOf<"telegram-user">().toMatchTypeOf<IdentityProvider>()
+    expectTypeOf<"slack">().not.toMatchTypeOf<IdentityProvider>()
   })
   it("rejects unknown strings and non-strings", () => {
     expect(isIdentityProvider("slack")).toBe(false)
