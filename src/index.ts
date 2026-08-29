@@ -14,6 +14,12 @@ export type {
   Integration,
   Channel,
   TrustLevel,
+  AdmissionState,
+  InitiativePolicy,
+  RelationshipPolicyProvenance,
+  RelationshipPolicyPrimitive,
+  RelationshipPolicyPreference,
+  RelationshipPolicy,
   AgentMeta,
   AgentAttribution,
   RelationshipOutcome,
@@ -43,7 +49,14 @@ export type {
   StandingRule,
   StandingRuleInput,
 } from "./standing"
-export type { FriendStore } from "./store"
+export type {
+  FriendStore,
+  ExternalIdClaimStore,
+  ExternalIdClaimInput,
+  ExternalIdCreateCandidate,
+  ExternalIdClaimTarget,
+  ExternalIdClaimResult,
+} from "./store"
 export type { GrantStore } from "./grant-store"
 export type { MissionStore } from "./mission-store"
 export type { FriendResolverParams } from "./resolver"
