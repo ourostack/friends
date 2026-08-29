@@ -48,9 +48,8 @@ export function describeTrustContext(input: {
         summary: "same-account family (signed account roster)",
         why: "this agent is recognized as the same owner's agent via the signed account roster, not through a shared group or cold first contact.",
         permits: [
-          "local operations when appropriate",
-          "proactive follow-through",
-          "full collaborative problem solving",
+          "relationship trust for legacy consent gates",
+          "collaborative problem solving within separately authorized capability and initiative policy",
         ],
         constraints: [],
       }
@@ -63,9 +62,8 @@ export function describeTrustContext(input: {
           : "direct trusted relationship",
         why: "this relationship is directly trusted rather than inferred through a shared group or cold first contact.",
         permits: [
-          "local operations when appropriate",
-          "proactive follow-through",
-          "full collaborative problem solving",
+          "relationship trust for legacy consent gates",
+          "collaborative problem solving within separately authorized capability and initiative policy",
         ],
         constraints: [],
       }

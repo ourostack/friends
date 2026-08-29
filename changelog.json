@@ -1,6 +1,12 @@
 {
   "versions": [
     {
+      "version": "0.1.0-alpha.10",
+      "changes": [
+        "Add fail-closed household relationship policy and atomic external identity claims."
+      ]
+    },
+    {
       "version": "0.1.0-alpha.9",
       "changes": [
         "Preserve established CLI, Teams, and Voice chat-style behavior alongside Telegram."

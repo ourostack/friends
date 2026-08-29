@@ -45,10 +45,36 @@ export interface ExternalId {
 
 export type TrustLevel = "family" | "friend" | "acquaintance" | "stranger"
 
-/** Trust levels that grant full tool access and proactive send capability. */
+export type AdmissionState = "unverified" | "active" | "revoked"
+
+export type InitiativePolicy = "none" | "reactive_only" | "request_follow_up_only" | "proactive"
+
+export type RelationshipPolicyProvenance = "stated" | "observed" | "default"
+
+export type RelationshipPolicyPrimitive = string | number | boolean
+
+export interface RelationshipPolicyPreference {
+  value: RelationshipPolicyPrimitive
+  provenance: RelationshipPolicyProvenance
+  version: number
+  source: string
+  expiresAt?: string
+}
+
+export interface RelationshipPolicy {
+  schemaVersion: 1
+  version: number
+  preferences: Record<string, RelationshipPolicyPreference>
+}
+
+/** Legacy coarse trust tiers used by existing consent gates. Capability and
+ * outreach authority are independent `capabilityProfileId` and
+ * `initiativePolicy` decisions. */
 export const TRUSTED_LEVELS: ReadonlySet<TrustLevel> = new Set(["family", "friend"])
 
-/** Whether a trust level grants full access (family or friend). Defaults to "friend" for legacy records. */
+/** Whether a level passes the legacy coarse trust predicate. This does not
+ * grant tools, effects, or proactive outreach. Defaults to "friend" only for
+ * backwards compatibility with schema-version-1 callers. */
 export function isTrustedLevel(trustLevel?: TrustLevel): boolean {
   return TRUSTED_LEVELS.has(trustLevel ?? "friend")
 }
@@ -423,9 +449,19 @@ export interface AgentMeta {
 // Stored as a unified JSON record in bundle `friends/`.
 export interface FriendRecord {
   id: string                              // stable UUID
+  /** Store-owned immutable lifecycle nonce returned on reads. `put` ignores a
+   * caller-supplied value, preserving it for updates and regenerating it after
+   * deletion so a reused UUID cannot inherit old external identities. */
+  readonly recordIncarnation?: string
+  /** Store-owned monotonic revision returned on reads. */
+  readonly recordGeneration?: number
   name: string
   role?: string
   trustLevel?: TrustLevel
+  admissionState?: AdmissionState
+  initiativePolicy?: InitiativePolicy
+  relationshipPolicy?: RelationshipPolicy
+  capabilityProfileId?: string
   connections?: FriendConnection[]
   externalIds: ExternalId[]               // PII
   tenantMemberships: string[]             // PII

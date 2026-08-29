@@ -334,13 +334,12 @@ This is the differentiator. The whole package is built so that **what you know s
 
 | Level | Meaning | Grants |
 |---|---|---|
-| `family` | The machine owner and those closest. | Full tool access, proactive follow-through, local operations. |
-| `friend` | A directly-trusted relationship. | Full collaborative access (same as family for gating purposes). |
+| `family` | The machine owner and those closest. | Passes legacy trusted-relationship consent gates. Capabilities and initiative remain separately authorized. |
+| `friend` | A directly-trusted relationship. | Passes legacy trusted-relationship consent gates. Capabilities and initiative remain separately authorized. |
 | `acquaintance` | Known through a **shared group** context, not direct endorsement. | Group-safe coordination; guarded local actions. |
 | `stranger` | Cold first contact. | Safe orientation only; no privileged actions. |
 
-`family` and `friend` are the **trusted** levels (`TRUSTED_LEVELS` / `isTrustedLevel`) — they
-unlock full tool access and proactive sends. `acquaintance` and `stranger` are gated.
+`family` and `friend` are the **trusted** levels for legacy coarse consent checks (`TRUSTED_LEVELS` / `isTrustedLevel`). They do not independently grant tools, effects, or proactive sends. Those decisions belong to `capabilityProfileId` and `initiativePolicy`; `admissionState` must also be active. `acquaintance` and `stranger` remain outside the legacy trusted set.
 
 Trust is **assigned, not guessed**:
 
@@ -421,8 +420,8 @@ cross-channel / cross-agent unification breaks:
   tenant match). This is how the same person is recognized across channels and how an import resolves
   its subject by join key.
 - **`get(id)` — UUID-then-name fallback.** Look up by UUID first; if not found, fall back to a
-  **case-insensitive name** lookup (the documented path for proactive sends). A DB backend should
-  index the UUID and MAY implement the name fallback.
+  **case-insensitive name** lookup as a human-facing convenience. Name lookup is never an identity
+  claim or authorization boundary. A DB backend should index the UUID and MAY implement the name fallback.
 - **Round-trip discipline (load-bearing).** A backend MUST preserve the **full `FriendRecord`
   losslessly** — including `importedNotes` **and future additive fields**. Storing a lossy projection
   breaks the schemaVersion-1 guarantee for non-file backends. Prefer storing the **whole record as a
