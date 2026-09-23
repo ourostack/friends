@@ -11,13 +11,12 @@
 import { describe, it, expect, afterEach } from "vitest"
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { mkdtempSync, rmSync, existsSync } from "node:fs"
-import { tmpdir, userInfo } from "node:os"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 // The bin is built by the `pretest` / `pretest:coverage` hook (D12). Resolve it
 // relative to this test file and fail fast with a clear message if it's missing.
 const BIN_PATH = join(__dirname, "..", "..", "dist", "mcp", "bin.js")
-const MACHINE_OWNER = userInfo().username
 
 type Framing = "newline" | "content-length"
 
@@ -147,11 +146,12 @@ describe("standalone harness-agnosticism proof (spawned child)", () => {
     // stranger. This is the real resolver ordering trap.
     const seed = await child.tool("resolve_party", {
       provider: "local",
-      externalId: MACHINE_OWNER,
-      displayName: MACHINE_OWNER,
+      externalId: "operator",
+      displayName: "operator",
       channel: "cli",
     })
     expect(seed.payload.created).toBe(true)
+    expect(seed.payload.friend.trustLevel).toBe("family") // owner imprints as family
 
     // ── 1. whoami ──
     const who = await child.tool("whoami", {})
@@ -237,7 +237,7 @@ describe("standalone harness-agnosticism proof (spawned child)", () => {
 
     // Seed an owner so the bundle is non-empty (the resolver imprint trap), then
     // imprint the owner as the self for whoami → share_profile's fromAgentId.
-    const owner = await child.tool("resolve_party", { provider: "local", externalId: MACHINE_OWNER, displayName: MACHINE_OWNER, channel: "cli" })
+    const owner = await child.tool("resolve_party", { provider: "local", externalId: "operator", displayName: "operator", channel: "cli" })
     const ownerId = owner.payload.friend.id as string
 
     // A subject friend the owner knows, and an agent peer to share with.
@@ -251,7 +251,7 @@ describe("standalone harness-agnosticism proof (spawned child)", () => {
       groupExternalId: "group:proj;+;room1",
       participants: [
         { provider: "aad", externalId: "jordan-aad", displayName: "Jordan" },
-        { provider: "local", externalId: MACHINE_OWNER, displayName: MACHINE_OWNER },
+        { provider: "local", externalId: "operator", displayName: "operator" },
       ],
     })
     const room = await child.tool("resolve_room", { groupExternalId: "group:proj;+;room1" })

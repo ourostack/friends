@@ -23,18 +23,9 @@ import { readySodium } from "./_sodium"
 
 const NOW = "2026-09-23T00:00:00.000Z"
 
-function tmpStore(): { store: FriendStore; dir: string } {
+function tmpStore(): { store: FileFriendStore; dir: string } {
   const dir = mkdtempSync(join(tmpdir(), "friends-resolver-"))
-  const backing = new FileFriendStore(join(dir, "friends"))
-  const store: FriendStore = {
-    get: (id) => backing.get(id),
-    put: (id, record) => backing.put(id, record),
-    delete: (id) => backing.delete(id),
-    findByExternalId: (provider, externalId, tenantId) => backing.findByExternalId(provider, externalId, tenantId),
-    hasAnyFriends: () => backing.hasAnyFriends(),
-    listAll: () => backing.listAll(),
-  }
-  return { store, dir }
+  return { store: new FileFriendStore(join(dir, "friends")), dir }
 }
 
 function makeFriend(overrides: Partial<FriendRecord> = {}): FriendRecord {
@@ -84,7 +75,7 @@ describe("FriendResolver against a temp FileFriendStore", () => {
     expect(persisted?.id).toBe(ctx.friend.id)
   })
 
-  it("first contact AFTER the bundle is populated resolves to stranger", async () => {
+  it("first contact AFTER the bundle is populated keeps stranger trust with store-owned defaults", async () => {
     const { store, dir } = tmpStore()
     dirs.push(dir)
     // Imprint the primary first so the bundle is non-empty.
@@ -105,7 +96,8 @@ describe("FriendResolver against a temp FileFriendStore", () => {
     }).resolve()
 
     expect(ctx.friend.trustLevel).toBe("stranger")
-    expect(ctx.friend.role).toBe("stranger")
+    expect(ctx.friend.role).toBe("friend")
+    expect(ctx.friend.admissionState).toBe("unverified")
   })
 
   it("resolves the machine-owner local identity to family even on a populated bundle", async () => {
@@ -152,7 +144,7 @@ describe("FriendResolver against a temp FileFriendStore", () => {
     expect(ctx.friend.trustLevel).toBe("family")
   })
 
-  it("keeps a non-owner local identity at stranger on a populated bundle", async () => {
+  it("keeps a non-owner local identity at stranger trust on a populated bundle", async () => {
     _setMachineOwnerUsernameForTest("operator")
     const { store, dir } = tmpStore()
     dirs.push(dir)
@@ -171,7 +163,8 @@ describe("FriendResolver against a temp FileFriendStore", () => {
     }).resolve()
 
     expect(ctx.friend.trustLevel).toBe("stranger")
-    expect(ctx.friend.role).toBe("stranger")
+    expect(ctx.friend.role).toBe("friend")
+    expect(ctx.friend.admissionState).toBe("unverified")
   })
 
   it("an a2a-agent provider creates a kind:'agent' record with agentMeta", async () => {

@@ -242,7 +242,14 @@ export class FriendResolver {
       } : {}),
     }
 
-    if (isExternalIdClaimStore(this.store)) {
+    const isDefaultIdentityPath =
+      !isFirstImprint &&
+      !isRosterFamily &&
+      !isLocalMachineOwner &&
+      !isA2AAgent &&
+      !isImessageGroup
+
+    if (isDefaultIdentityPath && isExternalIdClaimStore(this.store)) {
       const claim: ExternalIdClaimInput = {
         externalId: {
           provider: this.params.provider,
