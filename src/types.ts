@@ -99,6 +99,13 @@ export interface AgentAttribution {
 // and an absent `origin` is treated as "first_party" everywhere (the safe-merge
 // predicate). Attaches inline on a note value and on a RelationshipOutcome so a
 // cross-agent assertion can carry who made it (the P2 `assertedBy` slot).
+export interface NoteSourceReference {
+  channel: string
+  sourceId: string
+  observedAt: string
+  assertingFriendId?: string
+}
+
 export interface NoteProvenance {
   assertedBy?: AgentAttribution
   /** Provenance origin. Absent ⇒ treat as "first_party". An "imported" fact came
@@ -106,6 +113,7 @@ export interface NoteProvenance {
   origin?: "first_party" | "imported"
   /** ISO timestamp at which an imported fact was accepted. Set only on imports. */
   importedAt?: string
+  source?: NoteSourceReference
 }
 
 // -- Imported Note --

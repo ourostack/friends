@@ -1,6 +1,13 @@
 {
   "versions": [
     {
+      "version": "0.1.0-alpha.11",
+      "changes": [
+        "Add atomic same-identity resolution for default identities in claim-capable stores",
+        "Preserve source provenance on friend notes"
+      ]
+    },
+    {
       "version": "0.1.0-alpha.10",
       "changes": [
         "Add fail-closed household relationship policy and atomic external identity claims."

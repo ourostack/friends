@@ -25,6 +25,7 @@ import type {
   ImportMissionResultOptions,
   ImportMissionResultResult,
   ImportMissionResultStatus,
+  NoteSourceReference,
 } from "../index"
 
 describe("public API barrel — p11 inc2 surface", () => {
@@ -58,6 +59,12 @@ describe("public API barrel — p11 inc2 surface", () => {
     const impOpts: ImportMissionResultOptions = {}
     const impRes: ImportMissionResultResult = { ok: false, status: "no_delegation" }
     const impStatus: ImportMissionResultStatus = "imported"
-    expect([peer, connectIn, connectDeps, connectRes, connectStatus, authIn, auth, task, result, env, prepIn, prepRes, prepStatus, impIn, impOpts, impRes, impStatus].length).toBe(17)
+    const source: NoteSourceReference = {
+      channel: "teams",
+      sourceId: "activity-123",
+      observedAt: "2026-09-23T05:00:00.000Z",
+      assertingFriendId: "friend-alex",
+    }
+    expect([peer, connectIn, connectDeps, connectRes, connectStatus, authIn, auth, task, result, env, prepIn, prepRes, prepStatus, impIn, impOpts, impRes, impStatus, source].length).toBe(18)
   })
 })
