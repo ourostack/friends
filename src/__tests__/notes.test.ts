@@ -295,6 +295,7 @@ describe("applyFriendNote — FileFriendStore end-to-end", () => {
         provenance: sourceProvenance,
       })
       expect(result.ok).toBe(true)
+      expect(result.status).toBe("saved")
     }
     const reopened = new FileFriendStore(path)
     const reloaded = await reopened.findByExternalId("aad", "x1")
