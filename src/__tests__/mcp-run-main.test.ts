@@ -15,6 +15,15 @@ import { runMain } from "../mcp/run-main"
 // sequences after the poll phase and lets the awaited fs chain settle
 // deterministically. (Mirrors the harness in mcp-server.test.ts.)
 const flush = () => new Promise((r) => setTimeout(r, 0))
+const responseTimeoutMs = 5_000
+
+async function waitFor(condition: () => boolean, description: string): Promise<void> {
+  const deadline = Date.now() + responseTimeoutMs
+  while (!condition()) {
+    if (Date.now() >= deadline) throw new Error(`timeout waiting for ${description}`)
+    await flush()
+  }
+}
 
 interface Captured {
   out: string
@@ -65,7 +74,7 @@ describe("runMain", () => {
     expect(existsSync(join(dir, "_missions"))).toBe(true)
 
     stdin.write(frame({ jsonrpc: "2.0", id: 1, method: "initialize", params: {} }))
-    for (let i = 0; i < 50 && !cap.out.includes("protocolVersion"); i++) await flush()
+    await waitFor(() => cap.out.includes("protocolVersion"), "initialize response")
     expect(cap.out).toContain("protocolVersion")
     expect(cap.out).toContain("friends-mcp-server")
     server!.stop()
@@ -81,18 +90,18 @@ describe("runMain", () => {
 
     // Onboard an agent peer (so there is a friend to mutate), then set its trust.
     stdin.write(frame({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "onboard_agent", arguments: { name: "Bot", agentId: "peer-1" } } }))
-    for (let i = 0; i < 50 && !cap.out.includes("\"id\":1"); i++) await flush()
+    await waitFor(() => cap.out.includes("\"id\":1"), "onboard_agent response")
     const onboardRes = cap.out.match(/\{"jsonrpc":"2\.0","id":1.*?\}\}(?=Content-Length|$)/s)
     expect(onboardRes).not.toBeNull()
     const friendId = JSON.parse(JSON.parse(onboardRes![0]).result.content[0].text).id as string
 
     cap.out = ""
     stdin.write(frame({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "set_trust", arguments: { friendId, trustLevel: "friend" } } }))
-    for (let i = 0; i < 50 && !cap.out.includes("\"id\":2"); i++) await flush()
+    await waitFor(() => cap.out.includes("\"id\":2"), "set_trust response")
 
     // The append is best-effort after store.put; give the fs/promises chain a beat.
     const auditFile = join(dir, "_audit", "control.jsonl")
-    for (let i = 0; i < 50 && !existsSync(auditFile); i++) await flush()
+    await waitFor(() => existsSync(auditFile), "control-plane audit record")
     expect(existsSync(auditFile)).toBe(true)
     const lines = readFileSync(auditFile, "utf-8").trim().split("\n").filter(Boolean)
     expect(lines).toHaveLength(1)
