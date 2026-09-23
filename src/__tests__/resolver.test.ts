@@ -11,13 +11,50 @@ import {
   _setMachineOwnerUsernameForTest,
   MemoryRosterStore,
 } from "../index"
-import type { FriendRecord, AccountRoster } from "../index"
+import type {
+  FriendRecord,
+  AccountRoster,
+  FriendStore,
+  ExternalIdClaimStore,
+  ExternalIdClaimInput,
+} from "../index"
 import { ed25519RosterVerifier, signRoster } from "../a2a-client/roster-verify"
 import { readySodium } from "./_sodium"
 
-function tmpStore(): { store: FileFriendStore; dir: string } {
+const NOW = "2026-09-23T00:00:00.000Z"
+
+function tmpStore(): { store: FriendStore; dir: string } {
   const dir = mkdtempSync(join(tmpdir(), "friends-resolver-"))
-  return { store: new FileFriendStore(join(dir, "friends")), dir }
+  const backing = new FileFriendStore(join(dir, "friends"))
+  const store: FriendStore = {
+    get: (id) => backing.get(id),
+    put: (id, record) => backing.put(id, record),
+    delete: (id) => backing.delete(id),
+    findByExternalId: (provider, externalId, tenantId) => backing.findByExternalId(provider, externalId, tenantId),
+    hasAnyFriends: () => backing.hasAnyFriends(),
+    listAll: () => backing.listAll(),
+  }
+  return { store, dir }
+}
+
+function makeFriend(overrides: Partial<FriendRecord> = {}): FriendRecord {
+  return {
+    id: "friend-id",
+    name: "Jordan",
+    externalIds: [],
+    tenantMemberships: [],
+    toolPreferences: {},
+    notes: {},
+    totalTokens: 0,
+    createdAt: NOW,
+    updatedAt: NOW,
+    schemaVersion: 1,
+    ...overrides,
+  }
+}
+
+function isExternalIdClaimStore(store: FriendStore): store is ExternalIdClaimStore {
+  return typeof (store as Partial<ExternalIdClaimStore>).claimExternalId === "function"
 }
 
 describe("FriendResolver against a temp FileFriendStore", () => {
@@ -331,6 +368,295 @@ describe("FriendResolver against a temp FileFriendStore", () => {
       }).resolve()
       expect(ctx.channel.availableIntegrations).toEqual([])
       expect(ctx.channel.supportsStreaming).toBe(false)
+    })
+  })
+
+  describe("atomic external identity claims", () => {
+    it("converges concurrent first contact on the canonical claimed friend", async () => {
+      const canonical = makeFriend({
+        id: "canonical-friend",
+        name: "Alex Wilber",
+        externalIds: [{
+          provider: "aad",
+          externalId: "aad-alex",
+          tenantId: "tenant-1",
+          linkedAt: NOW,
+        }],
+      })
+      const claimCalls: ExternalIdClaimInput[] = []
+      let nextStatus: "created" | "already_claimed" = "created"
+      const store: ExternalIdClaimStore = {
+        get: async () => null,
+        put: async () => {
+          throw new Error("plain put path should stay unused for claim stores")
+        },
+        delete: async () => {},
+        findByExternalId: async () => null,
+        hasAnyFriends: async () => true,
+        claimExternalId: async (input) => {
+          claimCalls.push(input)
+          const status = nextStatus
+          nextStatus = "already_claimed"
+          return { ok: true, status, record: canonical }
+        },
+      }
+
+      expect(isExternalIdClaimStore(store)).toBe(true)
+
+      const [first, second] = await Promise.all([
+        new FriendResolver(store, {
+          provider: "aad",
+          externalId: "aad-alex",
+          tenantId: "tenant-1",
+          displayName: "Alex Wilber",
+          channel: "teams",
+        }).resolve(),
+        new FriendResolver(store, {
+          provider: "aad",
+          externalId: "aad-alex",
+          tenantId: "tenant-1",
+          displayName: "Alex Wilber",
+          channel: "teams",
+        }).resolve(),
+      ])
+
+      expect(claimCalls).toHaveLength(2)
+      expect(claimCalls[0]).toEqual({
+        externalId: {
+          provider: "aad",
+          externalId: "aad-alex",
+          tenantId: "tenant-1",
+          linkedAt: expect.any(String),
+        },
+        target: {
+          kind: "create",
+          record: {
+            id: expect.any(String),
+            name: "Alex Wilber",
+          },
+        },
+      })
+      expect(first.friend.id).toBe("canonical-friend")
+      expect(second.friend.id).toBe("canonical-friend")
+    })
+
+    it("keeps the legacy put path for plain stores", async () => {
+      const puts: FriendRecord[] = []
+      const store: FriendStore = {
+        get: async () => null,
+        put: async (_id, record) => {
+          puts.push(record)
+        },
+        delete: async () => {},
+        findByExternalId: async () => null,
+        hasAnyFriends: async () => false,
+      }
+
+      expect(isExternalIdClaimStore(store)).toBe(false)
+
+      const ctx = await new FriendResolver(store, {
+        provider: "aad",
+        externalId: "aad-first",
+        tenantId: "tenant-1",
+        displayName: "First Person",
+        channel: "teams",
+      }).resolve()
+
+      expect(puts).toHaveLength(1)
+      expect(puts[0].id).toBe(ctx.friend.id)
+      expect(ctx.friend.role).toBe("primary")
+      expect(ctx.friend.trustLevel).toBe("family")
+      expect(ctx.friend.externalIds).toEqual([{
+        provider: "aad",
+        externalId: "aad-first",
+        tenantId: "tenant-1",
+        linkedAt: expect.any(String),
+      }])
+    })
+
+    it("keeps tenant-scoped claims distinct", async () => {
+      const canonicalTenantOne = makeFriend({
+        id: "tenant-one-friend",
+        name: "Alex Wilber",
+        externalIds: [{
+          provider: "aad",
+          externalId: "aad-alex",
+          tenantId: "tenant-1",
+          linkedAt: NOW,
+        }],
+      })
+      const canonicalTenantTwo = makeFriend({
+        id: "tenant-two-friend",
+        name: "Alex Wilber",
+        externalIds: [{
+          provider: "aad",
+          externalId: "aad-alex",
+          tenantId: "tenant-2",
+          linkedAt: NOW,
+        }],
+      })
+      const claimKeys: string[] = []
+      const store: ExternalIdClaimStore = {
+        get: async () => null,
+        put: async () => {
+          throw new Error("plain put path should stay unused for claim stores")
+        },
+        delete: async () => {},
+        findByExternalId: async () => null,
+        hasAnyFriends: async () => true,
+        claimExternalId: async (input) => {
+          claimKeys.push(`${input.externalId.provider}:${input.externalId.externalId}:${input.externalId.tenantId ?? ""}`)
+          return {
+            ok: true,
+            status: "created",
+            record: input.externalId.tenantId === "tenant-1" ? canonicalTenantOne : canonicalTenantTwo,
+          }
+        },
+      }
+
+      const first = await new FriendResolver(store, {
+        provider: "aad",
+        externalId: "aad-alex",
+        tenantId: "tenant-1",
+        displayName: "Alex Wilber",
+        channel: "teams",
+      }).resolve()
+      const second = await new FriendResolver(store, {
+        provider: "aad",
+        externalId: "aad-alex",
+        tenantId: "tenant-2",
+        displayName: "Alex Wilber",
+        channel: "teams",
+      }).resolve()
+
+      expect(claimKeys).toEqual([
+        "aad:aad-alex:tenant-1",
+        "aad:aad-alex:tenant-2",
+      ])
+      expect(first.friend.id).toBe("tenant-one-friend")
+      expect(second.friend.id).toBe("tenant-two-friend")
+    })
+
+    it("surfaces a rejected claim failure", async () => {
+      const store: ExternalIdClaimStore = {
+        get: async () => null,
+        put: async () => {},
+        delete: async () => {},
+        findByExternalId: async () => null,
+        hasAnyFriends: async () => true,
+        claimExternalId: async () => {
+          throw new Error("claim journal unavailable")
+        },
+      }
+
+      await expect(new FriendResolver(store, {
+        provider: "aad",
+        externalId: "aad-alex",
+        tenantId: "tenant-1",
+        displayName: "Alex Wilber",
+        channel: "teams",
+      }).resolve()).rejects.toThrow("claim journal unavailable")
+    })
+
+    it("returns the store-owned authority fields unchanged", async () => {
+      const canonical = makeFriend({
+        id: "canonical-friend",
+        name: "Alex Wilber",
+        role: "friend",
+        trustLevel: "acquaintance",
+        admissionState: "active",
+        relationshipPolicy: {
+          version: 1,
+          updatedAt: NOW,
+          initiative: { allow: false, provenance: "stated" },
+        },
+        externalIds: [{
+          provider: "aad",
+          externalId: "aad-alex",
+          tenantId: "tenant-1",
+          linkedAt: NOW,
+        }],
+      })
+      let capturedClaim: ExternalIdClaimInput | undefined
+      const store: ExternalIdClaimStore = {
+        get: async () => null,
+        put: async () => {},
+        delete: async () => {},
+        findByExternalId: async () => null,
+        hasAnyFriends: async () => true,
+        claimExternalId: async (input) => {
+          capturedClaim = input
+          return { ok: true, status: "created", record: canonical }
+        },
+      }
+
+      const ctx = await new FriendResolver(store, {
+        provider: "aad",
+        externalId: "aad-alex",
+        tenantId: "tenant-1",
+        displayName: "Alex Wilber",
+        channel: "teams",
+      }).resolve()
+
+      expect(capturedClaim?.target).toEqual({
+        kind: "create",
+        record: {
+          id: expect.any(String),
+          name: "Alex Wilber",
+        },
+      })
+      expect(capturedClaim?.target).not.toHaveProperty("record.trustLevel")
+      expect(capturedClaim?.target).not.toHaveProperty("record.admissionState")
+      expect(capturedClaim?.target).not.toHaveProperty("record.relationshipPolicy")
+      expect(ctx.friend.role).toBe("friend")
+      expect(ctx.friend.trustLevel).toBe("acquaintance")
+      expect(ctx.friend.admissionState).toBe("active")
+      expect(ctx.friend.relationshipPolicy).toEqual(canonical.relationshipPolicy)
+    })
+
+    it("throws when a claim collides with a different canonical friend", async () => {
+      const store: ExternalIdClaimStore = {
+        get: async () => null,
+        put: async () => {},
+        delete: async () => {},
+        findByExternalId: async () => null,
+        hasAnyFriends: async () => true,
+        claimExternalId: async () => ({
+          ok: false,
+          status: "collision",
+          existingFriendId: "winner-friend",
+        }),
+      }
+
+      await expect(new FriendResolver(store, {
+        provider: "aad",
+        externalId: "aad-alex",
+        tenantId: "tenant-1",
+        displayName: "Alex Wilber",
+        channel: "teams",
+      }).resolve()).rejects.toThrow("friend resolution claim collision for aad:aad-alex:tenant-1 (existing friend winner-friend)")
+    })
+
+    it("throws when a claim target no longer exists", async () => {
+      const store: ExternalIdClaimStore = {
+        get: async () => null,
+        put: async () => {},
+        delete: async () => {},
+        findByExternalId: async () => null,
+        hasAnyFriends: async () => true,
+        claimExternalId: async () => ({
+          ok: false,
+          status: "not_found",
+        }),
+      }
+
+      await expect(new FriendResolver(store, {
+        provider: "aad",
+        externalId: "aad-alex",
+        tenantId: "tenant-1",
+        displayName: "Alex Wilber",
+        channel: "teams",
+      }).resolve()).rejects.toThrow("friend resolution claim target missing for aad:aad-alex:tenant-1")
     })
   })
 })

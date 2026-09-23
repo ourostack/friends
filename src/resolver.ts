@@ -4,7 +4,7 @@
 
 import { randomUUID } from "crypto"
 import { userInfo } from "os"
-import type { FriendStore } from "./store"
+import type { FriendStore, ExternalIdClaimStore, ExternalIdClaimInput } from "./store"
 import type { IdentityProvider, FriendRecord, ResolvedContext, ExternalId } from "./types"
 import { getChannelCapabilities } from "./channel"
 import { emitNervesEvent } from "./observability"
@@ -78,6 +78,10 @@ export function isLocalMachineOwnerIdentity(
 ): boolean {
   if (provider !== "local" || !ownerUsername) return false
   return externalId === ownerUsername || externalId.startsWith(`${ownerUsername}@`)
+}
+
+function isExternalIdClaimStore(store: FriendStore): store is ExternalIdClaimStore {
+  return typeof (store as Partial<ExternalIdClaimStore>).claimExternalId === "function"
 }
 
 export class FriendResolver {
@@ -236,6 +240,32 @@ export class FriendResolver {
           a2a: { agentId: this.params.externalId },
         },
       } : {}),
+    }
+
+    if (isExternalIdClaimStore(this.store)) {
+      const claim: ExternalIdClaimInput = {
+        externalId: {
+          provider: this.params.provider,
+          externalId: this.params.externalId,
+          linkedAt: now,
+          ...(this.params.tenantId !== undefined ? { tenantId: this.params.tenantId } : {}),
+        },
+        target: {
+          kind: "create",
+          record: {
+            id: friend.id,
+            name: friend.name,
+          },
+        },
+      }
+      const result = await this.store.claimExternalId(claim)
+      if (result.ok) return result.record
+
+      const claimIdentity = `${this.params.provider}:${this.params.externalId}${this.params.tenantId ? `:${this.params.tenantId}` : ""}`
+      if (result.status === "collision") {
+        throw new Error(`friend resolution claim collision for ${claimIdentity} (existing friend ${result.existingFriendId})`)
+      }
+      throw new Error(`friend resolution claim target missing for ${claimIdentity}`)
     }
 
     // Persist -- log and continue on failure (D16)
