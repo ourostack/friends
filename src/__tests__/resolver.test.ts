@@ -365,7 +365,7 @@ describe("FriendResolver against a temp FileFriendStore", () => {
   })
 
   describe("atomic external identity claims", () => {
-    it("converges concurrent first contact on the canonical claimed friend", async () => {
+    it("converges concurrent first contact without a population probe on the canonical claimed friend", async () => {
       const canonical = makeFriend({
         id: "canonical-friend",
         name: "Alex Wilber",
@@ -385,7 +385,6 @@ describe("FriendResolver against a temp FileFriendStore", () => {
         },
         delete: async () => {},
         findByExternalId: async () => null,
-        hasAnyFriends: async () => true,
         claimExternalId: async (input) => {
           claimCalls.push(input)
           const status = nextStatus
@@ -431,6 +430,105 @@ describe("FriendResolver against a temp FileFriendStore", () => {
       })
       expect(first.friend.id).toBe("canonical-friend")
       expect(second.friend.id).toBe("canonical-friend")
+    })
+
+    it("fails explicitly when a claim store population probe rejects", async () => {
+      let claimCalls = 0
+      let putCalls = 0
+      const store: ExternalIdClaimStore = {
+        get: async () => null,
+        put: async () => {
+          putCalls += 1
+        },
+        delete: async () => {},
+        findByExternalId: async () => null,
+        hasAnyFriends: async () => {
+          throw new Error("population probe unavailable")
+        },
+        claimExternalId: async () => {
+          claimCalls += 1
+          return {
+            ok: false,
+            status: "not_found",
+          }
+        },
+      }
+
+      await expect(new FriendResolver(store, {
+        provider: "aad",
+        externalId: "aad-alex",
+        tenantId: "tenant-1",
+        displayName: "Alex Wilber",
+        channel: "teams",
+      }).resolve()).rejects.toThrow("population probe unavailable")
+      expect(claimCalls).toBe(0)
+      expect(putCalls).toBe(0)
+    })
+
+    it("keeps the first-imprint legacy put path when a claim store explicitly reports empty", async () => {
+      const puts: FriendRecord[] = []
+      let claimCalls = 0
+      const store: ExternalIdClaimStore = {
+        get: async () => null,
+        put: async (_id, record) => {
+          puts.push(record)
+        },
+        delete: async () => {},
+        findByExternalId: async () => null,
+        hasAnyFriends: async () => false,
+        claimExternalId: async () => {
+          claimCalls += 1
+          return {
+            ok: false,
+            status: "not_found",
+          }
+        },
+      }
+
+      const ctx = await new FriendResolver(store, {
+        provider: "aad",
+        externalId: "aad-first",
+        tenantId: "tenant-1",
+        displayName: "First Person",
+        channel: "teams",
+      }).resolve()
+
+      expect(claimCalls).toBe(0)
+      expect(puts).toHaveLength(1)
+      expect(puts[0].id).toBe(ctx.friend.id)
+      expect(ctx.friend.role).toBe("primary")
+      expect(ctx.friend.trustLevel).toBe("family")
+    })
+
+    it.each([
+      ["missing", undefined],
+      ["failing", async () => {
+        throw new Error("population probe unavailable")
+      }],
+    ] as const)("keeps legacy first-imprint behavior for a plain store with a %s population probe", async (_label, hasAnyFriends) => {
+      const puts: FriendRecord[] = []
+      const store: FriendStore = {
+        get: async () => null,
+        put: async (_id, record) => {
+          puts.push(record)
+        },
+        delete: async () => {},
+        findByExternalId: async () => null,
+        ...(hasAnyFriends === undefined ? {} : { hasAnyFriends }),
+      }
+
+      const ctx = await new FriendResolver(store, {
+        provider: "aad",
+        externalId: "aad-first",
+        tenantId: "tenant-1",
+        displayName: "First Person",
+        channel: "teams",
+      }).resolve()
+
+      expect(puts).toHaveLength(1)
+      expect(puts[0].id).toBe(ctx.friend.id)
+      expect(ctx.friend.role).toBe("primary")
+      expect(ctx.friend.trustLevel).toBe("family")
     })
 
     it("keeps the legacy put path for plain stores", async () => {

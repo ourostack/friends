@@ -3,7 +3,7 @@
     {
       "version": "0.1.0-alpha.11",
       "changes": [
-        "Add atomic same-identity resolution for claim-capable stores",
+        "Add atomic same-identity resolution for default identities in claim-capable stores",
         "Preserve source provenance on friend notes"
       ]
     },

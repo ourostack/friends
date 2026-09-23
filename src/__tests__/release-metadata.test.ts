@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest"
 const root = fileURLToPath(new URL("../..", import.meta.url))
 const expectedVersion = "0.1.0-alpha.11"
 const expectedChanges = [
-  "Add atomic same-identity resolution for claim-capable stores",
+  "Add atomic same-identity resolution for default identities in claim-capable stores",
   "Preserve source provenance on friend notes",
 ]
 

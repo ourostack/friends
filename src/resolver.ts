@@ -168,16 +168,24 @@ export class FriendResolver {
     const tenantMemberships: string[] =
       this.params.tenantId ? [this.params.tenantId] : []
 
-    let hasAnyFriends = false
-    try {
-      if (typeof this.store.hasAnyFriends === "function") {
-        hasAnyFriends = await this.store.hasAnyFriends()
+    const claimStore = isExternalIdClaimStore(this.store) ? this.store : undefined
+    let isFirstImprint = false
+    if (claimStore) {
+      if (typeof claimStore.hasAnyFriends === "function") {
+        isFirstImprint = !(await claimStore.hasAnyFriends())
       }
-    } catch {
-      hasAnyFriends = false
+    } else {
+      let hasAnyFriends = false
+      try {
+        if (typeof this.store.hasAnyFriends === "function") {
+          hasAnyFriends = await this.store.hasAnyFriends()
+        }
+      } catch {
+        hasAnyFriends = false
+      }
+      isFirstImprint = !hasAnyFriends
     }
 
-    const isFirstImprint = !hasAnyFriends
     const isA2AAgent = this.params.provider === "a2a-agent"
     // Bug C — roster-awareness. When a roster context is injected AND the candidate's
     // did is a key-verified member of the pinned account roster, seat `family` (even
@@ -249,7 +257,7 @@ export class FriendResolver {
       !isA2AAgent &&
       !isImessageGroup
 
-    if (isDefaultIdentityPath && isExternalIdClaimStore(this.store)) {
+    if (isDefaultIdentityPath && claimStore) {
       const claim: ExternalIdClaimInput = {
         externalId: {
           provider: this.params.provider,
@@ -265,7 +273,7 @@ export class FriendResolver {
           },
         },
       }
-      const result = await this.store.claimExternalId(claim)
+      const result = await claimStore.claimExternalId(claim)
       if (result.ok) return result.record
 
       const claimIdentity = `${this.params.provider}:${this.params.externalId}${this.params.tenantId ? `:${this.params.tenantId}` : ""}`
