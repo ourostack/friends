@@ -4,7 +4,7 @@ import { tmpdir } from "os"
 import { join } from "path"
 
 import { applyFriendNote, FileFriendStore } from "../index"
-import type { FriendStore, FriendRecord, IdentityProvider, NoteProvenance } from "../index"
+import type { FriendStore, FriendRecord, IdentityProvider, NoteProvenance, NoteSourceReference } from "../index"
 
 const NOW = "2026-03-14T18:00:00.000Z"
 
@@ -64,6 +64,16 @@ function friend(overrides: Partial<FriendRecord> = {}): FriendRecord {
 }
 
 const provenance: NoteProvenance = { assertedBy: { agentId: "a1", agentName: "Agent" } }
+const source = {
+  channel: "teams",
+  sourceId: "activity-123",
+  observedAt: "2026-09-23T05:00:00.000Z",
+  assertingFriendId: "friend-alex",
+} satisfies NoteSourceReference
+const sourceProvenance: NoteProvenance = {
+  origin: "first_party",
+  source,
+}
 
 describe("applyFriendNote — name", () => {
   it("sets the record name and reports saved", async () => {
@@ -191,6 +201,19 @@ describe("applyFriendNote — note", () => {
     expect(result.ok).toBe(true)
     expect((await store.get("f-1"))?.notes.role.provenance?.assertedBy?.agentId).toBe("a1")
   })
+
+  it("persists source provenance on a note value", async () => {
+    const store = new MemoryStore([friend({ id: "friend-alex", externalIds: [{ provider: "aad", externalId: "x1", linkedAt: NOW }] })])
+    const result = await applyFriendNote(store, "friend-alex", {
+      type: "note",
+      key: "workshop_role",
+      content: "Owns participant setup",
+      provenance: sourceProvenance,
+    })
+    expect(result.status).toBe("saved")
+    expect(result.ok).toBe(true)
+    expect((await store.get("friend-alex"))?.notes.workshop_role.provenance?.source).toEqual(source)
+  })
 })
 
 describe("applyFriendNote — not found and validation", () => {
@@ -257,5 +280,24 @@ describe("applyFriendNote — FileFriendStore end-to-end", () => {
     const reloaded = await store.findByExternalId("aad", "x1")
     expect(reloaded?.notes.role.value).toBe("PM")
     expect(reloaded?.notes.role.provenance?.assertedBy?.agentId).toBe("a1")
+  })
+
+  it("preserves note source provenance through a close/reopen cycle", async () => {
+    dir = mkdtempSync(join(tmpdir(), "friends-notes-source-"))
+    const path = join(dir, "friends")
+    {
+      const store = new FileFriendStore(path)
+      await store.put("friend-alex", friend({ id: "friend-alex", externalIds: [{ provider: "aad", externalId: "x1", linkedAt: NOW }] }))
+      const result = await applyFriendNote(store, "friend-alex", {
+        type: "note",
+        key: "workshop_role",
+        content: "Owns participant setup",
+        provenance: sourceProvenance,
+      })
+      expect(result.ok).toBe(true)
+    }
+    const reopened = new FileFriendStore(path)
+    const reloaded = await reopened.findByExternalId("aad", "x1")
+    expect(reloaded?.notes.workshop_role.provenance?.source).toEqual(source)
   })
 })

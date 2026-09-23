@@ -23,6 +23,7 @@ export type {
   AgentMeta,
   AgentAttribution,
   RelationshipOutcome,
+  NoteSourceReference,
   NoteProvenance,
   ImportedNote,
   ShareScope,
