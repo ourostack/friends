@@ -134,6 +134,8 @@ export { upsertGroupContextParticipants } from "./group-context"
 export { accumulateFriendTokens } from "./tokens"
 
 export { applyFriendNote } from "./notes"
+export { prepareMessage, receiveMessage, MAX_MESSAGE_TEXT_CHARS, MAX_CONVERSATION_ID_CHARS } from "./message"
+export type { MessageEnvelope, ReceivedMessage, PrepareMessageInput, PrepareMessageResult, ReceiveMessageInput, ReceiveMessageOptions, ReceiveMessageResult } from "./message"
 
 export { setFriendTrust } from "./trust-mutation"
 export type { SetFriendTrustContext } from "./trust-mutation"
