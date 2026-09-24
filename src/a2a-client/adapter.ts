@@ -3,6 +3,8 @@
 // malicious-relay proof supplies a hostile stub). The async DID resolve + pin runs
 // BEFORE the (sync) core importer, so the importer's verifier stays sync.
 import { importCoordination } from "../coordination"
+import { receiveMessage } from "../message"
+import type { ReceivedMessage } from "../message"
 import { importMissionShare } from "../mission-share"
 import { importProfileShare } from "../share"
 import type { FriendStore } from "../store"
@@ -86,7 +88,7 @@ export async function sendShare(input: SendShareInput): Promise<SendShareResult>
 /** A2A TaskState mapping for an inbound share. `completed` carries the importer
  * status; `rejected` carries the reason code. */
 export type ReceiveShareResult =
-  | { state: "completed"; friendsKind: FriendsKind; status: string }
+  | { state: "completed"; friendsKind: FriendsKind; status: string; message?: ReceivedMessage }
   | {
       state: "rejected"
       reason:
@@ -188,6 +190,14 @@ export async function receiveShare(input: ReceiveShareInput): Promise<ReceiveSha
     const r = await importMissionShare(input.missionStore, importInput, { verifier })
     return mapImport(r, opened.friendsKind)
   }
+  if (opened.friendsKind === "message") {
+    // A message imports nothing: it returns the verified text for the recipient to act on.
+    const m = receiveMessage({ envelope: opened.envelope, fromAgentId, trustOfSource: input.trustOfSource }, { verifier })
+    if (m.ok) return { state: "completed", friendsKind: "message", status: m.status, message: m.message }
+    if (m.status === "malformed_message") return { state: "rejected", reason: "malformed_plaintext" }
+    return mapImport(m, opened.friendsKind)
+  }
+  // openSealedEnvelope admits only FRIENDS_KINDS, so the remaining kind is coordination.
   const r = await importCoordination(input.missionStore, importInput, { verifier })
   return mapImport(r, opened.friendsKind)
 }

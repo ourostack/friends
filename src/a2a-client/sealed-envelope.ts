@@ -12,7 +12,11 @@ import type { Sodium } from "./sodium"
 
 /** The friends taxonomy discriminant (the re-homed mailbox `kind`). Travels
  * SEALED, never on the DataPart `data`. */
-export type FriendsKind = "profile_share" | "mission_share" | "coordination"
+export type FriendsKind = "profile_share" | "mission_share" | "coordination" | "message"
+
+/** Every kind a recipient knows how to handle. An unknown kind is rejected at open
+ * rather than falling through to some other importer. */
+export const FRIENDS_KINDS: ReadonlySet<string> = new Set<FriendsKind>(["profile_share", "mission_share", "coordination", "message"])
 
 /** The on-the-wire sealed envelope: NOTHING plaintext beyond the version. */
 export interface SealedEnvelope {
@@ -144,6 +148,9 @@ export function openSealedEnvelope(input: OpenSealedEnvelopeInput): OpenSealedEn
     return { ok: false, error: "malformed_plaintext" }
   }
   if (typeof plaintext.friendsKind !== "string" || typeof plaintext.signerDid !== "string") {
+    return { ok: false, error: "malformed_plaintext" }
+  }
+  if (!FRIENDS_KINDS.has(plaintext.friendsKind)) {
     return { ok: false, error: "malformed_plaintext" }
   }
 
