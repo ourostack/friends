@@ -7,6 +7,7 @@ const expectedVersion = "0.1.0-alpha.12"
 const expectedChanges = [
   "Add a direct agent-to-agent message kind: MessageEnvelope text is signed by the sender and sealed to the recipient, received through receiveShare with the same sender-binding, replay, authentication, and trust-floor checks as the other kinds, and returned (never imported) for the recipient to act on.",
   "Reject envelopes whose sealed friendsKind is unknown at open, instead of routing them to the coordination importer.",
+  "Keep the message kind's doc comments to what the code does.",
 ]
 
 describe("release metadata", () => {

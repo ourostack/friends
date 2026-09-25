@@ -7,13 +7,11 @@
  * Security model (identical to the other friends kinds):
  *   - The text lives INSIDE the signed, sealed envelope. A relay or network
  *     observer can neither read it nor substitute it, so this is safe over any
- *     transport (a tailnet, a LAN, a relay) — the network is a pipe, not the lock.
+ *     transport (a tailnet, a LAN, a relay).
  *   - Authentication is the caller's `AgentVerifier` (the pinned sender key must
  *     have signed THIS envelope); authorization is the recipient's trust in the
- *     sender. Both must pass. The recipient still applies its own turn-level gates
- *     (trust gate, relationship profiles) to whatever the message asks for.
- *   - `receiveMessage` imports nothing: it only returns the verified message. What
- *     a recipient may DO in response is decided by the recipient, never the sender.
+ *     sender. Both must pass. Callers are expected to apply their own gates.
+ *   - `receiveMessage` imports nothing: it only returns the verified message.
  */
 import { emitNervesEvent } from "./observability"
 import type { TrustLevel } from "./types"
@@ -89,7 +87,7 @@ export interface ReceiveMessageInput {
 export interface ReceiveMessageOptions {
   verifier?: AgentVerifier
   /** The lowest sender trust that may deliver a message. Defaults to `acquaintance`,
-   * matching coordination; the recipient's own gates still apply to the turn. */
+   * matching coordination. */
   minTrustToAccept?: TrustLevel
 }
 
