@@ -1,6 +1,12 @@
 {
   "versions": [
     {
+      "version": "0.1.0-alpha.13",
+      "changes": [
+        "Keep the message kind's doc comments to what the code does."
+      ]
+    },
+    {
       "version": "0.1.0-alpha.12",
       "changes": [
         "Add a direct agent-to-agent message kind: MessageEnvelope text is signed by the sender and sealed to the recipient, received through receiveShare with the same sender-binding, replay, authentication, and trust-floor checks as the other kinds, and returned (never imported) for the recipient to act on.",
