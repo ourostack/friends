@@ -7,6 +7,7 @@ const expectedVersion = "0.1.0-alpha.14"
 const expectedChanges = [
   "Add an optional signed delegation marker to agent messages: MessageEnvelope.onBehalfOf \"principal\" is set by prepareMessage, signed and sealed with the text, and returned by receiveMessage; any other value is malformed.",
   "Add an explicit DelegationGrant on FriendRecord (scope principal_commands). FileFriendStore keeps it only in its exact shape and drops anything else, so trust tier never implies delegation.",
+  "Refuse a delegation grant in an external-identity create candidate, and update brace-expansion to clear its denial-of-service advisories.",
 ]
 
 describe("release metadata", () => {
