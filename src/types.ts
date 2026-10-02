@@ -455,6 +455,14 @@ export interface AgentMeta {
 // The single merged type for a person the agent interacts with.
 // Combines identity (who they are) and notes (what the agent has written about them).
 // Stored as a unified JSON record in bundle `friends/`.
+/** An explicit grant letting this friend (an agent) relay commands from the recipient's
+ * principal. Trust tier never implies it; only an operator-set grant does. */
+export interface DelegationGrant {
+  scope: "principal_commands"
+  grantedAt: string
+  source: string
+}
+
 export interface FriendRecord {
   id: string                              // stable UUID
   /** Store-owned immutable lifecycle nonce returned on reads. `put` ignores a
@@ -470,6 +478,8 @@ export interface FriendRecord {
   initiativePolicy?: InitiativePolicy
   relationshipPolicy?: RelationshipPolicy
   capabilityProfileId?: string
+  /** Present only when the operator granted this friend delegated principal commands. */
+  delegationGrant?: DelegationGrant
   connections?: FriendConnection[]
   externalIds: ExternalId[]               // PII
   tenantMemberships: string[]             // PII

@@ -8,6 +8,7 @@
 // -- Types --
 export type {
   FriendRecord,
+  DelegationGrant,
   FriendConnection,
   ExternalId,
   IdentityProvider,

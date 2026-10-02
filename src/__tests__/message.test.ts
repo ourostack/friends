@@ -21,6 +21,17 @@ describe("prepareMessage", () => {
     expect(r).toEqual({ ok: true, envelope: { fromAgentId: A, text: "hi", conversationId: "ctx-1", issuedAt: NOW } })
   })
 
+  it("carries a principal delegation marker only when asked", () => {
+    const r = prepareMessage({ fromAgentId: A, text: "books on", onBehalfOf: "principal", now: () => NOW })
+    expect(r).toEqual({ ok: true, envelope: { fromAgentId: A, text: "books on", onBehalfOf: "principal", issuedAt: NOW } })
+    const plain = prepareMessage({ fromAgentId: A, text: "hi", now: () => NOW })
+    expect(plain.ok && Object.hasOwn(plain.envelope, "onBehalfOf")).toBe(false)
+  })
+
+  it("rejects an unknown delegation marker", () => {
+    expect(prepareMessage({ fromAgentId: A, text: "hi", onBehalfOf: "someone" as unknown as "principal" })).toEqual({ ok: false, status: "invalid_delegation" })
+  })
+
   it("defaults issuedAt to the current time", () => {
     const r = prepareMessage({ fromAgentId: A, text: "hi" })
     expect(r.ok && !Number.isNaN(Date.parse(r.envelope.issuedAt))).toBe(true)
@@ -53,6 +64,16 @@ describe("receiveMessage", () => {
   it("keeps the conversation id", () => {
     const r = receiveMessage({ envelope: envelope({ conversationId: "ctx-9" }), fromAgentId: A, trustOfSource: "friend" }, { verifier: accept })
     expect(r).toEqual({ ok: true, status: "received", message: { fromAgentId: A, text: "status?", conversationId: "ctx-9", issuedAt: NOW } })
+  })
+
+  it("returns the principal delegation marker", () => {
+    const r = receiveMessage({ envelope: envelope({ onBehalfOf: "principal" }), fromAgentId: A, trustOfSource: "family" }, { verifier: accept })
+    expect(r).toEqual({ ok: true, status: "received", message: { fromAgentId: A, text: "status?", onBehalfOf: "principal", issuedAt: NOW } })
+  })
+
+  it.each([["someone"], [true], [null], [""]])("treats delegation marker %j as malformed", (marker) => {
+    expect(receiveMessage({ envelope: envelope({ onBehalfOf: marker }), fromAgentId: A, trustOfSource: "family" }, { verifier: accept }))
+      .toEqual({ ok: false, status: "malformed_message" })
   })
 
   it("passes the envelope proof to the verifier, and undefined for a non-string proof", () => {
