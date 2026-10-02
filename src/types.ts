@@ -451,10 +451,6 @@ export interface AgentMeta {
   mailbox?: { repo: string; selfOutboxAgentId: string }
 }
 
-// -- Friend Record --
-// The single merged type for a person the agent interacts with.
-// Combines identity (who they are) and notes (what the agent has written about them).
-// Stored as a unified JSON record in bundle `friends/`.
 /** An explicit grant letting this friend (an agent) relay commands from the recipient's
  * principal. Trust tier never implies it; only an operator-set grant does. */
 export interface DelegationGrant {
@@ -463,6 +459,10 @@ export interface DelegationGrant {
   source: string
 }
 
+// -- Friend Record --
+// The single merged type for a person the agent interacts with.
+// Combines identity (who they are) and notes (what the agent has written about them).
+// Stored as a unified JSON record in bundle `friends/`.
 export interface FriendRecord {
   id: string                              // stable UUID
   /** Store-owned immutable lifecycle nonce returned on reads. `put` ignores a

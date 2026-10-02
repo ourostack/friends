@@ -289,6 +289,12 @@ describe("household policy defensive coverage", () => {
       },
     })).rejects.toThrow("create candidate is invalid")
     expect(await subject.get("privileged")).toBeNull()
+
+    await expect(subject.claimExternalId({
+      externalId: { provider: "telegram-user", externalId: "44", linkedAt: NOW },
+      target: { kind: "create", record: { ...record("delegate"), delegationGrant: { scope: "principal_commands", grantedAt: NOW, source: "smuggled" } } },
+    })).rejects.toThrow("create candidate is invalid")
+    expect(await subject.get("delegate")).toBeNull()
   })
 
   it("constructs a minimal store-owned unverified Friend for a create claim", async () => {

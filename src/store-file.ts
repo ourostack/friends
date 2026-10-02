@@ -628,6 +628,7 @@ export class FileFriendStore implements ExternalIdClaimStore {
       (candidate.initiativePolicy === undefined || candidate.initiativePolicy === "none") &&
       (candidate.relationshipPolicy === undefined || this.isEmptyRelationshipPolicy(candidate.relationshipPolicy)) &&
       candidate.capabilityProfileId === undefined &&
+      candidate.delegationGrant === undefined &&
       (candidate.externalIds === undefined || (Array.isArray(candidate.externalIds) && candidate.externalIds.length === 0)) &&
       (candidate.tenantMemberships === undefined || (Array.isArray(candidate.tenantMemberships) && candidate.tenantMemberships.length === 0)) &&
       (candidate.toolPreferences === undefined || this.isEmptyRecord(candidate.toolPreferences)) &&
