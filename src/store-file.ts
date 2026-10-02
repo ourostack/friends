@@ -19,6 +19,7 @@ import type {
   FriendRecord,
   InitiativePolicy,
   RelationshipPolicy,
+  DelegationGrant,
   RelationshipPolicyPreference,
   TrustLevel,
 } from "./types"
@@ -296,6 +297,8 @@ export class FileFriendStore implements ExternalIdClaimStore {
       ? raw.capabilityProfileId.trim()
       : undefined
 
+    const delegationGrant = this.normalizeDelegationGrant(raw.delegationGrant)
+
     return {
       id: raw.id,
       ...(typeof raw.recordIncarnation === "string" && raw.recordIncarnation ? { recordIncarnation: raw.recordIncarnation } : {}),
@@ -307,6 +310,7 @@ export class FileFriendStore implements ExternalIdClaimStore {
       initiativePolicy,
       relationshipPolicy,
       ...(capabilityProfileId ? { capabilityProfileId } : {}),
+      ...(delegationGrant ? { delegationGrant } : {}),
       connections: Array.isArray(raw.connections)
         ? raw.connections
             .filter(
@@ -366,6 +370,18 @@ export class FileFriendStore implements ExternalIdClaimStore {
     return raw === "none" || raw === "reactive_only" || raw === "request_follow_up_only" || raw === "proactive"
       ? raw
       : DEFAULT_INITIATIVE_POLICY
+  }
+
+  /** A grant is kept only in its exact shape; anything else is dropped, so a malformed or
+   * widened grant fails closed instead of granting more than was written. */
+  private normalizeDelegationGrant(raw: unknown): DelegationGrant | undefined {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined
+    const grant = raw as Record<string, unknown>
+    const keys = Object.keys(grant).sort().join(",")
+    if (keys !== "grantedAt,scope,source" || grant.scope !== "principal_commands"
+      || typeof grant.grantedAt !== "string" || Number.isNaN(Date.parse(grant.grantedAt))
+      || typeof grant.source !== "string" || !grant.source.trim()) return undefined
+    return { scope: "principal_commands", grantedAt: grant.grantedAt, source: grant.source }
   }
 
   private normalizeRelationshipPolicy(raw: unknown): RelationshipPolicy {
@@ -612,6 +628,7 @@ export class FileFriendStore implements ExternalIdClaimStore {
       (candidate.initiativePolicy === undefined || candidate.initiativePolicy === "none") &&
       (candidate.relationshipPolicy === undefined || this.isEmptyRelationshipPolicy(candidate.relationshipPolicy)) &&
       candidate.capabilityProfileId === undefined &&
+      candidate.delegationGrant === undefined &&
       (candidate.externalIds === undefined || (Array.isArray(candidate.externalIds) && candidate.externalIds.length === 0)) &&
       (candidate.tenantMemberships === undefined || (Array.isArray(candidate.tenantMemberships) && candidate.tenantMemberships.length === 0)) &&
       (candidate.toolPreferences === undefined || this.isEmptyRecord(candidate.toolPreferences)) &&

@@ -451,6 +451,14 @@ export interface AgentMeta {
   mailbox?: { repo: string; selfOutboxAgentId: string }
 }
 
+/** An explicit grant letting this friend (an agent) relay commands from the recipient's
+ * principal. Trust tier never implies it; only an operator-set grant does. */
+export interface DelegationGrant {
+  scope: "principal_commands"
+  grantedAt: string
+  source: string
+}
+
 // -- Friend Record --
 // The single merged type for a person the agent interacts with.
 // Combines identity (who they are) and notes (what the agent has written about them).
@@ -470,6 +478,8 @@ export interface FriendRecord {
   initiativePolicy?: InitiativePolicy
   relationshipPolicy?: RelationshipPolicy
   capabilityProfileId?: string
+  /** Present only when the operator granted this friend delegated principal commands. */
+  delegationGrant?: DelegationGrant
   connections?: FriendConnection[]
   externalIds: ExternalId[]               // PII
   tenantMemberships: string[]             // PII

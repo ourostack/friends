@@ -84,6 +84,19 @@ describe("setFriendTrust", () => {
     }
   })
 
+  it("keeps a delegation grant across a trust change through the file store", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "friends-trust-grant-"))
+    try {
+      const store = new FileFriendStore(join(dir, "friends"))
+      const grant = { scope: "principal_commands" as const, grantedAt: NOW, source: "owner stated" }
+      await store.put("f-1", friend({ delegationGrant: grant }))
+      await setFriendTrust(store, "f-1", "family")
+      expect((await store.get("f-1"))?.delegationGrant).toEqual(grant)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it("returns not_found (no throw) when the friend is missing", async () => {
     const store = new MemoryStore()
     const result = await setFriendTrust(store, "missing", "friend")

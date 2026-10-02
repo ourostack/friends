@@ -56,6 +56,28 @@ describe("FileFriendStore", () => {
     expect(got?.name).toBe("Jordan")
   })
 
+  it("round-trips a principal delegation grant", async () => {
+    const { store: s } = store()
+    const grant = { scope: "principal_commands" as const, grantedAt: "2026-10-02T00:00:00.000Z", source: "owner stated" }
+    await s.put("rec-1", makeRecord({ delegationGrant: grant }))
+    expect((await s.get("rec-1"))?.delegationGrant).toEqual(grant)
+    await s.put("rec-2", makeRecord({ id: "rec-2" }))
+    expect(Object.hasOwn((await s.get("rec-2"))!, "delegationGrant")).toBe(false)
+  })
+
+  it.each([
+    ["wrong scope", { scope: "everything", grantedAt: "2026-10-02T00:00:00.000Z", source: "x" }],
+    ["bad time", { scope: "principal_commands", grantedAt: "yesterday", source: "x" }],
+    ["empty source", { scope: "principal_commands", grantedAt: "2026-10-02T00:00:00.000Z", source: "  " }],
+    ["extra key", { scope: "principal_commands", grantedAt: "2026-10-02T00:00:00.000Z", source: "x", allTools: true }],
+    ["not an object", "yes"],
+    ["an array", []],
+  ])("drops a malformed delegation grant (%s) on read", async (_label, grant) => {
+    const { store: s, friendsPath } = store()
+    writeFileSync(join(friendsPath, "g.json"), JSON.stringify({ ...makeRecord({ id: "g" }), delegationGrant: grant }))
+    expect(Object.hasOwn((await s.get("g"))!, "delegationGrant")).toBe(false)
+  })
+
   it("returns null for a missing id", async () => {
     const { store: s } = store()
     expect(await s.get("missing")).toBeNull()

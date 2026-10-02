@@ -33,6 +33,11 @@ export interface MessageEnvelope {
   text: string
   /** Optional sender-chosen conversation thread id, so replies can stay in one session. */
   conversationId?: string
+  /** Marks the text as a command the sender relays from its own principal (the human it
+   * works for). It is signed with the text, so a relay can neither add nor strip it.
+   * It claims nothing on its own: the recipient honours it only for a sender its own
+   * friend record explicitly grants delegation to. */
+  onBehalfOf?: "principal"
   /** Opaque, verifier-specific proof slot (stamped by `sealEnvelope`). */
   proof?: string
   issuedAt: string
@@ -43,6 +48,8 @@ export interface ReceivedMessage {
   fromAgentId: string
   text: string
   conversationId?: string
+  /** Present only when the signed envelope carried the delegation marker. */
+  onBehalfOf?: "principal"
   issuedAt: string
 }
 
@@ -51,12 +58,14 @@ export interface PrepareMessageInput {
   fromAgentId: string
   text: string
   conversationId?: string
+  /** Mark the message as a command relayed from this agent's principal. */
+  onBehalfOf?: "principal"
   now?: () => string
 }
 
 export type PrepareMessageResult =
   | { ok: true; envelope: MessageEnvelope }
-  | { ok: false; status: "empty_text" | "text_too_long" | "invalid_conversation_id" | "invalid_sender" }
+  | { ok: false; status: "empty_text" | "text_too_long" | "invalid_conversation_id" | "invalid_sender" | "invalid_delegation" }
 
 /** Producer half: build an unsigned message envelope (sealing signs it). */
 export function prepareMessage(input: PrepareMessageInput): PrepareMessageResult {
@@ -66,10 +75,12 @@ export function prepareMessage(input: PrepareMessageInput): PrepareMessageResult
   if (input.conversationId !== undefined && !validConversationId(input.conversationId)) {
     return { ok: false, status: "invalid_conversation_id" }
   }
+  if (input.onBehalfOf !== undefined && input.onBehalfOf !== "principal") return { ok: false, status: "invalid_delegation" }
   const envelope: MessageEnvelope = {
     fromAgentId: input.fromAgentId,
     text: input.text,
     ...(input.conversationId !== undefined ? { conversationId: input.conversationId } : {}),
+    ...(input.onBehalfOf !== undefined ? { onBehalfOf: input.onBehalfOf } : {}),
     issuedAt: (input.now ?? (() => new Date().toISOString()))(),
   }
   return { ok: true, envelope }
@@ -102,11 +113,13 @@ export function receiveMessage(input: ReceiveMessageInput, options: ReceiveMessa
   const text = envelope.text
   const conversationId = envelope.conversationId
   const issuedAt = envelope.issuedAt
+  const onBehalfOf = envelope.onBehalfOf
   if (
     envelope.fromAgentId !== input.fromAgentId
     || typeof text !== "string" || text.trim() === "" || text.length > MAX_MESSAGE_TEXT_CHARS
     || typeof issuedAt !== "string" || Number.isNaN(Date.parse(issuedAt))
     || (conversationId !== undefined && !validConversationId(conversationId))
+    || (onBehalfOf !== undefined && onBehalfOf !== "principal")
   ) {
     return { ok: false, status: "malformed_message" }
   }
@@ -139,6 +152,7 @@ export function receiveMessage(input: ReceiveMessageInput, options: ReceiveMessa
       fromAgentId: input.fromAgentId,
       text,
       ...(conversationId !== undefined ? { conversationId: conversationId as string } : {}),
+      ...(onBehalfOf !== undefined ? { onBehalfOf } : {}),
       issuedAt,
     },
   }

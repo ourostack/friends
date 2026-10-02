@@ -93,6 +93,19 @@ describe("receiveShare — direct agent messages", () => {
     })
   })
 
+  it("carries the signed delegation marker through the seal", async () => {
+    const { sodium, a, b } = await twoAgents()
+    const prepared = prepareMessage({ fromAgentId: a.did, text: "books on", onBehalfOf: "principal", now: () => NOW })
+    if (!prepared.ok) throw new Error(prepared.status)
+    const wire = await sendFromA(sodium, a, b, prepared.envelope as unknown as Record<string, unknown>)
+    expect(JSON.stringify(wire)).not.toContain("principal")
+    const r = await receiveAt(sodium, b, wire, "family")
+    expect(r).toEqual({
+      state: "completed", friendsKind: "message", status: "received",
+      message: { fromAgentId: a.did, text: "books on", onBehalfOf: "principal", issuedAt: NOW },
+    })
+  })
+
   it("rejects a replay of the same sealed message", async () => {
     const { sodium, a, b } = await twoAgents()
     const wire = await sendFromA(sodium, a, b, messageFrom(a))
