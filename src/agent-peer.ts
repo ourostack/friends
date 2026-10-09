@@ -8,7 +8,8 @@ import { randomUUID } from "node:crypto"
 
 import { emitNervesEvent } from "./observability"
 import type { FriendStore } from "./store"
-import type { AgentMeta, FriendRecord, TrustLevel } from "./types"
+import { resolveAgentIdentity } from "./identity"
+import type { AgentMeta, FriendRecord, TrustLevel, TrustReset } from "./types"
 
 export interface UpsertAgentPeerInput {
   name: string
@@ -22,10 +23,17 @@ export interface UpsertAgentPeerInput {
   bundleName?: string
 }
 
+/** The stored record, plus (on this return value only) whether the peer's DID changed. */
+export type UpsertAgentPeerResult = FriendRecord & {
+  didChanged?: true
+  previousDid?: string
+  trustReset?: TrustReset
+}
+
 export async function upsertAgentPeer(
   store: FriendStore,
   input: UpsertAgentPeerInput,
-): Promise<FriendRecord> {
+): Promise<UpsertAgentPeerResult> {
   const { name, agentId, a2a, bundleName } = input
 
   const existing = await store.findByExternalId("a2a-agent", agentId)
@@ -34,13 +42,30 @@ export async function upsertAgentPeer(
   // trustLevel and no existing record lands at `stranger`, not `acquaintance`. An
   // owner-initiated onboard that passes an explicit `trustLevel`, and an existing
   // record's level, both still win (they precede this fallback).
-  const trustLevel: TrustLevel = input.trustLevel ?? existing?.trustLevel ?? "stranger"
+  //
+  // A different DID on an existing record is a different peer: authority resets and
+  // no caller option can exempt it (a rotation goes through the DID verifier's signed
+  // successor statement, never through here).
+  const previousDid = resolveAgentIdentity(existing?.agentMeta).did
+  const didChanged = Boolean(existing && previousDid && a2a?.did && a2a.did !== previousDid)
+  const trustReset: TrustReset | undefined = didChanged
+    ? { at: now, reason: "did_changed", previousDid: previousDid!, previousTrust: existing!.trustLevel ?? "stranger" }
+    : undefined
+  const trustLevel: TrustLevel = didChanged ? "stranger" : input.trustLevel ?? existing?.trustLevel ?? "stranger"
   const baseMeta: AgentMeta = existing?.agentMeta ?? {
     bundleName: bundleName ?? name,
     familiarity: 0,
     sharedMissions: [],
     outcomes: [],
   }
+
+  const { identity: _staleIdentity, ...metaWithoutIdentity } = baseMeta
+  const carriedMeta: AgentMeta = didChanged ? metaWithoutIdentity : baseMeta
+  // The other coordinates are rebuilt from the input, but a re-onboard that names no
+  // DID keeps the pinned one. When the DID changed, none of the old peer's coordinates
+  // carry over.
+  const keptDid = !didChanged && !a2a?.did && baseMeta.a2a?.did ? { did: baseMeta.a2a.did } : {}
+  const mergedA2a = { ...keptDid, ...(a2a ?? {}) }
 
   const record: FriendRecord = {
     ...(existing ?? {
@@ -56,14 +81,17 @@ export async function upsertAgentPeer(
     name,
     role: "agent-peer",
     trustLevel,
+    ...(didChanged
+      ? { admissionState: "unverified" as const, trustReset }
+      : {}),
     kind: "agent",
     agentMeta: {
       // `...baseMeta` already carries any existing top-level `mailbox`; an explicit
       // `input.mailbox` overrides it below. Mailbox is top-level on AgentMeta since
       // the phase-8 demote (was nested under `a2a` in alpha.4).
-      ...baseMeta,
+      ...carriedMeta,
       bundleName: baseMeta.bundleName || bundleName || name,
-      a2a: { ...(a2a ?? {}), agentId },
+      a2a: { ...mergedA2a, agentId },
       ...(input.mailbox ? { mailbox: input.mailbox } : {}),
     },
     externalIds: [
@@ -75,15 +103,28 @@ export async function upsertAgentPeer(
     updatedAt: now,
   }
 
+  if (didChanged) {
+    delete record.capabilityProfileId
+    delete record.delegationGrant
+  }
   const settled = dropGrantBelowFamily(record)
   await store.put(settled.id, settled)
+  if (didChanged) {
+    emitNervesEvent({
+      level: "warn",
+      component: "friends",
+      event: "friends.peer_did_changed",
+      message: "peer DID changed on re-onboard; trust and grants reset to stranger",
+      meta: { friendId: settled.id, previousDid, previousTrust: trustReset!.previousTrust },
+    })
+  }
   emitNervesEvent({
     component: "friends",
     event: "friends.agent_peer_upserted",
     message: "upserted agent peer record",
     meta: { friendId: settled.id, trustLevel },
   })
-  return settled
+  return didChanged ? { ...settled, didChanged: true, previousDid } : settled
 }
 
 /** The legacy record grant is never carried below family (finding 10), or a later

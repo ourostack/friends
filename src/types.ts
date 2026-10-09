@@ -464,6 +464,23 @@ export interface DelegationGrant {
   source: string
 }
 
+/** Why and when a record's trust was reset. */
+export interface TrustReset {
+  at: string
+  reason: "did_changed"
+  previousDid: string
+  previousTrust: TrustLevel
+}
+
+/** An external id asserted by another agent, held as an unverified claim. */
+export interface ImportedExternalId {
+  provider: IdentityProvider
+  externalId: string
+  tenantId?: string
+  assertedBy: AgentAttribution
+  importedAt: string
+}
+
 // -- Friend Record --
 // The single merged type for a person the agent interacts with.
 // Combines identity (who they are) and notes (what the agent has written about them).
@@ -499,6 +516,12 @@ export interface FriendRecord {
   // import can never clobber first-party knowledge. Additive — absent on records
   // that have never imported anything.
   importedNotes?: Record<string, Record<string, ImportedNote>>
+  /** External ids a peer asserted about this person in a profile share. They are
+   * unverified claims: never indexed, never claimed, never used to resolve a sender.
+   * Absent on records that have never imported anything. */
+  importedExternalIds?: ImportedExternalId[]
+  /** Set when the record's authority was reset because the peer's DID changed. */
+  trustReset?: TrustReset
   totalTokens: number                     // cumulative token usage across all turns
   createdAt: string                       // ISO date
   updatedAt: string
