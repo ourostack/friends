@@ -148,20 +148,34 @@ describe("tieredPolicy (A3, the default)", () => {
     expect(DEFAULT_CONSENT_POLICY).toBe(tieredPolicy)
   })
 
-  it("consents identity-scope shares on trust ≥ friend without a grant", async () => {
+  it("consents name and coordinate shares on trust ≥ friend without a grant", async () => {
     const grants = new MemoryGrantStore()
     expect(
-      await tieredPolicy.consents({ subjectKey: "f-1", recipient: recipient("friend"), scope: "identity", grants, now: NOW }),
+      await tieredPolicy.consents({ subjectKey: "f-1", recipient: recipient("friend"), scope: "name", grants, now: NOW }),
     ).toBe(true)
     expect(
-      await tieredPolicy.consents({ subjectKey: "f-1", recipient: recipient("family"), scope: "name", grants, now: NOW }),
+      await tieredPolicy.consents({ subjectKey: "f-1", recipient: recipient("family"), scope: "coordinate", grants, now: NOW }),
     ).toBe(true)
   })
 
-  it("refuses identity-scope shares below friend trust", async () => {
+  it("consents identity shares without a grant only at family; below family it needs an explicit grant", async () => {
     const grants = new MemoryGrantStore()
     expect(
-      await tieredPolicy.consents({ subjectKey: "f-1", recipient: recipient("acquaintance"), scope: "identity", grants, now: NOW }),
+      await tieredPolicy.consents({ subjectKey: "f-1", recipient: recipient("family"), scope: "identity", grants, now: NOW }),
+    ).toBe(true)
+    expect(
+      await tieredPolicy.consents({ subjectKey: "f-1", recipient: recipient("friend"), scope: "identity", grants, now: NOW }),
+    ).toBe(false)
+    const granted = new MemoryGrantStore([grant({ scope: "identity" })])
+    expect(
+      await tieredPolicy.consents({ subjectKey: "f-1", recipient: recipient("friend"), scope: "identity", grants: granted, now: NOW }),
+    ).toBe(true)
+  })
+
+  it("refuses name-scope shares below friend trust", async () => {
+    const grants = new MemoryGrantStore()
+    expect(
+      await tieredPolicy.consents({ subjectKey: "f-1", recipient: recipient("acquaintance"), scope: "name", grants, now: NOW }),
     ).toBe(false)
   })
 

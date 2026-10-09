@@ -29,6 +29,10 @@ export interface FriendStore {
   put(id: string, record: FriendRecord): Promise<void>
   delete(id: string): Promise<void>
   findByExternalId(provider: string, externalId: string, tenantId?: string): Promise<FriendRecord | null>
+  /** Drop any durable claim that would re-attach this external id to `friendId` on
+   * the next read. Stores that keep a claim journal implement it; unlink calls it
+   * before rewriting the record. */
+  releaseExternalId?(friendId: string, externalId: ExternalId): Promise<void>
   hasAnyFriends?(): Promise<boolean>
   listAll?(): Promise<FriendRecord[]>
 }

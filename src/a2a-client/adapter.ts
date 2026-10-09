@@ -100,6 +100,7 @@ export type ReceiveShareResult =
         | "malformed_plaintext"
         | "sender_binding_mismatch"
         | "resolve_failed"
+        | "retired_pin"
         | "replayed"
         | "in_flight"
         | "bad_signature"
@@ -230,6 +231,11 @@ async function processClaimed(
   bareNonce: string,
 ): Promise<ReceiveShareResult> {
   const bound = binding.bound
+
+  // A retired pin is a tombstone: the old DID's key no longer verifies anything.
+  if (input.pinStore.get(senderDid)?.retiredBy !== undefined) {
+    return { state: "rejected", reason: "retired_pin" }
+  }
 
   // Resolve + pin the SENDER's DID (async — BEFORE the sync importer/verifier).
   const resolved = await input.didResolution.resolveAndPin({

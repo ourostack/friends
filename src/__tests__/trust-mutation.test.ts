@@ -273,3 +273,34 @@ describe("setFriendTrust — Bug B: control-plane audit", () => {
     }
   })
 })
+
+describe("setFriendTrust and the DID-change marker", () => {
+  const reset = { at: NOW, reason: "did_changed" as const, previousDid: "did:key:OLD", previousTrust: "family" as const }
+  function stranger(): FriendRecord {
+    return {
+      id: "x", name: "X", role: "stranger", trustLevel: "stranger", connections: [], externalIds: [], tenantMemberships: [],
+      toolPreferences: {}, notes: {}, totalTokens: 0, createdAt: NOW, updatedAt: NOW, schemaVersion: 1, trustReset: reset,
+    }
+  }
+
+  it("clears trustReset when trust is explicitly raised", async () => {
+    const store = new MemoryStore([stranger()])
+    const result = await setFriendTrust(store, "x", "friend")
+    expect(result.record?.trustReset).toBeUndefined()
+    expect(store.records.get("x")?.trustReset).toBeUndefined()
+  })
+
+  it("keeps trustReset when trust is not raised", async () => {
+    const store = new MemoryStore([stranger()])
+    const result = await setFriendTrust(store, "x", "stranger")
+    expect(result.record?.trustReset).toEqual(reset)
+  })
+
+  it("treats a record with no trust level as stranger when deciding whether trust was raised", async () => {
+    const record = stranger()
+    delete record.trustLevel
+    const store = new MemoryStore([record])
+    const result = await setFriendTrust(store, "x", "stranger")
+    expect(result.record?.trustReset).toEqual(reset)
+  })
+})

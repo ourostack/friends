@@ -13,7 +13,8 @@
 //  - the source agent's trust CAPS acceptance (a stranger peer is refused);
 //  - imports NEVER change the party's trust level (non-transitive — the key one);
 //  - an unknown party may be SEEDED only by a friend/family introducing peer
-//    (Fork E); a stranger/acquaintance peer may not seed a new record.
+//    (Fork E), at stranger, with the peer's external ids held as unverified claims
+//    (`importedExternalIds`, never indexed); a stranger/acquaintance peer may not.
 import { randomUUID } from "node:crypto"
 
 import { emitNervesEvent } from "./observability"
@@ -23,6 +24,7 @@ import type {
   AgentAttribution,
   ExternalId,
   FriendRecord,
+  ImportedExternalId,
   ImportedNote,
   RelationshipOutcome,
   ShareScope,
@@ -151,7 +153,11 @@ export async function prepareProfileShare(
   const isIdentityScope = IDENTITY_SCOPES.has(input.scope)
   const envelope: ProfileShareEnvelope = {
     subject: {
-      externalIds: record.externalIds,
+      // The subject's account handles go out only where the share is meant to identify
+      // the person: the identity scope, and the grant-gated content scopes (which need
+      // them so the receiver can find the right record). "name" and "coordinate" send
+      // the display name alone.
+      externalIds: input.scope === "name" || input.scope === "coordinate" ? [] : record.externalIds,
       displayName: record.name,
     },
     fromAgentId: input.selfAgentId,
@@ -179,7 +185,7 @@ export async function prepareProfileShare(
 // ── Consumer ──
 
 /** Trust levels a peer must hold to INTRODUCE a previously-unknown party (Fork E).
- * A friend/family peer may seed a new record at acquaintance; a stranger /
+ * A friend/family peer may seed a new record at stranger; a stranger /
  * acquaintance peer may not. */
 const SEEDING_TRUST: ReadonlySet<TrustLevel> = new Set(["family", "friend"])
 
@@ -216,10 +222,26 @@ const TRUST_RANK: Record<TrustLevel, number> = { family: 4, friend: 3, acquainta
 
 /** Find the local friend the envelope's subject refers to, by join key — the
  * FIRST of the subject's externalIds that resolves to an existing record. */
-async function resolveSubject(store: FriendStore, envelope: ProfileShareEnvelope): Promise<FriendRecord | null> {
+async function resolveSubject(
+  store: FriendStore,
+  envelope: ProfileShareEnvelope,
+  fromAgentId: string,
+): Promise<FriendRecord | null> {
   for (const ext of envelope.subject.externalIds) {
     const found = await store.findByExternalId(ext.provider, ext.externalId, ext.tenantId)
     if (found) return found
+  }
+  // A party this same peer introduced before is held with the peer's ids as unverified
+  // claims. Match those (and only those from the same peer) so a repeat share updates
+  // the seeded record instead of seeding a duplicate. This is import dedupe, never
+  // sender resolution.
+  if (typeof store.listAll === "function") {
+    const all = await store.listAll()
+    return all.find((record) => (record.importedExternalIds ?? []).some((claim) =>
+      claim.assertedBy.agentId === fromAgentId &&
+      envelope.subject.externalIds.some((ext) =>
+        ext.provider === claim.provider && ext.externalId === claim.externalId && ext.tenantId === claim.tenantId),
+    )) ?? null
   }
   return null
 }
@@ -251,15 +273,29 @@ function mergeImportedNotes(
 }
 
 /** Create a freshly-seeded record for a previously-unknown party (Fork E). Always
- * `acquaintance`, kind `human`, carrying the subject's join-key externalIds. */
-function seedRecord(envelope: ProfileShareEnvelope, now: string): FriendRecord {
+ * `stranger` (the level a real first contact gets), kind `human`. The peer's
+ * external ids are kept as unverified `importedExternalIds` claims: never in
+ * `externalIds`, so they are never indexed and the real person cannot resolve to
+ * this record by them. */
+function seedRecord(envelope: ProfileShareEnvelope, fromAgentId: string, now: string): FriendRecord {
   return {
     id: randomUUID(),
     name: envelope.subject.displayName,
-    role: "acquaintance",
-    trustLevel: "acquaintance",
+    role: "stranger",
+    trustLevel: "stranger",
     connections: [],
-    externalIds: envelope.subject.externalIds.map((ext) => ({ ...ext, linkedAt: now })),
+    externalIds: [],
+    ...(envelope.subject.externalIds.length > 0
+      ? {
+          importedExternalIds: envelope.subject.externalIds.map((ext) => ({
+            provider: ext.provider,
+            externalId: ext.externalId,
+            ...(ext.tenantId !== undefined ? { tenantId: ext.tenantId } : {}),
+            assertedBy: { agentId: fromAgentId },
+            importedAt: now,
+          })),
+        }
+      : {}),
     tenantMemberships: [],
     toolPreferences: {},
     notes: {},
@@ -303,14 +339,14 @@ export async function importProfileShare(
   }
 
   const now = new Date().toISOString()
-  const existing = await resolveSubject(store, input.envelope)
+  const existing = await resolveSubject(store, input.envelope, input.fromAgentId)
 
   if (!existing) {
     // Unknown party. Fork E: only a friend/family peer may seed a new record.
     if (!SEEDING_TRUST.has(input.trustOfSource)) {
       return { ok: false, status: "untrusted_introduction" }
     }
-    const seeded = seedRecord(input.envelope, now)
+    const seeded = seedRecord(input.envelope, input.fromAgentId, now)
     const withNotes = applyEnvelopeToRecord(seeded, input.envelope, input.fromAgentId, now)
     await store.put(withNotes.id, withNotes)
     emitNervesEvent({
@@ -333,6 +369,18 @@ export async function importProfileShare(
   return { ok: true, status: "imported", record: updated }
 }
 
+/** One peer may hold at most this many unverified id claims on a record. */
+export const MAX_IMPORTED_CLAIMS_PER_PEER = 32
+
+/** Keep the newest claims from the asserting peer and drop its oldest beyond the cap.
+ * Other peers' claims are never evicted. */
+function capClaimsPerPeer(claims: ImportedExternalId[], agentId: string): ImportedExternalId[] {
+  const excess = claims.filter((claim) => claim.assertedBy.agentId === agentId).length - MAX_IMPORTED_CLAIMS_PER_PEER
+  if (excess <= 0) return claims
+  let toDrop = excess
+  return claims.filter((claim) => claim.assertedBy.agentId !== agentId || toDrop-- <= 0)
+}
+
 /** Apply an envelope's payload to a record WITHOUT changing its trust level or
  * touching first-party `notes`. Only `importedNotes` (and `updatedAt`) change.
  * `trustLevel` and `role` are copied through verbatim — imports are non-transitive. */
@@ -347,8 +395,26 @@ function applyEnvelopeToRecord(
       ? mergeImportedNotes(record, envelope.notes, fromAgentId, now)
       : record.importedNotes
 
+  // Ids this peer names that the record does not already hold (as a real identity or
+  // as this peer's earlier claim) are appended as unverified claims.
+  const known = (ext: { provider: string; externalId: string; tenantId?: string }) =>
+    record.externalIds.some((have) => have.provider === ext.provider && have.externalId === ext.externalId && have.tenantId === ext.tenantId) ||
+    (record.importedExternalIds ?? []).some((claim) =>
+      claim.assertedBy.agentId === fromAgentId && claim.provider === ext.provider && claim.externalId === ext.externalId && claim.tenantId === ext.tenantId)
+  const newClaims = envelope.subject.externalIds.filter((ext) => !known(ext)).map((ext) => ({
+    provider: ext.provider,
+    externalId: ext.externalId,
+    ...(ext.tenantId !== undefined ? { tenantId: ext.tenantId } : {}),
+    assertedBy: { agentId: fromAgentId },
+    importedAt: now,
+  }))
+  const importedExternalIds = newClaims.length > 0
+    ? capClaimsPerPeer([...(record.importedExternalIds ?? []), ...newClaims], fromAgentId)
+    : record.importedExternalIds
+
   return {
     ...record,
+    ...(importedExternalIds ? { importedExternalIds } : {}),
     // trustLevel / role are intentionally NOT recomputed — an import must never
     // change the party's trust (the single most important safety invariant).
     ...(importedNotes ? { importedNotes } : {}),

@@ -888,6 +888,24 @@ describe("tools/call dispatch — control-plane audit wiring (finding 3)", () =>
     expect(records[0].targetDid).toBe("did:key:zPeerAcq")
   })
 
+  it("onboard_agent audits the stored trust level and tells the owner to use set_trust when a raise is ignored (review item 4)", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    const audit = new MemoryAuditSink()
+    startAudited(store, audit)
+    await h.tool("onboard_agent", { name: "PeerBot", agentId: "peer-r", trustLevel: "family", a2a: JSON.stringify({ did: "did:key:zOld" }) })
+    await h.tool("onboard_agent", { name: "PeerBot", agentId: "peer-r", a2a: JSON.stringify({ did: "did:key:zNew" }) })
+    const before = audit.list().length
+    const r = await h.tool("onboard_agent", { name: "PeerBot", agentId: "peer-r", trustLevel: "family" })
+    const payload = r.payload as FriendRecord & { trustRaiseIgnored?: boolean; note?: string }
+    expect(payload.trustLevel).toBe("stranger")
+    expect(payload.trustRaiseIgnored).toBe(true)
+    expect(payload.note).toContain("set_trust")
+    const records = audit.list()
+    expect(records).toHaveLength(before + 1)
+    expect(records[records.length - 1]).toMatchObject({ action: "set_trust", level: "stranger" })
+  })
+
   it("onboard_agent trust seat omits targetDid when the peer carries no resolvable did (only a bare agentId)", async () => {
     const store = makeStore()
     seedOwner(store)
@@ -1144,8 +1162,8 @@ describe("moat tools/call dispatch", () => {
     expect((r.payload as { status: string }).status).toBe("invalid")
   })
 
-  it("share_profile: produces an envelope when consent is satisfied (identity via trust)", async () => {
-    // The self (owner) is family; the recipient agent is a friend so tiered consents on identity.
+  it("share_profile: produces an envelope when consent is satisfied (identity via an explicit grant)", async () => {
+    // The self (owner) is family; the recipient agent is a friend holding an identity grant.
     const store = makeStore([
       ownerRecord(),
       friendOf(),
@@ -1158,7 +1176,7 @@ describe("moat tools/call dispatch", () => {
         externalIds: [{ provider: "a2a-agent", externalId: "agent-2", linkedAt: NOW }],
       },
     ])
-    start(store, makeGrantStore())
+    start(store, makeGrantStore([{ id: "g-id", subjectKey: "subj-1", recipientAgentId: "agent-2", scope: "identity", grantedAt: NOW }]))
     const r = await h.tool("share_profile", { friendId: "subj-1", toAgentId: "agent-2", scope: "identity" })
     expect(r.isError).toBe(false)
     const payload = r.payload as { ok: boolean; envelope: { subject: { displayName: string }; fromAgentId: string } }
@@ -1189,7 +1207,7 @@ describe("moat tools/call dispatch", () => {
         externalIds: [{ provider: "a2a-agent", externalId: "agent-2", linkedAt: NOW }],
       },
     ])
-    start(store, makeGrantStore())
+    start(store, makeGrantStore([{ id: "g-id", subjectKey: "subj-1", recipientAgentId: "agent-2", scope: "identity", grantedAt: NOW }]))
     const r = await h.tool("share_profile", { friendId: "subj-1", toAgentId: "agent-2", scope: "identity" })
     expect(r.isError).toBe(false)
     const payload = r.payload as { ok: boolean; envelope: { fromAgentId: string } }

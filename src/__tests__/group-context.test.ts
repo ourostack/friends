@@ -264,3 +264,21 @@ describe("upsertGroupContextParticipants", () => {
     }
   })
 })
+
+describe("group context never promotes a record whose DID reset is pending (review item 6)", () => {
+  it("leaves a reset stranger at stranger", async () => {
+    const reset = stranger({ trustReset: { at: NOW, reason: "did_changed", previousDid: "did:key:OLD", previousTrust: "family" } })
+    const store = new MemoryStore([reset])
+    const [result] = await upsertGroupContextParticipants({
+      store,
+      participants: [participant("p@example.com", "Person")],
+      groupExternalId: "group:any;+;g1",
+      now: () => NOW,
+    })
+    const updated = await store.get("s-1")
+    expect(updated?.trustLevel).toBe("stranger")
+    expect(updated?.role).not.toBe("acquaintance")
+    expect(result.trustLevel).toBe("stranger")
+    expect(updated?.externalIds.map((e) => e.externalId)).toContain("group:any;+;g1")
+  })
+})

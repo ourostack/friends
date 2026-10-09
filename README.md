@@ -102,6 +102,10 @@ hook). Identity is `agentId === did`, pinned trust-on-first-use, with **trust-ti
 (a family/friend peer may present a *signed* successor proof; acquaintances/strangers re-confirm out
 of band).
 
+**A rotation needs both keys.** The OLD key signs the successor statement (`rotationProof`, from `signSuccessor`), and the NEW key signs its own consent (`successorProof`, from `signSuccessorConsent`), which covers the old DID, the new DID, the new key and `issuedAt`. Without the second signature a peer could name any real DID and public key as its successor. `signFullSuccessor` builds both from the two keys. `evaluateRotation` verifies both before it writes anything and rejects with `missing_successor_proof` or `bad_successor_proof`. The successor DID must also belong to the successor key: a `did:key` must encode the presented key, and every rotation of a non-`did:key` DID, a same-DID key change included, needs `resolvedSuccessorPub`, the key the host verified for it (`successor_key_mismatch` otherwise). `receiveShare` rejects a sender whose pin is retired with `retired_pin`.
+
+**After an accepted rotation, call `applyAcceptedRotation`.** `evaluateRotation` only moves the pin; the friend record still names the old DID, so the peer would arrive as a stranger. Call `applyAcceptedRotation({ store, pinStore, oldDid, newDid })` right after an `accepted` decision. It follows the `retiredBy` chain from `oldDid`, hop by hop, to the live pin (at most 16 hops, and a loop is refused with `rotation_chain_invalid`), so back-to-back rotations (A to B to C) do not strand the record. `newDid` may be any DID on that chain, and the record always moves to the live end: both `apply(A, B)` and `apply(A, C)` leave it on C. It moves the record's `a2a-agent` external id and DID and keeps trust, grant and profile, because a verified rotation is the same peer (this is not a reset). It also finds a record that was already moved part-way along the chain. If a record already exists at the live DID, the call returns `successor_already_linked` and leaves both records as they are; the operator resolves that (for example by merging them with `link_identity`). Call it right after the `accepted` decision, before that DID is used for anything else. The successor's consent is signed over a fixed context prefix (`ourostack-friends/v1/key-successor-consent`) plus the canonical JSON, so an envelope signature can never count as a consent. Other refusals are `rotation_not_accepted` (a hop is not a retired pin with an existing next pin, the end is not live, or `newDid` is not on the chain), `record_not_found` and `successor_already_linked`.
+
 **Signed binding.** `sealEnvelope` also stamps a reserved, signed `binding: { to, kind, id }` into
 every envelope before signing: the recipient DID, the friends kind, and 128 random bits (base64url).
 Because it is signed, a recipient who opens a message cannot re-seal the same signed envelope to a
@@ -382,9 +386,20 @@ three postures ship behind one swap point (`DEFAULT_CONSENT_POLICY` in `src/cons
 
 - **`strictPolicy`** — consented only by a non-revoked, non-expired explicit grant.
 - **`trustImpliedPolicy`** — an explicit grant, *or* recipient trust ≥ `friend` (any scope).
-- **`tieredPolicy`** *(default)* — identity-scope shares (the join key) are consented on recipient
-  trust ≥ `friend`; any **note-content scope** requires an explicit grant. *(Trust agrees on who;
-  content still needs consent.)*
+- **`tieredPolicy`** *(default)* — `name` and `coordinate` shares (display name only, no account ids)
+  are consented on recipient trust ≥ `friend`; an `identity` share needs an explicit grant below
+  `family`; any **note-content scope** requires an explicit grant. *(Trust agrees on who; content
+  still needs consent.)*
+
+A grant for `notes:safe`, `notes:all` or `outcomes` also discloses the subject's account ids
+(`externalIds`), because the receiver needs them to find the right record. Only the `name` and
+`coordinate` scopes withhold them.
+
+### Linking identities
+
+`linkExternalId` merges a second record (the orphan) that already holds the id into the target. The target keeps its own trust, and a link never raises it. It refuses with `conflict_requires_operator` when the orphan has a capability profile, a grant, active or revoked admission, or a different trust level. It also refuses when the target holds authority (trust above stranger, active admission, a capability profile or a grant) and the orphan carries other external ids, because those ids would gain the target's authority.
+
+The merge writes the target before deleting the orphan. If the delete fails, link the same id again: the retry finds the leftover orphan in the same tenant and finishes the merge. A store without `listAll` cannot do that, so the retry returns `retry_unsupported` instead of `noop`.
 
 ### The safety invariants
 

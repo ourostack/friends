@@ -16,6 +16,9 @@ import type {
 import type {
   AdmissionState,
   AgentMeta,
+  ExternalId,
+  ImportedExternalId,
+  TrustReset,
   FriendRecord,
   InitiativePolicy,
   RelationshipPolicy,
@@ -206,6 +209,16 @@ export class FileFriendStore implements ExternalIdClaimStore {
     return records
   }
 
+  async releaseExternalId(friendId: string, externalId: ExternalId): Promise<void> {
+    if (!SAFE_RECORD_ID.test(friendId)) throw new Error("external identity claim target id is invalid")
+    const claimPath = this.pendingClaimPath(externalId)
+    await this.ensureClaimsDirectory()
+    const journal = await this.readClaimIfPresent(claimPath, externalId)
+    if (!journal || journal.friendId !== friendId) return
+    await fsPromises.rm(claimPath, { force: true })
+    this.syncClaimsDirectory()
+  }
+
   async claimExternalId(input: ExternalIdClaimInput): Promise<ExternalIdClaimResult> {
     let phase: "validating" | "journal_durable" | "friend_durable" | "committed" = "validating"
     try {
@@ -298,6 +311,8 @@ export class FileFriendStore implements ExternalIdClaimStore {
       : undefined
 
     const delegationGrant = this.normalizeDelegationGrant(raw.delegationGrant)
+    const trustReset = this.normalizeTrustReset(raw.trustReset)
+    const importedExternalIds = this.normalizeImportedExternalIds(raw.importedExternalIds)
 
     return {
       id: raw.id,
@@ -337,6 +352,8 @@ export class FileFriendStore implements ExternalIdClaimStore {
       ...(raw.importedNotes && typeof raw.importedNotes === "object" && !Array.isArray(raw.importedNotes)
         ? { importedNotes: raw.importedNotes }
         : {}),
+      ...(importedExternalIds ? { importedExternalIds } : {}),
+      ...(trustReset ? { trustReset } : {}),
       totalTokens: typeof raw.totalTokens === "number" ? raw.totalTokens : 0,
       createdAt: typeof raw.createdAt === "string" ? raw.createdAt : new Date().toISOString(),
       updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : new Date().toISOString(),
@@ -914,14 +931,70 @@ export class FileFriendStore implements ExternalIdClaimStore {
       (a2aRaw ? this.normalizeMailbox(a2aRaw.mailbox) : undefined)
 
     const a2a = this.normalizeA2AMeta(meta.a2a)
+    const identity = this.normalizeIdentity(meta.identity)
     return {
       bundleName: meta.bundleName,
       familiarity: typeof meta.familiarity === "number" ? meta.familiarity : 0,
       sharedMissions: Array.isArray(meta.sharedMissions) ? meta.sharedMissions : [],
       outcomes: Array.isArray(meta.outcomes) ? meta.outcomes : [],
+      ...(identity ? { identity } : {}),
       ...(a2a ? { a2a } : {}),
       ...(mailbox ? { mailbox } : {}),
     }
+  }
+
+  /** The durable identity home: kept only with a non-empty string `did`. */
+  private normalizeIdentity(raw: unknown): AgentMeta["identity"] | undefined {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined
+    const id = raw as Record<string, unknown>
+    if (typeof id.did !== "string" || !id.did) return undefined
+    return {
+      did: id.did,
+      ...(typeof id.pinnedKey === "string" ? { pinnedKey: id.pinnedKey } : {}),
+      ...(typeof id.handle === "string" ? { handle: id.handle } : {}),
+      ...(typeof id.pinnedAt === "string" ? { pinnedAt: id.pinnedAt } : {}),
+    }
+  }
+
+  private normalizeTrustReset(raw: unknown): TrustReset | undefined {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined
+    const r = raw as Record<string, unknown>
+    if (
+      (r.reason !== "did_changed" && r.reason !== "did_adopted") ||
+      typeof r.at !== "string" ||
+      (r.previousDid !== undefined && typeof r.previousDid !== "string") ||
+      (r.previousTrust !== "family" && r.previousTrust !== "friend" && r.previousTrust !== "acquaintance" && r.previousTrust !== "stranger")
+    ) return undefined
+    return {
+      at: r.at,
+      reason: r.reason,
+      ...(r.previousDid !== undefined ? { previousDid: r.previousDid } : {}),
+      previousTrust: r.previousTrust,
+    }
+  }
+
+  private normalizeImportedExternalIds(raw: unknown): ImportedExternalId[] | undefined {
+    if (!Array.isArray(raw)) return undefined
+    const kept: ImportedExternalId[] = []
+    for (const entry of raw) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue
+      const e = entry as Record<string, unknown>
+      const by = e.assertedBy as Record<string, unknown> | undefined
+      if (
+        !isIdentityProvider(e.provider) ||
+        typeof e.externalId !== "string" ||
+        typeof e.importedAt !== "string" ||
+        !by || typeof by !== "object" || typeof by.agentId !== "string"
+      ) continue
+      kept.push({
+        provider: e.provider,
+        externalId: e.externalId,
+        ...(typeof e.tenantId === "string" ? { tenantId: e.tenantId } : {}),
+        assertedBy: { agentId: by.agentId, ...(typeof by.agentName === "string" ? { agentName: by.agentName } : {}) },
+        importedAt: e.importedAt,
+      })
+    }
+    return kept.length > 0 ? kept : undefined
   }
 
   private normalizeA2AMeta(raw: unknown): AgentMeta["a2a"] | undefined {

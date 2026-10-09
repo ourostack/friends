@@ -329,11 +329,14 @@ async function main(): Promise<void> {
     assert.equal(contentNoGrant.isError, true)
     ok("notes:safe share with no grant → REFUSED (no_consent)")
 
-    const identityShare = await agentA.tool("share_profile", { friendId: pInAId, toAgentId: AGENT_B_ID, scope: "identity" })
-    assert.equal(identityShare.payload.ok, true, "an identity share must succeed on peer trust ≥ friend")
-    assert.equal(identityShare.payload.envelope.scope, "identity")
-    assert.equal(identityShare.payload.envelope.notes, undefined, "an identity share carries NO note content")
-    ok("identity share with no grant → ALLOWED on friend-trust alone (carries only the join key)")
+    const identityNoGrant = await agentA.tool("share_profile", { friendId: pInAId, toAgentId: AGENT_B_ID, scope: "identity" })
+    assert.equal(identityNoGrant.payload.status, "no_consent", "an identity share (it carries P's account ids) needs a grant below family")
+    const identityShare = await agentA.tool("share_profile", { friendId: pInAId, toAgentId: AGENT_B_ID, scope: "name" })
+    assert.equal(identityShare.payload.ok, true, "a name share must succeed on peer trust ≥ friend")
+    assert.equal(identityShare.payload.envelope.scope, "name")
+    assert.deepEqual(identityShare.payload.envelope.subject.externalIds, [], "a name share carries NO external ids")
+    assert.equal(identityShare.payload.envelope.notes, undefined, "a name share carries NO note content")
+    ok("identity share with no grant → REFUSED; name share → ALLOWED on friend-trust alone (display name only)")
 
     // ════════════════════════════════════════════════════════════════════════
     // STEP 4 — A grants B a content share, then A PREPARES it → envelope.
@@ -459,7 +462,7 @@ async function main(): Promise<void> {
 
     // ════════════════════════════════════════════════════════════════════════
     // STEP 7 — Fork-E introduction. Only a friend/family peer may introduce a
-    // PREVIOUSLY-UNKNOWN party (seeded at acquaintance). A non-friend/family peer
+    // PREVIOUSLY-UNKNOWN party (seeded at stranger). A non-friend/family peer
     // may not seed — refused along one of two gates, both proven here:
     //   • a STRANGER source is refused at the acceptance cap (untrusted_source) —
     //     its facts don't count at all;
@@ -506,7 +509,7 @@ async function main(): Promise<void> {
     assert.equal(acqProbe.payload.created, true, "the acquaintance introduction must not have created the party")
     ok("acquaintance source introducing an unknown party → REFUSED (untrusted_introduction); nothing written")
 
-    // (c) FRIEND source → SEEDED at acquaintance (never inherits the peer's trust).
+    // (c) FRIEND source → SEEDED at stranger (never inherits the peer's trust).
     const friendKey = "friend-intro@contoso.com"
     const friendIntro = await agentB.tool("import_profile", {
       envelope: introEnvelopeFor(friendKey, "FriendIntro"),
@@ -515,8 +518,12 @@ async function main(): Promise<void> {
     })
     assert.equal(friendIntro.payload.ok, true, "a friend source must be able to introduce a new party")
     assert.equal(friendIntro.payload.status, "seeded", "a friend introduction of an unknown party must be seeded")
-    assert.equal(friendIntro.payload.record.trustLevel, "acquaintance", "a seeded party must start at acquaintance (never higher)")
-    ok("friend source introducing an unknown party → SEEDED at acquaintance (never inherits the peer's friend trust)")
+    assert.equal(friendIntro.payload.record.trustLevel, "stranger", "a seeded party must start at stranger (never higher)")
+    assert.deepEqual(friendIntro.payload.record.externalIds, [], "the peer's ids are unverified claims, never indexed identities")
+    assert.equal(friendIntro.payload.record.importedExternalIds[0].externalId, friendKey)
+    const friendProbe = await agentB.tool("resolve_party", { provider: "aad", externalId: friendKey, displayName: "Real", channel: "mcp" })
+    assert.equal(friendProbe.payload.created, true, "the real person must not resolve to the seeded record")
+    ok("friend source introducing an unknown party → SEEDED at stranger; its ids are claims only (never inherits the peer's friend trust)")
 
     // ════════════════════════════════════════════════════════════════════════
     console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")

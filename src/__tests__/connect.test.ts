@@ -400,3 +400,36 @@ describe("connectAgents — resolution edge/error branches (coverage)", () => {
 // Type-level: the result shape is the PINNED discriminated union.
 const _typecheck: ConnectResult = { ok: true, status: "connected", record: {} as FriendRecord }
 void _typecheck
+
+describe("connectAgents audits the trust level actually stored (review item 4)", () => {
+  it("audits stranger and reports trustRaiseIgnored when a DID reset is pending", async () => {
+    const reset = agentRecord(
+      { trustLevel: "stranger", trustReset: { at: NOW, reason: "did_changed", previousDid: "did:key:OLD", previousTrust: "family" } },
+      { a2a: { agentId: "peer-existing", did: "did:key:NEW" } },
+    )
+    const store = new MemoryStore([reset])
+    const audit = new MemoryAuditSink()
+    const result = await connectAgents(
+      store,
+      { peer: { agentId: "peer-existing" }, trustLevel: "family", senseType: "local" },
+      { audit, actor: "owner:stdio", originSense: "stdio" },
+    )
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error("unreachable")
+    expect(result.record.trustLevel).toBe("stranger")
+    expect(result.trustRaiseIgnored).toBe(true)
+    expect(audit.list()[0]).toMatchObject({ action: "connect", level: "stranger" })
+  })
+
+  it("does not flag an ordinary connect", async () => {
+    const store = new MemoryStore()
+    const audit = new MemoryAuditSink()
+    const result = await connectAgents(
+      store,
+      { peer: { agentId: "peer-1", name: "Peer One" }, senseType: "local" },
+      { audit, actor: "owner:stdio", originSense: "stdio" },
+    )
+    expect(result.ok && result.trustRaiseIgnored).toBeFalsy()
+    expect(audit.list()[0]).toMatchObject({ level: "family" })
+  })
+})

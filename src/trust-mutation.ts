@@ -22,6 +22,8 @@ export interface SetFriendTrustContext {
   sink?: AuditSink
 }
 
+const TRUST_RANK: Record<TrustLevel, number> = { stranger: 1, acquaintance: 2, friend: 3, family: 4 }
+
 export async function setFriendTrust(
   store: FriendStore,
   friendId: string,
@@ -47,8 +49,12 @@ export async function setFriendTrust(
   // later re-promotion would silently revive it. Drop it on any such change.
   const suspendsDelegation = level !== "family" && current.delegationGrant !== undefined
   const { delegationGrant: _dropped, ...withoutGrant } = current
+  // An explicit raise supersedes the DID-change reset marker.
+  const raised = TRUST_RANK[level] > TRUST_RANK[current.trustLevel ?? "stranger"]
+  const base: FriendRecord = suspendsDelegation ? withoutGrant : current
+  const { trustReset: _resolvedReset, ...baseWithoutReset } = base
   const updated: FriendRecord = {
-    ...(suspendsDelegation ? withoutGrant : current),
+    ...(raised ? baseWithoutReset : base),
     trustLevel: level,
     role: level,
     updatedAt,

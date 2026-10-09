@@ -41,16 +41,19 @@ export type { DidDocResolver, DidDocument, ResolveDidWebInput } from "./did-web"
 
 // ── DidVerifier — binding, TOFU pin, trust-tiered rotation ──
 export {
+  applyAcceptedRotation,
   DidVerifier,
   evaluateRotation,
   getPinned,
   isPinned,
   MemoryPinStore,
   pinOnFirstContact,
+  signFullSuccessor,
   signSuccessor,
+  signSuccessorConsent,
   verifyCardDidBinding,
 } from "./did-verifier"
-export type { PinnedDid, PinStore, RotationDecision } from "./did-verifier"
+export type { ApplyRotationResult, PinnedDid, PinStore, RotationDecision } from "./did-verifier"
 
 // ── SealedEnvelope sign-then-seal compose ──
 export { openSealedEnvelope, sealEnvelope } from "./sealed-envelope"

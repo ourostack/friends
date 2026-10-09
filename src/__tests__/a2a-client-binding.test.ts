@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest"
 
 import { didKeyIdentityFromEd25519, keyAgreementFromDidKey, parseDidKey } from "../a2a-client/did-key"
 import type { DidKeyIdentity } from "../a2a-client/did-key"
-import { MemoryPinStore, pinOnFirstContact } from "../a2a-client/did-verifier"
+import { MemoryPinStore, getPinned, pinOnFirstContact } from "../a2a-client/did-verifier"
 import { receiveShare, sendShare } from "../a2a-client/adapter"
 import type { A2ATransport, DidResolution, SeenLedgerLike } from "../a2a-client/adapter"
 import { wrapInDataPart, unwrapDataPart } from "../a2a-client/a2a-message"
@@ -35,7 +35,7 @@ function didKeyResolution(sodium: Sodium, delayMs = 0): DidResolution {
   return {
     async resolveAndPin({ fromAgentId, did, pinStore }) {
       if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs))
-      const existing = pinStore.get(fromAgentId)
+      const existing = getPinned(pinStore, fromAgentId)
       if (existing) return { ed25519Pub: existing.ed25519Pub }
       const parsed = parseDidKey(did)
       if (!parsed) return null

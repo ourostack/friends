@@ -107,16 +107,16 @@ describe("linkExternalId", () => {
     expect(added?.tenantId).toBe("t1")
   })
 
-  it("merges an orphan that holds the linked id: deletes orphan, keeps higher trust, target notes win, folds orphan ids", async () => {
+  it("merges an orphan that holds the linked id: deletes orphan, keeps the target's own trust, target notes win, folds orphan ids", async () => {
     const target = friend({
       id: "target",
-      trustLevel: "acquaintance",
+      trustLevel: "stranger",
       notes: { shared: { value: "target wins", savedAt: NOW } },
       externalIds: [{ provider: "aad", externalId: "x1", linkedAt: NOW }],
     })
     const orphan = friend({
       id: "orphan",
-      trustLevel: "family",
+      trustLevel: "stranger",
       notes: {
         shared: { value: "orphan loses", savedAt: NOW },
         orphanOnly: { value: "kept", savedAt: NOW },
@@ -134,8 +134,8 @@ describe("linkExternalId", () => {
     expect(await store.get("orphan")).toBeNull()
 
     const merged = await store.get("target")
-    // higher trust wins (family > acquaintance)
-    expect(merged?.trustLevel).toBe("family")
+    // the target keeps its own trust; a link never raises it
+    expect(merged?.trustLevel).toBe("stranger")
     // target notes win on key collision; orphan-only notes are kept
     expect(merged?.notes.shared.value).toBe("target wins")
     expect(merged?.notes.orphanOnly.value).toBe("kept")
@@ -148,7 +148,7 @@ describe("linkExternalId", () => {
     const target = friend({ id: "target", externalIds: [{ provider: "aad", externalId: "x1", linkedAt: NOW }] })
     const orphan = friend({
       id: "orphan",
-      trustLevel: "stranger",
+      trustLevel: "friend", // same standing as the target
       externalIds: [{ provider: "aad", externalId: "x2", linkedAt: NOW }], // NO tenantId
     })
     const store = new MemoryStore([target, orphan])
@@ -203,14 +203,14 @@ describe("link/unlink — FileFriendStore end-to-end", () => {
     dir = mkdtempSync(join(tmpdir(), "friends-link-"))
     const store = new FileFriendStore(join(dir, "friends"))
     await store.put("target", friend({ id: "target", trustLevel: "acquaintance", externalIds: [{ provider: "aad", externalId: "x1", linkedAt: NOW }] }))
-    await store.put("orphan", friend({ id: "orphan", trustLevel: "family", externalIds: [{ provider: "teams-conversation", externalId: "c1", linkedAt: NOW }] }))
+    await store.put("orphan", friend({ id: "orphan", trustLevel: "acquaintance", externalIds: [{ provider: "teams-conversation", externalId: "c1", linkedAt: NOW }] }))
 
     const linkResult = await linkExternalId(store, "target", { provider: "teams-conversation", externalId: "c1" })
     expect(linkResult.status).toBe("merged")
     expect(await store.get("orphan")).toBeNull()
     const afterLink = await store.findByExternalId("teams-conversation", "c1")
     expect(afterLink?.id).toBe("target")
-    expect(afterLink?.trustLevel).toBe("family")
+    expect(afterLink?.trustLevel).toBe("acquaintance")
 
     const unlinkResult = await unlinkExternalId(store, "target", { provider: "teams-conversation", externalId: "c1" })
     expect(unlinkResult.status).toBe("unlinked")
