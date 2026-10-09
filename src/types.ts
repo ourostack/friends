@@ -483,7 +483,8 @@ export interface FriendRecord {
   initiativePolicy?: InitiativePolicy
   relationshipPolicy?: RelationshipPolicy
   capabilityProfileId?: string
-  /** Present only when the operator granted this friend delegated principal commands. */
+  /** Present only when the operator granted this friend delegated principal commands.
+   * @deprecated A record of intent in agent-writable storage; never authority. See `DelegationGrant`. */
   delegationGrant?: DelegationGrant
   connections?: FriendConnection[]
   externalIds: ExternalId[]               // PII
