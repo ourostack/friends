@@ -102,7 +102,6 @@ export type ReceiveShareResult =
         | "resolve_failed"
         | "replayed"
         | "in_flight"
-        | "in_flight"
         | "bad_signature"
         | "untrusted_source"
         | "signed_recipient_mismatch"
