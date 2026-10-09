@@ -102,6 +102,8 @@ hook). Identity is `agentId === did`, pinned trust-on-first-use, with **trust-ti
 (a family/friend peer may present a *signed* successor proof; acquaintances/strangers re-confirm out
 of band).
 
+**After an accepted rotation, call `applyAcceptedRotation`.** `evaluateRotation` only moves the pin: it retires the old DID's pin and pins the new one. The friend record still names the old DID, so the peer would arrive as a stranger. Call `applyAcceptedRotation({ store, pinStore, oldDid, newDid })` right after an `accepted` decision. It moves the record's `a2a-agent` external id and DID to the new DID and keeps trust, grant and profile, because a verified rotation is the same peer (this is not a reset). It refuses with a reason (`rotation_not_accepted`, `record_not_found`, `successor_already_linked`) unless the pin store shows the old DID retired by the new one and the new pin live. `evaluateRotation` also requires the successor DID to belong to the successor key: a `did:key` must encode the presented key (`successor_key_mismatch` otherwise), and a rotation to a different non-`did:key` DID needs `resolvedSuccessorPub`, the key the host verified for it. `receiveShare` rejects a sender whose pin is retired with `retired_pin`.
+
 **Signed binding.** `sealEnvelope` also stamps a reserved, signed `binding: { to, kind, id }` into
 every envelope before signing: the recipient DID, the friends kind, and 128 random bits (base64url).
 Because it is signed, a recipient who opens a message cannot re-seal the same signed envelope to a

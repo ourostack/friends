@@ -137,7 +137,7 @@ function profileEnvelope(fromDid: string) {
 function didKeyResolution(sodium: Sodium): DidResolution {
   return {
     async resolveAndPin({ fromAgentId, did, pinStore }) {
-      const existing = pinStore.get(fromAgentId)
+      const existing = getPinned(pinStore, fromAgentId)
       if (existing) return { ed25519Pub: existing.ed25519Pub }
       const parsed = parseDidKey(did)
       if (!parsed) return null

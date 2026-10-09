@@ -145,9 +145,14 @@ describe("a successor statement cannot overwrite another peer's pin (review find
     })
   }
 
-  it("still accepts a rotation onto the same DID with a new key", async () => {
+  it("still accepts a signed same-DID key rotation for a non-did:key DID", async () => {
     const f = await fixture()
-    const result = rotate(f, f.a, { did: f.a.did, ed25519Pub: f.c.ed25519Pub }, T2)
+    f.pinStore.set("did:web:a.example", { did: "did:web:a.example", ed25519Pub: f.a.ed25519Pub })
+    const rotationProof = signSuccessor({ sodium: f.sodium, oldEd25519Priv: f.a.ed25519Priv, newDid: "did:web:a.example", newEd25519Pub: f.c.ed25519Pub, issuedAt: T2 })
+    const result = evaluateRotation({
+      sodium: f.sodium, pinStore: f.pinStore, fromAgentId: "did:web:a.example", trustOfSource: "friend",
+      newDid: "did:web:a.example", newEd25519Pub: f.c.ed25519Pub, rotationProof, issuedAt: T2, now: NOW,
+    })
     expect(result).toEqual({ decision: "accepted" })
   })
 })

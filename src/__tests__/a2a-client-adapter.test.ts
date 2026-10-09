@@ -14,7 +14,7 @@ import type { FriendStore } from "../store"
 import type { MissionStore, MissionRecord } from "../mission-store"
 import { didKeyIdentityFromEd25519, keyAgreementFromDidKey, parseDidKey } from "../a2a-client/did-key"
 import type { DidKeyIdentity } from "../a2a-client/did-key"
-import { MemoryPinStore, pinOnFirstContact } from "../a2a-client/did-verifier"
+import { MemoryPinStore, getPinned, pinOnFirstContact } from "../a2a-client/did-verifier"
 import type { PinStore } from "../a2a-client/did-verifier"
 import { receiveShare, sendShare } from "../a2a-client/adapter"
 import type { A2ATransport, DidResolution, SeenLedgerLike } from "../a2a-client/adapter"
@@ -89,7 +89,7 @@ class SeenLedger implements SeenLedgerLike {
 function didKeyResolution(sodium: Sodium): DidResolution {
   return {
     async resolveAndPin({ fromAgentId, did, pinStore }) {
-      const existing = pinStore.get(fromAgentId)
+      const existing = getPinned(pinStore, fromAgentId)
       if (existing) return { ed25519Pub: existing.ed25519Pub }
       const parsed = parseDidKey(did)
       if (!parsed) return null

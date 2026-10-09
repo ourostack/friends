@@ -328,7 +328,7 @@ describe("evaluateRotation — every trust-tier branch (Fork 11)", () => {
     const otherKey = sodium.crypto_sign_keypair()
     // Same DID string, different key bytes → bytesEqual false → goes through rotation.
     const d = evaluateRotation({ sodium, pinStore, fromAgentId: id.did, trustOfSource: "friend", newDid: id.did, newEd25519Pub: otherKey.publicKey })
-    expect(d).toEqual({ decision: "rejected", reason: "bad_rotation_proof" })
+    expect(d).toEqual({ decision: "rejected", reason: "successor_key_mismatch" })
   })
 
   it("a SAME-did but WRONG-LENGTH key is a rotation (bytesEqual length-mismatch branch)", async () => {
@@ -336,6 +336,6 @@ describe("evaluateRotation — every trust-tier branch (Fork 11)", () => {
     // A truncated key for the same DID → bytesEqual returns false on the length
     // check (not the byte loop) → treated as a rotation, missing proof → rejected.
     const d = evaluateRotation({ sodium, pinStore, fromAgentId: id.did, trustOfSource: "friend", newDid: id.did, newEd25519Pub: new Uint8Array([1, 2, 3]) })
-    expect(d).toEqual({ decision: "rejected", reason: "bad_rotation_proof" })
+    expect(d).toEqual({ decision: "rejected", reason: "successor_key_mismatch" })
   })
 })

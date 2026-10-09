@@ -10,7 +10,9 @@
 //   3. trust-tiered key-rotation (Fork 11): family/friend auto-accept a SIGNED
 //      successor proof; acquaintance/stranger reject (re-confirm out of band).
 import type { AgentVerifier } from "../verifier"
-import type { TrustLevel } from "../types"
+import type { FriendStore } from "../store"
+import type { FriendRecord, TrustLevel } from "../types"
+import { parseDidKey } from "./did-key"
 import { jcsBytes } from "./jcs"
 import type { Sodium } from "./sodium"
 import { verifyEnvelopeSignature, parseProof } from "./sign"
@@ -190,7 +192,7 @@ export function getPinned(pinStore: PinStore, fromAgentId: string): PinnedDid | 
 export type RotationDecision =
   | { decision: "unchanged" }
   | { decision: "accepted" }
-  | { decision: "rejected"; reason: "bad_rotation_proof" | "rotation_requires_reconfirm" | "not_pinned" | "stale_rotation" | "undated_rotation" | "retired_pin" | "successor_already_pinned" }
+  | { decision: "rejected"; reason: "bad_rotation_proof" | "rotation_requires_reconfirm" | "not_pinned" | "stale_rotation" | "undated_rotation" | "retired_pin" | "successor_already_pinned" | "successor_key_mismatch" }
 
 /** Successor statements dated further ahead than this are rejected. */
 const ROTATION_CLOCK_SKEW_MS = 2 * 60 * 1000
@@ -244,6 +246,9 @@ export interface EvaluateRotationInput {
   /** Opt in to the original undated statement shape, which cannot be replay-checked.
    * Default false. */
   acceptUndatedSuccessor?: boolean
+  /** The successor's key as the host verified it out of band (for example by resolving
+   * a did:web document). Required to rotate to a different non-did:key DID. */
+  resolvedSuccessorPub?: Uint8Array
   /** Clock override for tests. */
   now?: Date
 }
@@ -269,6 +274,19 @@ export function evaluateRotation(input: EvaluateRotationInput): RotationDecision
   // Unchanged key (same bytes) → nothing to rotate.
   if (current.did === newDid && bytesEqual(current.ed25519Pub, newEd25519Pub)) {
     return { decision: "unchanged" }
+  }
+
+  // The successor DID must belong to the successor key, or a peer could pin a key under
+  // a DID it does not control (squatting a victim's DID before the victim first calls).
+  const derived = parseDidKey(newDid)
+  if (derived) {
+    if (!bytesEqual(derived.ed25519Pub, newEd25519Pub)) {
+      return { decision: "rejected", reason: "successor_key_mismatch" }
+    }
+  } else if (input.resolvedSuccessorPub !== undefined || newDid !== fromAgentId) {
+    if (input.resolvedSuccessorPub === undefined || !bytesEqual(input.resolvedSuccessorPub, newEd25519Pub)) {
+      return { decision: "rejected", reason: "successor_key_mismatch" }
+    }
   }
 
   // acquaintance / stranger: never auto-accept a rotation, even with a valid proof.
@@ -318,4 +336,49 @@ export function evaluateRotation(input: EvaluateRotationInput): RotationDecision
   pinStore.set(newDid, { did: newDid, ed25519Pub: newEd25519Pub, rotatedAt })
   if (newDid !== fromAgentId) pinStore.retire(fromAgentId, newDid, rotatedAt)
   return { decision: "accepted" }
+}
+
+// ── Carrying the relationship across an accepted rotation ──────────────────────
+
+export type ApplyRotationResult =
+  | { ok: true; record: FriendRecord }
+  | { ok: false; reason: "rotation_not_accepted" | "record_not_found" | "successor_already_linked" }
+
+/** After `evaluateRotation` returns `accepted`, call this to move the peer's record from
+ * the old DID to the new one. It moves the `a2a-agent` external id and the record's DID
+ * and keeps trust, grant and profile: a verified rotation is the same peer, so this is
+ * not a reset. It refuses unless the pin store shows the old DID retired by the new DID
+ * and the new DID's pin live, so it cannot be used to rename a record without a rotation. */
+export async function applyAcceptedRotation(input: {
+  store: FriendStore
+  pinStore: PinStore
+  oldDid: string
+  newDid: string
+}): Promise<ApplyRotationResult> {
+  const { store, pinStore, oldDid, newDid } = input
+  if (pinStore.get(oldDid)?.retiredBy !== newDid || getPinned(pinStore, newDid) === undefined) {
+    return { ok: false, reason: "rotation_not_accepted" }
+  }
+  const record = await store.findByExternalId("a2a-agent", oldDid)
+  if (!record) return { ok: false, reason: "record_not_found" }
+  const holder = await store.findByExternalId("a2a-agent", newDid)
+  if (holder && holder.id !== record.id) return { ok: false, reason: "successor_already_linked" }
+
+  const { pinnedKey: _stalePinnedKey, ...identity } = record.agentMeta?.identity ?? {}
+  const agentMeta = record.agentMeta
+    ? {
+        ...record.agentMeta,
+        a2a: { ...record.agentMeta.a2a, agentId: newDid, did: newDid },
+        identity: { ...identity, did: newDid },
+      }
+    : undefined
+  const updated: FriendRecord = {
+    ...record,
+    externalIds: record.externalIds.map((ext) =>
+      ext.provider === "a2a-agent" && ext.externalId === oldDid ? { ...ext, externalId: newDid } : ext),
+    ...(agentMeta ? { agentMeta } : {}),
+    updatedAt: new Date().toISOString(),
+  }
+  await store.put(updated.id, updated)
+  return { ok: true, record: updated }
 }
