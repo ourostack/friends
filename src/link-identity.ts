@@ -63,14 +63,17 @@ export async function linkExternalId(
     )?.tenantId
     const sameTenantHolds = (record: FriendRecord): boolean =>
       record.externalIds.some(
-        (ext) => ext.provider === input.provider && ext.externalId === input.externalId && ext.tenantId === targetTenant,
+        (ext) => ext.provider === input.provider && ext.externalId === input.externalId && (ext.tenantId === targetTenant || ext.tenantId === undefined),
       )
     orphans = (await store.listAll()).filter((record) => record.id !== friendId && sameTenantHolds(record))
     if (orphans.length === 0) {
       return { ok: true, status: "noop", message: "identity already linked", record: current }
     }
   } else {
-    const orphan = await store.findByExternalId(input.provider, input.externalId)
+    // Same-tenant first, then tenant-unqualified (D4); the retry pass accepts the same two.
+    const orphan =
+      (input.tenantId !== undefined ? await store.findByExternalId(input.provider, input.externalId, input.tenantId) : null) ??
+      (await store.findByExternalId(input.provider, input.externalId))
     orphans = orphan && orphan.id !== friendId ? [orphan] : []
   }
 

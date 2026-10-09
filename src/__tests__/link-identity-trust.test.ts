@@ -260,3 +260,40 @@ describe("link review findings 2 and 5", () => {
     expect(store.records.has("elsewhere")).toBe(true)
   })
 })
+
+describe("link review item 5: first pass and retry match orphans the same way", () => {
+  class TenantStrictStore extends MemoryStore {
+    async findByExternalId(provider: string, externalId: string, tenantId?: string) {
+      for (const r of this.records.values()) {
+        if (r.externalIds.some((e) => e.provider === provider && e.externalId === externalId && e.tenantId === tenantId)) return r
+      }
+      return null
+    }
+  }
+  const tenantId = "tenant-1"
+  const idIn = { ...ariTelegram, tenantId }
+
+  it("the first pass finds a same-tenant orphan on a tenant-strict store, and an interrupted merge can be resumed", async () => {
+    const store = new TenantStrictStore([
+      person({ id: "target", name: "Target" }),
+      person({ id: "orphan", name: "Orphan", externalIds: [idIn] }),
+    ])
+    store.failDeleteOnce = "orphan"
+    await expect(linkExternalId(store, "target", { provider: "telegram-user", externalId: "42", tenantId })).rejects.toThrow("disk hiccup")
+    expect(store.records.get("target")?.externalIds.map((e) => e.externalId)).toEqual(["42"])
+    expect(store.records.has("orphan")).toBe(true)
+    const retry = await linkExternalId(store, "target", { provider: "telegram-user", externalId: "42", tenantId })
+    expect(retry.status).toBe("merged")
+    expect(store.records.has("orphan")).toBe(false)
+  })
+
+  it("a fresh link with a tenant merges the same-tenant orphan in one call", async () => {
+    const store = new TenantStrictStore([
+      person({ id: "target", name: "Target" }),
+      person({ id: "orphan", name: "Orphan", externalIds: [idIn] }),
+    ])
+    const result = await linkExternalId(store, "target", { provider: "telegram-user", externalId: "42", tenantId })
+    expect(result.status).toBe("merged")
+    expect(store.records.has("orphan")).toBe(false)
+  })
+})
