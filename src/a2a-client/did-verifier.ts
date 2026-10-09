@@ -241,14 +241,22 @@ function consentMessage(
   b64: (b: Uint8Array) => string,
   issuedAt?: string,
 ): Uint8Array {
-  return jcsBytes({
+  const body = jcsBytes({
     statement: "key-successor-consent",
     predecessor: oldDid,
     successor: newDid,
     newKey: b64(newEd25519Pub),
     ...(issuedAt !== undefined ? { issuedAt } : {}),
   })
+  // A fixed context prefix keeps this signature from ever matching a signature over a
+  // bare JSON object, such as an envelope signature over a look-alike object.
+  const out = new Uint8Array(CONSENT_CONTEXT.length + body.length)
+  out.set(CONSENT_CONTEXT, 0)
+  out.set(body, CONSENT_CONTEXT.length)
+  return out
 }
+
+const CONSENT_CONTEXT = new TextEncoder().encode("ourostack-friends/v1/key-successor-consent\0")
 
 /** Mint the successor's consent: the NEW private key signs the old DID, the new DID, the
  * new key and `issuedAt`. Returns the base64 detached signature for `successorProof`. */

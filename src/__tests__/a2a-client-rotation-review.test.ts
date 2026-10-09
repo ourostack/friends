@@ -18,6 +18,7 @@ import type { A2AMessage, } from "../a2a-client/a2a-message"
 import type { A2ATransport, SeenLedgerLike } from "../a2a-client/adapter"
 import { prepareMessage } from "../message"
 import type { FriendRecord, FriendStore } from "../index"
+import { signEnvelope } from "../a2a-client/sign"
 import { readySodium } from "./_sodium"
 
 const T1 = "2026-10-01T00:00:00.000Z"
@@ -105,6 +106,17 @@ describe("a rotation needs the successor's own consent (re-review item 1)", () =
   it("accepts when both keys sign", async () => {
     const s = await setup()
     expect(s.rotateTo(s.victim.did, s.victim.ed25519Pub)).toEqual({ decision: "accepted" })
+  })
+})
+
+describe("the successor consent is domain-separated (final change 1)", () => {
+  it("rejects a consent made with signEnvelope over a look-alike object", async () => {
+    const s = await setup()
+    const b64 = (b: Uint8Array) => s.sodium.to_base64(b, s.sodium.base64_variants.ORIGINAL)
+    const lookAlike = { statement: "key-successor-consent", predecessor: s.a.did, successor: s.victim.did, newKey: b64(s.victim.ed25519Pub), issuedAt: T1 }
+    const proof = signEnvelope({ sodium: s.sodium, envelope: lookAlike, signerEd25519Priv: s.victim.ed25519Priv, signerDid: s.victim.did, signerKeyId: "k" })
+    expect(s.rotateTo(s.victim.did, s.victim.ed25519Pub, { successorProof: proof.sig })).toEqual({ decision: "rejected", reason: "bad_successor_proof" })
+    expect(s.pinStore.get(s.victim.did)).toBeUndefined()
   })
 })
 
