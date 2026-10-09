@@ -47,9 +47,25 @@ export async function linkExternalId(
   // again so a retry finishes the job.
   let orphans: FriendRecord[]
   if (alreadyLinked) {
-    orphans = typeof store.listAll === "function"
-      ? (await store.listAll()).filter((record) => record.id !== friendId && holds(record))
-      : []
+    if (typeof store.listAll !== "function") {
+      // Without listAll an interrupted merge cannot be finished; say so rather than
+      // report the link as settled.
+      return {
+        ok: true,
+        status: "retry_unsupported",
+        message: "identity already linked; this store cannot list records, so a leftover duplicate cannot be merged on retry",
+        record: current,
+      }
+    }
+    // Only records in the same tenant as the target's claim are the interrupted merge's orphan.
+    const targetTenant = current.externalIds.find(
+      (ext) => ext.provider === input.provider && ext.externalId === input.externalId,
+    )?.tenantId
+    const sameTenantHolds = (record: FriendRecord): boolean =>
+      record.externalIds.some(
+        (ext) => ext.provider === input.provider && ext.externalId === input.externalId && ext.tenantId === targetTenant,
+      )
+    orphans = (await store.listAll()).filter((record) => record.id !== friendId && sameTenantHolds(record))
     if (orphans.length === 0) {
       return { ok: true, status: "noop", message: "identity already linked", record: current }
     }
@@ -62,7 +78,31 @@ export async function linkExternalId(
   // that holds any authority, was revoked, or sits at a different trust level than the
   // target is the operator's call.
   const currentTrust = current.trustLevel ?? "stranger"
+  const targetHoldsAuthority =
+    currentTrust !== "stranger" ||
+    current.admissionState === "active" ||
+    current.capabilityProfileId !== undefined ||
+    current.delegationGrant !== undefined
   for (const orphan of orphans) {
+    // Folding the orphan's other ids onto an authority-holding target would hand those
+    // ids the target's authority.
+    const carriesOtherIds = orphan.externalIds.some(
+      (ext) => !(ext.provider === input.provider && ext.externalId === input.externalId),
+    )
+    if (targetHoldsAuthority && carriesOtherIds) {
+      emitNervesEvent({
+        level: "warn",
+        component: "friends",
+        event: "friends.identity_link_refused",
+        message: "refused to fold an orphan's other ids onto a record that holds authority",
+        meta: { orphanId: orphan.id, targetId: friendId },
+      })
+      return {
+        ok: false,
+        status: "conflict_requires_operator",
+        message: `external id is held by "${orphan.name}" (${orphan.id}), which carries other external ids; "${current.name}" (${friendId}) holds authority, so those ids cannot be folded onto it without an operator decision`,
+      }
+    }
     if (
       orphan.capabilityProfileId !== undefined ||
       orphan.delegationGrant !== undefined ||

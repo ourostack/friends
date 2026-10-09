@@ -173,10 +173,10 @@ describe("linkExternalId refuses to move a different-trust or revoked identity",
 })
 
 describe("linkExternalId edge cases", () => {
-  it("is a noop for an already-linked id when the store cannot list records", async () => {
+  it("reports retry_unsupported for an already-linked id when the store cannot list records", async () => {
     const store = new MemoryStore([person({ id: "t", name: "Target", externalIds: [ariTelegram] })])
     ;(store as { listAll?: unknown }).listAll = undefined
-    expect((await linkExternalId(store, "t", { provider: "telegram-user", externalId: "42" })).status).toBe("noop")
+    expect((await linkExternalId(store, "t", { provider: "telegram-user", externalId: "42" })).status).toBe("retry_unsupported")
   })
 
   it("treats a missing trust level as stranger on both sides and does not duplicate shared ids", async () => {
@@ -213,5 +213,50 @@ describe("unlinkExternalId clears the claim journal (audit finding 14)", () => {
     const fresh = new FileFriendStore(path)
     expect((await fresh.get("t"))?.externalIds).toEqual([])
     expect(await fresh.findByExternalId("telegram-user", "42")).toBeNull()
+  })
+})
+
+describe("link review findings 2 and 5", () => {
+  const extra = { provider: "a2a-agent" as const, externalId: "agent-x", linkedAt: NOW }
+
+  it("refuses to fold an orphan's extra ids onto a target that holds authority", async () => {
+    const store = new MemoryStore([
+      person({ id: "target", name: "Target", trustLevel: "family" }),
+      person({ id: "orphan", name: "Orphan", trustLevel: "family", externalIds: [ariTelegram, extra] }),
+    ])
+    const result = await linkExternalId(store, "target", { provider: "telegram-user", externalId: "42" })
+    expect(result.status).toBe("conflict_requires_operator")
+    expect(store.records.has("orphan")).toBe(true)
+    expect(store.records.get("target")?.externalIds).toEqual([])
+  })
+
+  it("still merges an orphan that carries only the linked id into an authority-holding target", async () => {
+    const store = new MemoryStore([
+      person({ id: "target", name: "Target", trustLevel: "family" }),
+      person({ id: "orphan", name: "Orphan", trustLevel: "family", externalIds: [ariTelegram] }),
+    ])
+    const result = await linkExternalId(store, "target", { provider: "telegram-user", externalId: "42" })
+    expect(result.status).toBe("merged")
+  })
+
+  it("merges extra ids into a stranger target with no authority", async () => {
+    const store = new MemoryStore([
+      person({ id: "target", name: "Target" }),
+      person({ id: "orphan", name: "Orphan", externalIds: [ariTelegram, extra] }),
+    ])
+    const result = await linkExternalId(store, "target", { provider: "telegram-user", externalId: "42" })
+    expect(result.status).toBe("merged")
+    expect(result.record?.externalIds.map((e) => e.externalId).sort()).toEqual(["42", "agent-x"])
+  })
+
+  it("merge-on-retry only considers records in the same tenant", async () => {
+    const tenantTelegram = { ...ariTelegram, tenantId: "other" }
+    const store = new MemoryStore([
+      person({ id: "target", name: "Target", externalIds: [{ ...ariTelegram, tenantId: "mine" }] }),
+      person({ id: "elsewhere", name: "Elsewhere", externalIds: [tenantTelegram] }),
+    ])
+    const result = await linkExternalId(store, "target", { provider: "telegram-user", externalId: "42", tenantId: "mine" })
+    expect(result.status).toBe("noop")
+    expect(store.records.has("elsewhere")).toBe(true)
   })
 })

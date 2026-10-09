@@ -13,6 +13,7 @@ export type FriendOpStatus =
   | "unlinked"
   | "merged"
   | "noop"
+  | "retry_unsupported"
   | "not_found"
   | "override_required"
   | "conflict_requires_operator"

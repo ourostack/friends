@@ -110,13 +110,13 @@ describe("linkExternalId", () => {
   it("merges an orphan that holds the linked id: deletes orphan, keeps the target's own trust, target notes win, folds orphan ids", async () => {
     const target = friend({
       id: "target",
-      trustLevel: "acquaintance",
+      trustLevel: "stranger",
       notes: { shared: { value: "target wins", savedAt: NOW } },
       externalIds: [{ provider: "aad", externalId: "x1", linkedAt: NOW }],
     })
     const orphan = friend({
       id: "orphan",
-      trustLevel: "acquaintance",
+      trustLevel: "stranger",
       notes: {
         shared: { value: "orphan loses", savedAt: NOW },
         orphanOnly: { value: "kept", savedAt: NOW },
@@ -135,7 +135,7 @@ describe("linkExternalId", () => {
 
     const merged = await store.get("target")
     // the target keeps its own trust; a link never raises it
-    expect(merged?.trustLevel).toBe("acquaintance")
+    expect(merged?.trustLevel).toBe("stranger")
     // target notes win on key collision; orphan-only notes are kept
     expect(merged?.notes.shared.value).toBe("target wins")
     expect(merged?.notes.orphanOnly.value).toBe("kept")

@@ -391,6 +391,12 @@ A grant for `notes:safe`, `notes:all` or `outcomes` also discloses the subject's
 (`externalIds`), because the receiver needs them to find the right record. Only the `name` and
 `coordinate` scopes withhold them.
 
+### Linking identities
+
+`linkExternalId` merges a second record (the orphan) that already holds the id into the target. The target keeps its own trust, and a link never raises it. It refuses with `conflict_requires_operator` when the orphan has a capability profile, a grant, active or revoked admission, or a different trust level. It also refuses when the target holds authority (trust above stranger, active admission, a capability profile or a grant) and the orphan carries other external ids, because those ids would gain the target's authority.
+
+The merge writes the target before deleting the orphan. If the delete fails, link the same id again: the retry finds the leftover orphan in the same tenant and finishes the merge. A store without `listAll` cannot do that, so the retry returns `retry_unsupported` instead of `noop`.
+
 ### The safety invariants
 
 Each is **structurally enforced** and tested — they are properties of the domain logic, not of any
