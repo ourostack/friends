@@ -24,6 +24,7 @@ import type {
   AgentAttribution,
   ExternalId,
   FriendRecord,
+  ImportedExternalId,
   ImportedNote,
   RelationshipOutcome,
   ShareScope,
@@ -368,6 +369,18 @@ export async function importProfileShare(
   return { ok: true, status: "imported", record: updated }
 }
 
+/** One peer may hold at most this many unverified id claims on a record. */
+export const MAX_IMPORTED_CLAIMS_PER_PEER = 32
+
+/** Keep the newest claims from the asserting peer and drop its oldest beyond the cap.
+ * Other peers' claims are never evicted. */
+function capClaimsPerPeer(claims: ImportedExternalId[], agentId: string): ImportedExternalId[] {
+  const excess = claims.filter((claim) => claim.assertedBy.agentId === agentId).length - MAX_IMPORTED_CLAIMS_PER_PEER
+  if (excess <= 0) return claims
+  let toDrop = excess
+  return claims.filter((claim) => claim.assertedBy.agentId !== agentId || toDrop-- <= 0)
+}
+
 /** Apply an envelope's payload to a record WITHOUT changing its trust level or
  * touching first-party `notes`. Only `importedNotes` (and `updatedAt`) change.
  * `trustLevel` and `role` are copied through verbatim — imports are non-transitive. */
@@ -396,7 +409,7 @@ function applyEnvelopeToRecord(
     importedAt: now,
   }))
   const importedExternalIds = newClaims.length > 0
-    ? [...(record.importedExternalIds ?? []), ...newClaims]
+    ? capClaimsPerPeer([...(record.importedExternalIds ?? []), ...newClaims], fromAgentId)
     : record.importedExternalIds
 
   return {

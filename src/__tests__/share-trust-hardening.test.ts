@@ -259,3 +259,33 @@ describe("importProfileShare seeds at stranger and never indexes the peer's ids 
     expect(result.ok && result.record.importedExternalIds?.[0].tenantId).toBe("t9")
   })
 })
+
+describe("importedExternalIds claims are capped per asserting peer (review finding 6)", () => {
+  // The record holds telegram 555 as a real identity, so every share resolves to it.
+  const anchor = { provider: "telegram-user" as const, externalId: "555", linkedAt: NOW }
+  const claimEnv = (prefix: string, from: number, to: number): ProfileShareEnvelope => ({
+    ...aboutStranger(),
+    subject: {
+      displayName: "X",
+      externalIds: [anchor, ...Array.from({ length: to - from }, (_, i) => ({ provider: "email-address" as const, externalId: `${prefix}${from + i}`, linkedAt: NOW }))],
+    },
+  })
+
+  it("keeps the newest 32 claims from one peer and drops the oldest", async () => {
+    const store = new MemoryStore([person()])
+    await importProfileShare(store, { envelope: claimEnv("id-", 0, 30), fromAgentId: "peer", trustOfSource: "friend" })
+    await importProfileShare(store, { envelope: claimEnv("id-", 30, 40), fromAgentId: "peer", trustOfSource: "friend" })
+    const claims = store.records.get("sam")?.importedExternalIds ?? []
+    expect(claims).toHaveLength(32)
+    expect(claims.map((c) => c.externalId)).toEqual(Array.from({ length: 32 }, (_, i) => `id-${i + 8}`))
+  })
+
+  it("does not let one peer evict another peer's claims", async () => {
+    const store = new MemoryStore([person()])
+    await importProfileShare(store, { envelope: claimEnv("o-", 0, 2), fromAgentId: "other", trustOfSource: "friend" })
+    await importProfileShare(store, { envelope: claimEnv("p-", 0, 40), fromAgentId: "peer", trustOfSource: "friend" })
+    const claims = store.records.get("sam")?.importedExternalIds ?? []
+    expect(claims.filter((c) => c.assertedBy.agentId === "other")).toHaveLength(2)
+    expect(claims.filter((c) => c.assertedBy.agentId === "peer").map((c) => c.externalId)).toEqual(Array.from({ length: 32 }, (_, i) => `p-${i + 8}`))
+  })
+})
