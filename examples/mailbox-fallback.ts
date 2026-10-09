@@ -345,11 +345,14 @@ async function main(): Promise<void> {
     assert.equal(mailboxEnumerate(mailboxDir).length, mailboxBefore, "a refused share must write NOTHING to the mailbox")
     ok("notes:safe share with no grant → REFUSED (no_consent); the mailbox stays empty")
 
-    const identityShare = await agentA.tool("share_profile", { friendId: pInAId, toAgentId: AGENT_B_ID, scope: "identity" })
-    assert.equal(identityShare.payload.ok, true, "an identity share must succeed on peer trust ≥ friend")
-    assert.equal(identityShare.payload.envelope.scope, "identity")
-    assert.equal(identityShare.payload.envelope.notes, undefined, "an identity share carries NO note content")
-    ok("identity share with no grant → ALLOWED on friend-trust alone (carries only the join key)")
+    const identityNoGrant = await agentA.tool("share_profile", { friendId: pInAId, toAgentId: AGENT_B_ID, scope: "identity" })
+    assert.equal(identityNoGrant.payload.status, "no_consent", "an identity share (it carries P's account ids) needs a grant below family")
+    const identityShare = await agentA.tool("share_profile", { friendId: pInAId, toAgentId: AGENT_B_ID, scope: "name" })
+    assert.equal(identityShare.payload.ok, true, "a name share must succeed on peer trust ≥ friend")
+    assert.equal(identityShare.payload.envelope.scope, "name")
+    assert.deepEqual(identityShare.payload.envelope.subject.externalIds, [], "a name share carries NO external ids")
+    assert.equal(identityShare.payload.envelope.notes, undefined, "a name share carries NO note content")
+    ok("identity share with no grant → REFUSED; name share → ALLOWED on friend-trust alone (display name only)")
 
     // ════════════════════════════════════════════════════════════════════════
     // STEP 4 — Grant + share → buildOutgoing → host writes to A's outbox. Assert
