@@ -319,12 +319,22 @@ export async function dispatchTool(
           action: "set_trust",
           targetId: record.id,
           ...(targetDid !== undefined ? { targetDid } : {}),
-          level: explicitTrustLevel,
+          // The level the record actually holds: a pending DID reset ignores the request.
+          level: record.trustLevel!,
           actor: auditActor,
           originSense: auditOriginSense,
           ts: record.updatedAt,
         }
         await audit.append(auditRecord)
+      }
+      if (record.trustRaiseIgnored) {
+        return {
+          result: {
+            ...record,
+            note: "The requested trust level was ignored because this peer's DID changed and its trust was reset. Use set_trust to raise it.",
+          },
+          isError: false,
+        }
       }
       return { result: record, isError: false }
     }

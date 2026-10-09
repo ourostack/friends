@@ -253,3 +253,18 @@ describe("review findings 3 and 4", () => {
     expect(result.trustLevel).toBe("stranger")
   })
 })
+
+describe("review item 4: a trust raise that was ignored is reported", () => {
+  it("flags trustRaiseIgnored on the returned record, not on a normal onboard", async () => {
+    const store = new MemoryStore([familyPeer()])
+    const changed = await upsertAgentPeer(store, { name: "Claude Code", agentId: "peer-1", trustLevel: "family", a2a: { did: "did:key:EVIL" } })
+    expect(changed.trustRaiseIgnored).toBe(true)
+    const again = await upsertAgentPeer(store, { name: "Claude Code", agentId: "peer-1", trustLevel: "family" })
+    expect(again.trustRaiseIgnored).toBe(true)
+    expect(again.trustLevel).toBe("stranger")
+    const lowered = await upsertAgentPeer(store, { name: "Claude Code", agentId: "peer-1", trustLevel: "stranger" })
+    expect(lowered.trustRaiseIgnored).toBeUndefined()
+    const plain = await upsertAgentPeer(new MemoryStore([familyPeer()]), { name: "Claude Code", agentId: "peer-1", trustLevel: "family" })
+    expect(plain.trustRaiseIgnored).toBeUndefined()
+  })
+})

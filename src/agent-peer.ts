@@ -11,6 +11,8 @@ import type { FriendStore } from "./store"
 import { resolveAgentIdentity } from "./identity"
 import type { AgentMeta, FriendRecord, TrustLevel, TrustReset } from "./types"
 
+const TRUST_ORDER: Record<TrustLevel, number> = { stranger: 1, acquaintance: 2, friend: 3, family: 4 }
+
 export interface UpsertAgentPeerInput {
   name: string
   agentId: string
@@ -28,6 +30,9 @@ export type UpsertAgentPeerResult = FriendRecord & {
   didChanged?: true
   previousDid?: string
   trustReset?: TrustReset
+  /** The caller asked for a higher trust level than the record now holds, and it was
+   * ignored (a DID change or a pending reset). Raise it with setFriendTrust. */
+  trustRaiseIgnored?: true
 }
 
 export async function upsertAgentPeer(
@@ -70,8 +75,9 @@ export async function upsertAgentPeer(
         previousTrust: existing!.trustLevel ?? "stranger",
       }
     : undefined
-  // While a DID-change reset marker is set, an onboard cannot raise trust: raising
-  // goes through setFriendTrust, which clears the marker.
+  // While a DID-change reset marker is set, the stored trust level wins in both
+  // directions: an onboard can neither raise nor lower it. Changing it goes through
+  // setFriendTrust, which clears the marker on a raise.
   const trustLevel: TrustLevel = didChanged
     ? "stranger"
     : existing?.trustReset
@@ -150,7 +156,13 @@ export async function upsertAgentPeer(
     message: "upserted agent peer record",
     meta: { friendId: settled.id, trustLevel },
   })
-  return didChanged ? { ...settled, didChanged: true, previousDid } : settled
+  const trustRaiseIgnored =
+    input.trustLevel !== undefined && TRUST_ORDER[input.trustLevel] > TRUST_ORDER[trustLevel]
+  return {
+    ...settled,
+    ...(didChanged ? { didChanged: true as const, previousDid } : {}),
+    ...(trustRaiseIgnored ? { trustRaiseIgnored: true as const } : {}),
+  }
 }
 
 /** The legacy record grant is never carried below family (finding 10), or a later

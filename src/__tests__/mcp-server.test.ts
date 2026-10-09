@@ -888,6 +888,24 @@ describe("tools/call dispatch — control-plane audit wiring (finding 3)", () =>
     expect(records[0].targetDid).toBe("did:key:zPeerAcq")
   })
 
+  it("onboard_agent audits the stored trust level and tells the owner to use set_trust when a raise is ignored (review item 4)", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    const audit = new MemoryAuditSink()
+    startAudited(store, audit)
+    await h.tool("onboard_agent", { name: "PeerBot", agentId: "peer-r", trustLevel: "family", a2a: JSON.stringify({ did: "did:key:zOld" }) })
+    await h.tool("onboard_agent", { name: "PeerBot", agentId: "peer-r", a2a: JSON.stringify({ did: "did:key:zNew" }) })
+    const before = audit.list().length
+    const r = await h.tool("onboard_agent", { name: "PeerBot", agentId: "peer-r", trustLevel: "family" })
+    const payload = r.payload as FriendRecord & { trustRaiseIgnored?: boolean; note?: string }
+    expect(payload.trustLevel).toBe("stranger")
+    expect(payload.trustRaiseIgnored).toBe(true)
+    expect(payload.note).toContain("set_trust")
+    const records = audit.list()
+    expect(records).toHaveLength(before + 1)
+    expect(records[records.length - 1]).toMatchObject({ action: "set_trust", level: "stranger" })
+  })
+
   it("onboard_agent trust seat omits targetDid when the peer carries no resolvable did (only a bare agentId)", async () => {
     const store = makeStore()
     seedOwner(store)

@@ -68,7 +68,7 @@ export interface ConnectAgentsDeps {
 export type ConnectStatus = "connected" | "needs_handle_or_introduction" | "downgraded"
 
 export type ConnectResult =
-  | { ok: true; status: "connected"; record: FriendRecord }
+  | { ok: true; status: "connected"; record: FriendRecord; trustRaiseIgnored?: true }
   | { ok: false; status: "needs_handle_or_introduction" }
   | { ok: false; status: "downgraded"; downgrade: ConnectAuthorization }
 
@@ -188,6 +188,9 @@ export async function connectAgents(
     trustLevel,
     ...(a2a ? { a2a } : {}),
   })
+  // Audit and report the trust level the record actually holds: a pending DID reset
+  // ignores the requested level.
+  const storedTrust: TrustLevel = record.trustLevel!
 
   // 4) The control-plane audit — ONE action:"connect" record through the wired sink
   // (mirrors the onboard_agent seat writer). No sink ⇒ a clean no-op.
@@ -197,7 +200,7 @@ export async function connectAgents(
       action: "connect",
       targetId: record.id,
       ...(targetDid !== undefined ? { targetDid } : {}),
-      level: trustLevel,
+      level: storedTrust,
       actor: deps.actor,
       originSense: deps.originSense,
       ts: record.updatedAt,
@@ -209,7 +212,7 @@ export async function connectAgents(
     component: "friends",
     event: "friends.connect_linked",
     message: "connect_to linked an own-fleet agent peer",
-    meta: { targetId: record.id, level: trustLevel },
+    meta: { targetId: record.id, level: storedTrust },
   })
-  return { ok: true, status: "connected", record }
+  return { ok: true, status: "connected", record, ...(record.trustRaiseIgnored ? { trustRaiseIgnored: true as const } : {}) }
 }
