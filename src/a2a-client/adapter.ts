@@ -101,6 +101,8 @@ export type ReceiveShareResult =
         | "sender_binding_mismatch"
         | "resolve_failed"
         | "replayed"
+        | "in_flight"
+        | "in_flight"
         | "bad_signature"
         | "untrusted_source"
         | "signed_recipient_mismatch"
@@ -160,10 +162,16 @@ function blobKey(sodium: Sodium, blob: { ePk: string; n: string; ct: string }): 
  *
  * Replay protection: before the first `await`, the blob key and the `mid:` key are
  * checked against the durable ledger and claimed in an in-memory in-flight set (released
- * on every exit). They are marked in the durable ledger only once the signature verifies,
- * so a transient failure leaves the message redeliverable and a forged blob cannot burn a
- * real one. A legacy nonce-only ledger entry still counts as seen. Throws a TypeError on
- * invalid `options` (non-finite clock or windows). */
+ * on every exit). A duplicate that hits an in-flight claim is rejected as `in_flight`
+ * (retryable); one that hits the durable ledger is `replayed`. The keys are marked in the
+ * durable ledger only once the signature verifies, so a failure BEFORE that (resolve
+ * failure, a throw, a forged blob) leaves the message redeliverable and a forged blob
+ * cannot burn a real one. Once the signature has verified the message is consumed, even
+ * if the trust gate or the import then fails. The keys are marked one at a time, so a
+ * durable write that fails between the blob key and the `mid:` key also consumes the
+ * message. A legacy nonce-only ledger entry still counts as seen, and the bare nonce is
+ * marked too (downgrade guard). Throws a TypeError on invalid `options` (non-finite clock
+ * or windows). */
 export async function receiveShare(input: ReceiveShareInput): Promise<ReceiveShareResult> {
   if (input.options) assertValidBindingOptions(input.options)
   const payload = unwrapDataPart(input.a2aMessage)
@@ -171,9 +179,10 @@ export async function receiveShare(input: ReceiveShareInput): Promise<ReceiveSha
 
   const inFlight = inFlightFor(input.seen)
   const nonceKey = blobKey(input.sodium, payload.sealed)
-  if (input.seen.isSeen(payload.sealed.n) || input.seen.isSeen(nonceKey) || inFlight.has(nonceKey)) {
+  if (input.seen.isSeen(payload.sealed.n) || input.seen.isSeen(nonceKey)) {
     return { state: "rejected", reason: "replayed" }
   }
+  if (inFlight.has(nonceKey)) return { state: "rejected", reason: "in_flight" }
 
   const opened = openSealedEnvelope({
     sodium: input.sodium,
@@ -202,12 +211,12 @@ export async function receiveShare(input: ReceiveShareInput): Promise<ReceiveSha
   const binding = checkEnvelopeBinding(opened, { ...input.options, recipientDid: input.recipientDid, seen: input.seen })
   if (!binding.ok) return { state: "rejected", reason: binding.reason }
   if (binding.seenKey !== undefined && inFlight.has(binding.seenKey)) {
-    return { state: "rejected", reason: "replayed" }
+    return { state: "rejected", reason: "in_flight" }
   }
   const claimed = binding.seenKey === undefined ? [nonceKey] : [nonceKey, binding.seenKey]
   for (const key of claimed) inFlight.add(key)
   try {
-    return await processClaimed(input, opened, senderDid, binding, claimed)
+    return await processClaimed(input, opened, senderDid, binding, claimed, payload.sealed.n)
   } finally {
     for (const key of claimed) inFlight.delete(key)
   }
@@ -219,6 +228,7 @@ async function processClaimed(
   senderDid: string,
   binding: { bound: boolean; bindingId?: string },
   claimed: string[],
+  bareNonce: string,
 ): Promise<ReceiveShareResult> {
   const bound = binding.bound
 
@@ -242,7 +252,12 @@ async function processClaimed(
   const verifier = {
     verify(fromAgentId: string, proof?: string): boolean {
       const ok = didVerifier.verify(fromAgentId, proof)
-      if (ok) for (const key of claimed) input.seen.markSeen(key)
+      if (ok) {
+        for (const key of claimed) input.seen.markSeen(key)
+        // Downgrade guard: an older friends version dedupes on the bare seal nonce only,
+        // so mark it too, or it could replay a message this version already accepted.
+        input.seen.markSeen(bareNonce)
+      }
       return ok
     },
   }

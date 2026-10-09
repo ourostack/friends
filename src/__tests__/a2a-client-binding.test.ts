@@ -157,7 +157,7 @@ describe("EXPLOIT: re-sealing a delegated message to a different recipient", () 
     const slow = { seen, didResolution: didKeyResolution(sodium, 10) }
     const results = await Promise.all([receiveAt(sodium, c, wire, "friend", slow), receiveAt(sodium, c, wire, "friend", slow)])
     expect(results.filter((r) => r.state === "completed")).toHaveLength(1)
-    expect(results.filter((r) => r.state === "rejected" && r.reason === "replayed")).toHaveLength(1)
+    expect(results.filter((r) => r.state === "rejected" && r.reason === "in_flight")).toHaveLength(1)
   })
 })
 
@@ -384,7 +384,7 @@ describe("claim ordering (in-flight set, durable mark only after the signature v
     override markSeen(n: string) { this.marks.push(n); super.markSeen(n) }
   }
 
-  it("a concurrent re-sealed duplicate (fresh nonce, same message id) is replayed while the first is in flight", async () => {
+  it("a concurrent re-sealed duplicate (fresh nonce, same message id) gets in_flight while the first is in flight", async () => {
     const sodium = await readySodium()
     const [a, c] = [agent(sodium), agent(sodium)]
     const first = await sendTo(sodium, a, c, msg(a))
@@ -392,7 +392,19 @@ describe("claim ordering (in-flight set, durable mark only after the signature v
     const slow = { seen: new SeenLedger(), didResolution: didKeyResolution(sodium, 10) }
     const results = await Promise.all([receiveAt(sodium, c, first, "friend", slow), receiveAt(sodium, c, second, "friend", slow)])
     expect(results.map((r) => r.state).sort()).toEqual(["completed", "rejected"])
-    expect(results.find((r) => r.state === "rejected")).toEqual({ state: "rejected", reason: "replayed" })
+    expect(results.find((r) => r.state === "rejected")).toEqual({ state: "rejected", reason: "in_flight" })
+  })
+
+  it("three concurrent deliveries: the first resolve_fails, the others get in_flight, then redelivery completes", async () => {
+    const sodium = await readySodium()
+    const [a, c] = [agent(sodium), agent(sodium)]
+    const wire = await sendTo(sodium, a, c, msg(a))
+    const seen = new SeenLedger()
+    let calls = 0
+    const flaky: DidResolution = { async resolveAndPin(i) { calls += 1; await new Promise((r) => setTimeout(r, 10)); return calls === 1 ? null : didKeyResolution(sodium).resolveAndPin(i) } }
+    const results = await Promise.all([1, 2, 3].map(() => receiveAt(sodium, c, wire, "friend", { seen, didResolution: flaky })))
+    expect(results.map((r) => (r.state === "rejected" ? r.reason : r.state))).toEqual(["resolve_failed", "in_flight", "in_flight"])
+    expect((await receiveAt(sodium, c, wire, "friend", { seen })).state).toBe("completed")
   })
 
   it("a transient resolve_failed does not burn the message: redelivery of the same blob completes", async () => {
@@ -438,7 +450,8 @@ describe("claim ordering (in-flight set, durable mark only after the signature v
     const wire = await sendTo(sodium, a, c, msg(a))
     const seen = new RecordingLedger()
     expect((await receiveAt(sodium, c, wire, "family", { seen })).state).toBe("completed")
-    expect(seen.marks).toHaveLength(2) // blob key + mid key
+    expect(seen.marks).toHaveLength(3) // blob key + mid key + bare nonce
+    expect(seen.isSeen(unwrapDataPart(wire)!.sealed.n)).toBe(true) // downgrade guard for older receivers
     expect(await receiveAt(sodium, c, wire, "family", { seen })).toEqual({ state: "rejected", reason: "replayed" })
   })
 

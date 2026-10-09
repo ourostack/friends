@@ -3,7 +3,7 @@
     {
       "version": "0.1.0-alpha.15",
       "changes": [
-        "Bind every signed envelope to its recipient, kind, a random message id and its issue time (signed binding field). receiveShare rejects re-sealed, replayed, stale and unbound delegated envelopes, dedupes concurrent deliveries without burning a message on a transient failure, returns the signed id as bindingId, and reports explicit reasons. New checkEnvelopeBinding export and rejectUnboundEnvelopes option; invalid time options throw a TypeError.",
+        "Bind every signed envelope to its recipient, kind, a random message id and its issue time (signed binding field). receiveShare rejects re-sealed, replayed, stale and unbound delegated envelopes, dedupes concurrent deliveries (a duplicate in flight gets the retryable in_flight), leaves a message redeliverable when it fails before its signature verifies (once verified it is consumed), also marks the bare seal nonce so an older receiver cannot replay it, returns the signed id as bindingId, and reports explicit reasons. New checkEnvelopeBinding export and rejectUnboundEnvelopes option; invalid time options throw a TypeError.",
         "Deprecate the friend-record DelegationGrant as authority; add PinnedDelegationGrant and checkPinnedDelegationGrant for hosts that keep grants in trusted storage. setFriendTrust and upsertAgentPeer clear the legacy grant whenever trust is below family; setFriendTrust reports delegationSuspended."
       ]
     },

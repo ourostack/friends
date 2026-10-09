@@ -49,7 +49,7 @@ const ISO_WITH_ZONE = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?(Z|[+-]\d\d:\d\d)$
 
 export interface CheckEnvelopeBindingInput extends EnvelopeBindingOptions {
   recipientDid: string
-  /** The ledger the `mid:<senderDid>:<id>` key is checked against and claimed in. */
+  /** The ledger the `mid:<senderDid>:<id>` key is CHECKED against (never marked here). */
   seen: BindingSeenLedger
 }
 

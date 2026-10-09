@@ -112,7 +112,14 @@ their own receive path) rejects with `signed_recipient_mismatch`, `signed_kind_m
 10 minutes old (`stale_envelope` / `stale_delegation`), with 2 minutes of clock skew allowed. An
 envelope with no `binding` (an older sender) is accepted with `bound: false` unless it is a
 delegated command (`unbound_delegation`) or the host sets `rejectUnboundEnvelopes` (`unbound_envelope`).
-A completed result carries the signed `bindingId`. Invalid time options (non-finite `now` or windows)
+A completed result carries the signed `bindingId`. `checkEnvelopeBinding` is check-only: a host
+with its own receive path must hold an in-memory claim across its own awaits, and mark the returned
+`seenKey` (and its blob key) in the ledger only after the signature verifies. `receiveShare` does
+this itself: a duplicate that hits an in-flight claim gets the retryable `in_flight`, one that hits
+the ledger gets `replayed`. A failure before the signature verifies (resolve failure, a throw, a
+forged blob) leaves the message redeliverable; once verified, the message is consumed even if the
+trust gate or the import then fails, and so is a message whose ledger write fails between the blob
+key and the `mid:` key. Invalid time options (non-finite `now` or windows)
 throw a `TypeError` rather than skip the check.
 
 **The friends relay (`ourostack/friends-relay`)** is the friends-family communication layer for any
