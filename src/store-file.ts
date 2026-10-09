@@ -990,7 +990,7 @@ export class FileFriendStore implements ExternalIdClaimStore {
         provider: e.provider,
         externalId: e.externalId,
         ...(typeof e.tenantId === "string" ? { tenantId: e.tenantId } : {}),
-        assertedBy: by as unknown as ImportedExternalId["assertedBy"],
+        assertedBy: { agentId: by.agentId, ...(typeof by.agentName === "string" ? { agentName: by.agentName } : {}) },
         importedAt: e.importedAt,
       })
     }

@@ -382,8 +382,26 @@ function applyEnvelopeToRecord(
       ? mergeImportedNotes(record, envelope.notes, fromAgentId, now)
       : record.importedNotes
 
+  // Ids this peer names that the record does not already hold (as a real identity or
+  // as this peer's earlier claim) are appended as unverified claims.
+  const known = (ext: { provider: string; externalId: string; tenantId?: string }) =>
+    record.externalIds.some((have) => have.provider === ext.provider && have.externalId === ext.externalId && have.tenantId === ext.tenantId) ||
+    (record.importedExternalIds ?? []).some((claim) =>
+      claim.assertedBy.agentId === fromAgentId && claim.provider === ext.provider && claim.externalId === ext.externalId && claim.tenantId === ext.tenantId)
+  const newClaims = envelope.subject.externalIds.filter((ext) => !known(ext)).map((ext) => ({
+    provider: ext.provider,
+    externalId: ext.externalId,
+    ...(ext.tenantId !== undefined ? { tenantId: ext.tenantId } : {}),
+    assertedBy: { agentId: fromAgentId },
+    importedAt: now,
+  }))
+  const importedExternalIds = newClaims.length > 0
+    ? [...(record.importedExternalIds ?? []), ...newClaims]
+    : record.importedExternalIds
+
   return {
     ...record,
+    ...(importedExternalIds ? { importedExternalIds } : {}),
     // trustLevel / role are intentionally NOT recomputed — an import must never
     // change the party's trust (the single most important safety invariant).
     ...(importedNotes ? { importedNotes } : {}),

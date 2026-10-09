@@ -382,9 +382,14 @@ three postures ship behind one swap point (`DEFAULT_CONSENT_POLICY` in `src/cons
 
 - **`strictPolicy`** — consented only by a non-revoked, non-expired explicit grant.
 - **`trustImpliedPolicy`** — an explicit grant, *or* recipient trust ≥ `friend` (any scope).
-- **`tieredPolicy`** *(default)* — identity-scope shares (the join key) are consented on recipient
-  trust ≥ `friend`; any **note-content scope** requires an explicit grant. *(Trust agrees on who;
-  content still needs consent.)*
+- **`tieredPolicy`** *(default)* — `name` and `coordinate` shares (display name only, no account ids)
+  are consented on recipient trust ≥ `friend`; an `identity` share needs an explicit grant below
+  `family`; any **note-content scope** requires an explicit grant. *(Trust agrees on who; content
+  still needs consent.)*
+
+A grant for `notes:safe`, `notes:all` or `outcomes` also discloses the subject's account ids
+(`externalIds`), because the receiver needs them to find the right record. Only the `name` and
+`coordinate` scopes withhold them.
 
 ### The safety invariants
 

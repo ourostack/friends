@@ -109,6 +109,16 @@ describe("FileFriendStore round trip", () => {
     expect(three?.importedExternalIds).toBeUndefined()
     expect(three?.agentMeta?.identity).toEqual({ did: "did:key:ONLY" })
     await expect(store.releaseExternalId("../escape", { provider: "aad", externalId: "x", linkedAt: T })).rejects.toThrow("invalid")
+    writeFileSync(join(friendsPath, "bad-4.json"), JSON.stringify({ ...bad, id: "bad-4", importedExternalIds: [
+      { provider: "aad", externalId: "9", importedAt: T, assertedBy: { agentId: "p", agentName: "Peer", evil: "x" } },
+      { provider: "aad", externalId: "8", importedAt: T, assertedBy: { agentId: "p", agentName: 5 } },
+      { provider: "aad", externalId: "7", importedAt: T, assertedBy: { agentId: 5 } },
+    ] }))
+    const four = await store.get("bad-4")
+    expect(four?.importedExternalIds).toEqual([
+      { provider: "aad", externalId: "9", importedAt: T, assertedBy: { agentId: "p", agentName: "Peer" } },
+      { provider: "aad", externalId: "8", importedAt: T, assertedBy: { agentId: "p" } },
+    ])
     const two = await store.get("bad-2")
     expect(two?.trustReset).toBeUndefined()
     expect(two?.importedExternalIds).toBeUndefined()

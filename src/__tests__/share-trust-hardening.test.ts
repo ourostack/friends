@@ -215,4 +215,26 @@ describe("importProfileShare seeds at stranger and never indexes the peer's ids 
     const tenant = await importProfileShare(store, { envelope: env, fromAgentId: "peer", trustOfSource: "friend" })
     expect(tenant.ok && tenant.status).toBe("seeded")
   })
+
+  it("appends new ids from a repeat share by the same peer, without duplicating known ones", async () => {
+    const store = new MemoryStore()
+    await importProfileShare(store, { envelope: aboutStranger(), fromAgentId: "peer", trustOfSource: "friend" })
+    const env = aboutStranger()
+    env.subject.externalIds.push({ provider: "email-address", externalId: "bank@example.com", linkedAt: NOW })
+    const again = await importProfileShare(store, { envelope: env, fromAgentId: "peer", trustOfSource: "friend" })
+    expect(again.ok && again.status).toBe("imported")
+    const claims = again.ok ? again.record.importedExternalIds : undefined
+    expect(claims?.map((c) => c.externalId)).toEqual(["555", "bank@example.com"])
+    const third = await importProfileShare(store, { envelope: env, fromAgentId: "peer", trustOfSource: "friend" })
+    expect(third.ok && third.record.importedExternalIds).toHaveLength(2)
+  })
+
+  it("does not record a claim for an id the record already holds as a real identity", async () => {
+    const store = new MemoryStore([person()])
+    const env = aboutStranger()
+    delete env.subject.externalIds[0].tenantId
+    const result = await importProfileShare(store, { envelope: env, fromAgentId: "peer", trustOfSource: "friend" })
+    expect(result.ok && result.status).toBe("imported")
+    expect(result.ok && result.record.importedExternalIds).toBeUndefined()
+  })
 })
