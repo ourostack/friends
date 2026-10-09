@@ -48,7 +48,9 @@ export {
   isPinned,
   MemoryPinStore,
   pinOnFirstContact,
+  signFullSuccessor,
   signSuccessor,
+  signSuccessorConsent,
   verifyCardDidBinding,
 } from "./did-verifier"
 export type { ApplyRotationResult, PinnedDid, PinStore, RotationDecision } from "./did-verifier"

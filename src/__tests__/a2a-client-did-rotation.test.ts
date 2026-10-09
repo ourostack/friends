@@ -9,6 +9,7 @@ import {
   MemoryPinStore,
   pinOnFirstContact,
   signSuccessor,
+  signSuccessorConsent,
 } from "../a2a-client/did-verifier"
 import { serializeProof, signEnvelope } from "../a2a-client/sign"
 import { readySodium } from "./_sodium"
@@ -36,11 +37,12 @@ async function fixture() {
 function rotate(
   f: Awaited<ReturnType<typeof fixture>>,
   from: { did: string; ed25519Priv: Uint8Array },
-  to: { did: string; ed25519Pub: Uint8Array },
+  to: { did: string; ed25519Pub: Uint8Array; ed25519Priv: Uint8Array },
   issuedAt?: string,
   opts: { acceptUndatedSuccessor?: boolean } = {},
 ) {
   const rotationProof = signSuccessor({ sodium: f.sodium, oldEd25519Priv: from.ed25519Priv, newDid: to.did, newEd25519Pub: to.ed25519Pub, ...(issuedAt ? { issuedAt } : {}) })
+  const successorProof = signSuccessorConsent({ sodium: f.sodium, oldDid: from.did, newDid: to.did, newEd25519Pub: to.ed25519Pub, newEd25519Priv: to.ed25519Priv, ...(issuedAt ? { issuedAt } : {}) })
   return evaluateRotation({
     sodium: f.sodium,
     pinStore: f.pinStore,
@@ -49,6 +51,7 @@ function rotate(
     newDid: to.did,
     newEd25519Pub: to.ed25519Pub,
     rotationProof,
+    successorProof,
     ...(issuedAt ? { issuedAt } : {}),
     ...opts,
     now: NOW,
@@ -138,7 +141,7 @@ describe("a successor statement cannot overwrite another peer's pin (review find
       const bBefore = f.pinStore.get(f.b.did)
       const aBefore = f.pinStore.get(f.a.did)
       // A signs a dated successor statement naming B's DID, but with the attacker's key.
-      const result = rotate(f, f.a, { did: f.b.did, ed25519Pub: f.c.ed25519Pub }, T2)
+      const result = rotate(f, f.a, { did: f.b.did, ed25519Pub: f.c.ed25519Pub, ed25519Priv: f.c.ed25519Priv }, T2)
       expect(result).toEqual({ decision: "rejected", reason: state === "retired" ? "retired_pin" : "successor_already_pinned" })
       expect(f.pinStore.get(f.b.did)).toEqual(bBefore)
       expect(f.pinStore.get(f.a.did)).toEqual(aBefore)
@@ -152,6 +155,8 @@ describe("a successor statement cannot overwrite another peer's pin (review find
     const result = evaluateRotation({
       sodium: f.sodium, pinStore: f.pinStore, fromAgentId: "did:web:a.example", trustOfSource: "friend",
       newDid: "did:web:a.example", newEd25519Pub: f.c.ed25519Pub, rotationProof, issuedAt: T2, now: NOW,
+      resolvedSuccessorPub: f.c.ed25519Pub,
+      successorProof: signSuccessorConsent({ sodium: f.sodium, oldDid: "did:web:a.example", newDid: "did:web:a.example", newEd25519Pub: f.c.ed25519Pub, newEd25519Priv: f.c.ed25519Priv, issuedAt: T2 }),
     })
     expect(result).toEqual({ decision: "accepted" })
   })

@@ -192,7 +192,7 @@ export function getPinned(pinStore: PinStore, fromAgentId: string): PinnedDid | 
 export type RotationDecision =
   | { decision: "unchanged" }
   | { decision: "accepted" }
-  | { decision: "rejected"; reason: "bad_rotation_proof" | "rotation_requires_reconfirm" | "not_pinned" | "stale_rotation" | "undated_rotation" | "retired_pin" | "successor_already_pinned" | "successor_key_mismatch" }
+  | { decision: "rejected"; reason: "bad_rotation_proof" | "rotation_requires_reconfirm" | "not_pinned" | "stale_rotation" | "undated_rotation" | "retired_pin" | "successor_already_pinned" | "successor_key_mismatch" | "missing_successor_proof" | "bad_successor_proof" }
 
 /** Successor statements dated further ahead than this are rejected. */
 const ROTATION_CLOCK_SKEW_MS = 2 * 60 * 1000
@@ -231,6 +231,60 @@ export function signSuccessor(input: {
   return b64(sodium.crypto_sign_detached(msg, input.oldEd25519Priv))
 }
 
+/** The statement the NEW key signs to consent to being the successor of `oldDid`. It
+ * covers the old DID, the new DID, the new key and (when dated) the time, so a consent
+ * cannot be reused for another predecessor, another key or another moment. */
+function consentMessage(
+  oldDid: string,
+  newDid: string,
+  newEd25519Pub: Uint8Array,
+  b64: (b: Uint8Array) => string,
+  issuedAt?: string,
+): Uint8Array {
+  return jcsBytes({
+    statement: "key-successor-consent",
+    predecessor: oldDid,
+    successor: newDid,
+    newKey: b64(newEd25519Pub),
+    ...(issuedAt !== undefined ? { issuedAt } : {}),
+  })
+}
+
+/** Mint the successor's consent: the NEW private key signs the old DID, the new DID, the
+ * new key and `issuedAt`. Returns the base64 detached signature for `successorProof`. */
+export function signSuccessorConsent(input: {
+  sodium: Sodium
+  oldDid: string
+  newDid: string
+  newEd25519Pub: Uint8Array
+  newEd25519Priv: Uint8Array
+  issuedAt?: string
+}): string {
+  const { sodium } = input
+  const b64 = (b: Uint8Array) => sodium.to_base64(b, sodium.base64_variants.ORIGINAL)
+  const msg = consentMessage(input.oldDid, input.newDid, input.newEd25519Pub, b64, input.issuedAt)
+  return b64(sodium.crypto_sign_detached(msg, input.newEd25519Priv))
+}
+
+/** Build both halves of a rotation from the two keys: `rotationProof` (old key) and
+ * `successorProof` (new key). A host with both keys passes the result to
+ * `evaluateRotation` on the receiving side. */
+export function signFullSuccessor(input: {
+  sodium: Sodium
+  oldDid: string
+  oldEd25519Priv: Uint8Array
+  newDid: string
+  newEd25519Pub: Uint8Array
+  newEd25519Priv: Uint8Array
+  issuedAt?: string
+}): { rotationProof: string; successorProof: string; issuedAt?: string } {
+  return {
+    rotationProof: signSuccessor(input),
+    successorProof: signSuccessorConsent(input),
+    ...(input.issuedAt !== undefined ? { issuedAt: input.issuedAt } : {}),
+  }
+}
+
 export interface EvaluateRotationInput {
   sodium: Sodium
   pinStore: PinStore
@@ -246,6 +300,9 @@ export interface EvaluateRotationInput {
   /** Opt in to the original undated statement shape, which cannot be replay-checked.
    * Default false. */
   acceptUndatedSuccessor?: boolean
+  /** The base64 signature from `signSuccessorConsent`: the NEW key consenting to succeed
+   * `fromAgentId`. Required for every accepted rotation. */
+  successorProof?: string
   /** The successor's key as the host verified it out of band (for example by resolving
    * a did:web document). Required to rotate to a different non-did:key DID. */
   resolvedSuccessorPub?: Uint8Array
@@ -283,10 +340,9 @@ export function evaluateRotation(input: EvaluateRotationInput): RotationDecision
     if (!bytesEqual(derived.ed25519Pub, newEd25519Pub)) {
       return { decision: "rejected", reason: "successor_key_mismatch" }
     }
-  } else if (input.resolvedSuccessorPub !== undefined || newDid !== fromAgentId) {
-    if (input.resolvedSuccessorPub === undefined || !bytesEqual(input.resolvedSuccessorPub, newEd25519Pub)) {
-      return { decision: "rejected", reason: "successor_key_mismatch" }
-    }
+  } else if (input.resolvedSuccessorPub === undefined || !bytesEqual(input.resolvedSuccessorPub, newEd25519Pub)) {
+    // Any other method, a same-DID rotation included, needs the host's own resolution.
+    return { decision: "rejected", reason: "successor_key_mismatch" }
   }
 
   // acquaintance / stranger: never auto-accept a rotation, even with a valid proof.
@@ -315,6 +371,18 @@ export function evaluateRotation(input: EvaluateRotationInput): RotationDecision
   }
   if (!ok) return { decision: "rejected", reason: "bad_rotation_proof" }
 
+  // The successor must consent too, or a peer could name any real DID and key as its
+  // successor. The NEW key signs the old DID, the new DID, its own key and the date.
+  if (input.successorProof === undefined) return { decision: "rejected", reason: "missing_successor_proof" }
+  let consented = false
+  try {
+    const consentSig = sodium.from_base64(input.successorProof, sodium.base64_variants.ORIGINAL)
+    consented = sodium.crypto_sign_verify_detached(consentSig, consentMessage(fromAgentId, newDid, newEd25519Pub, b64, issuedAt), newEd25519Pub)
+  } catch {
+    consented = false
+  }
+  if (!consented) return { decision: "rejected", reason: "bad_successor_proof" }
+
   // Replay guard. A statement must be dated, not in the future, and newer than the
   // pin's last rotation. An undated one cannot be checked, so it needs the opt-in.
   const now = input.now ?? new Date()
@@ -342,13 +410,21 @@ export function evaluateRotation(input: EvaluateRotationInput): RotationDecision
 
 export type ApplyRotationResult =
   | { ok: true; record: FriendRecord }
-  | { ok: false; reason: "rotation_not_accepted" | "record_not_found" | "successor_already_linked" }
+  | { ok: false; reason: "rotation_not_accepted" | "rotation_chain_invalid" | "record_not_found" | "successor_already_linked" }
+
+/** The most rotations `applyAcceptedRotation` will follow from the old DID. */
+export const MAX_ROTATION_HOPS = 16
 
 /** After `evaluateRotation` returns `accepted`, call this to move the peer's record from
- * the old DID to the new one. It moves the `a2a-agent` external id and the record's DID
- * and keeps trust, grant and profile: a verified rotation is the same peer, so this is
- * not a reset. It refuses unless the pin store shows the old DID retired by the new DID
- * and the new DID's pin live, so it cannot be used to rename a record without a rotation. */
+ * the old DID to where the rotation chain ends. It follows `retiredBy` hop by hop from
+ * `oldDid` to the live pin, so back-to-back rotations (A to B to C) do not strand the
+ * record: `newDid` may be any DID on the chain, and the record always moves to the live
+ * end. It moves the `a2a-agent` external id and the record's DID and keeps trust, grant
+ * and profile, because a verified rotation is the same peer (this is not a reset). It
+ * looks for the record at `oldDid` first, then at each later DID before the live end, so
+ * a record already moved part-way is finished. It refuses unless every hop is a retired
+ * pin naming an existing next pin, the chain ends in a live pin, and `newDid` is on it
+ * (`rotation_not_accepted`), or the chain loops or exceeds 16 hops (`rotation_chain_invalid`). */
 export async function applyAcceptedRotation(input: {
   store: FriendStore
   pinStore: PinStore
@@ -356,26 +432,44 @@ export async function applyAcceptedRotation(input: {
   newDid: string
 }): Promise<ApplyRotationResult> {
   const { store, pinStore, oldDid, newDid } = input
-  if (pinStore.get(oldDid)?.retiredBy !== newDid || getPinned(pinStore, newDid) === undefined) {
+  const chain = [oldDid]
+  for (;;) {
+    const next = pinStore.get(chain[chain.length - 1])?.retiredBy
+    if (next === undefined) break
+    if (chain.includes(next) || chain.length > MAX_ROTATION_HOPS) return { ok: false, reason: "rotation_chain_invalid" }
+    if (pinStore.get(next) === undefined) return { ok: false, reason: "rotation_not_accepted" }
+    chain.push(next)
+  }
+  const liveEnd = chain[chain.length - 1]
+  if (chain.length < 2 || !chain.includes(newDid) || newDid === oldDid || getPinned(pinStore, liveEnd) === undefined) {
     return { ok: false, reason: "rotation_not_accepted" }
   }
-  const record = await store.findByExternalId("a2a-agent", oldDid)
+
+  let record: FriendRecord | null = null
+  let heldAt = oldDid
+  for (const did of chain.slice(0, -1)) {
+    record = await store.findByExternalId("a2a-agent", did)
+    if (record) {
+      heldAt = did
+      break
+    }
+  }
   if (!record) return { ok: false, reason: "record_not_found" }
-  const holder = await store.findByExternalId("a2a-agent", newDid)
+  const holder = await store.findByExternalId("a2a-agent", liveEnd)
   if (holder && holder.id !== record.id) return { ok: false, reason: "successor_already_linked" }
 
   const { pinnedKey: _stalePinnedKey, ...identity } = record.agentMeta?.identity ?? {}
   const agentMeta = record.agentMeta
     ? {
         ...record.agentMeta,
-        a2a: { ...record.agentMeta.a2a, agentId: newDid, did: newDid },
-        identity: { ...identity, did: newDid },
+        a2a: { ...record.agentMeta.a2a, agentId: liveEnd, did: liveEnd },
+        identity: { ...identity, did: liveEnd },
       }
     : undefined
   const updated: FriendRecord = {
     ...record,
     externalIds: record.externalIds.map((ext) =>
-      ext.provider === "a2a-agent" && ext.externalId === oldDid ? { ...ext, externalId: newDid } : ext),
+      ext.provider === "a2a-agent" && ext.externalId === heldAt ? { ...ext, externalId: liveEnd } : ext),
     ...(agentMeta ? { agentMeta } : {}),
     updatedAt: new Date().toISOString(),
   }

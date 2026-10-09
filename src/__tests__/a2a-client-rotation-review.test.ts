@@ -9,7 +9,9 @@ import {
   getPinned,
   MemoryPinStore,
   pinOnFirstContact,
+  signFullSuccessor,
   signSuccessor,
+  signSuccessorConsent,
 } from "../a2a-client/did-verifier"
 import { receiveShare, sendShare } from "../a2a-client/adapter"
 import type { A2AMessage, } from "../a2a-client/a2a-message"
@@ -31,12 +33,17 @@ async function setup() {
   const [a, c, victim, me] = [await mint(sodium), await mint(sodium), await mint(sodium), await mint(sodium)]
   const pinStore = new MemoryPinStore()
   pinOnFirstContact({ pinStore, fromAgentId: a.did, did: a.did, ed25519Pub: a.ed25519Pub })
-  const rotateTo = (newDid: string, newPub: Uint8Array, extra: Record<string, unknown> = {}) =>
-    evaluateRotation({
-      sodium, pinStore, fromAgentId: a.did, trustOfSource: "friend", newDid, newEd25519Pub: newPub,
-      rotationProof: signSuccessor({ sodium, oldEd25519Priv: a.ed25519Priv, newDid, newEd25519Pub: newPub, issuedAt: T1 }),
-      issuedAt: T1, now: NOW, ...extra,
+  const known = [a, c, victim, me]
+  /** Rotate `from` (default A) to a DID and key. Both keys sign unless `extra` overrides. */
+  const rotateTo = (newDid: string, newPub: Uint8Array, extra: Record<string, unknown> = {}, from: DidKeyIdentity = a, at = T1) => {
+    const newPriv = known.find((k) => k.ed25519Pub.every((b, i) => b === newPub[i]))?.ed25519Priv
+    return evaluateRotation({
+      sodium, pinStore, fromAgentId: from.did, trustOfSource: "friend", newDid, newEd25519Pub: newPub,
+      rotationProof: signSuccessor({ sodium, oldEd25519Priv: from.ed25519Priv, newDid, newEd25519Pub: newPub, issuedAt: at }),
+      ...(newPriv ? { successorProof: signSuccessorConsent({ sodium, oldDid: from.did, newDid, newEd25519Pub: newPub, newEd25519Priv: newPriv, issuedAt: at }) } : {}),
+      issuedAt: at, now: NOW, ...extra,
     })
+  }
   return { sodium, a, c, victim, me, pinStore, rotateTo }
 }
 
@@ -73,6 +80,64 @@ describe("a rotation must bind the successor DID to the successor key (review it
       .toEqual({ decision: "rejected", reason: "successor_key_mismatch" })
     expect(s.rotateTo("did:web:new.example", s.c.ed25519Pub, { resolvedSuccessorPub: s.c.ed25519Pub }))
       .toEqual({ decision: "accepted" })
+  })
+})
+
+describe("a rotation needs the successor's own consent (re-review item 1)", () => {
+  it("rejects naming a victim's real did:key and public key without the victim's signature", async () => {
+    const s = await setup()
+    const result = s.rotateTo(s.victim.did, s.victim.ed25519Pub, { successorProof: undefined })
+    expect(result).toEqual({ decision: "rejected", reason: "missing_successor_proof" })
+    expect(s.pinStore.get(s.victim.did)).toBeUndefined()
+    expect(getPinned(s.pinStore, s.a.did)).toBeDefined()
+  })
+
+  it("rejects a successor proof made with the wrong key, or for a different old DID", async () => {
+    const s = await setup()
+    const wrongKey = signSuccessorConsent({ sodium: s.sodium, oldDid: s.a.did, newDid: s.victim.did, newEd25519Pub: s.victim.ed25519Pub, newEd25519Priv: s.a.ed25519Priv, issuedAt: T1 })
+    expect(s.rotateTo(s.victim.did, s.victim.ed25519Pub, { successorProof: wrongKey })).toEqual({ decision: "rejected", reason: "bad_successor_proof" })
+    const otherOld = signSuccessorConsent({ sodium: s.sodium, oldDid: s.c.did, newDid: s.victim.did, newEd25519Pub: s.victim.ed25519Pub, newEd25519Priv: s.victim.ed25519Priv, issuedAt: T1 })
+    expect(s.rotateTo(s.victim.did, s.victim.ed25519Pub, { successorProof: otherOld })).toEqual({ decision: "rejected", reason: "bad_successor_proof" })
+    expect(s.rotateTo(s.victim.did, s.victim.ed25519Pub, { successorProof: "!!!not-base64!!!" })).toEqual({ decision: "rejected", reason: "bad_successor_proof" })
+    expect(s.pinStore.get(s.victim.did)).toBeUndefined()
+  })
+
+  it("accepts when both keys sign", async () => {
+    const s = await setup()
+    expect(s.rotateTo(s.victim.did, s.victim.ed25519Pub)).toEqual({ decision: "accepted" })
+  })
+})
+
+describe("signFullSuccessor builds both halves from the two keys", () => {
+  it("produces proofs evaluateRotation accepts, dated or undated", async () => {
+    for (const issuedAt of [T1, undefined]) {
+      const s = await setup()
+      const proofs = signFullSuccessor({
+        sodium: s.sodium, oldDid: s.a.did, oldEd25519Priv: s.a.ed25519Priv,
+        newDid: s.c.did, newEd25519Pub: s.c.ed25519Pub, newEd25519Priv: s.c.ed25519Priv, ...(issuedAt ? { issuedAt } : {}),
+      })
+      expect(proofs.issuedAt).toBe(issuedAt)
+      expect(evaluateRotation({
+        sodium: s.sodium, pinStore: s.pinStore, fromAgentId: s.a.did, trustOfSource: "friend",
+        newDid: s.c.did, newEd25519Pub: s.c.ed25519Pub, ...proofs, acceptUndatedSuccessor: true, now: NOW,
+      })).toEqual({ decision: "accepted" })
+    }
+  })
+})
+
+describe("every non-did:key rotation needs a host-resolved successor key (re-review item 2)", () => {
+  it("rejects a same-DID rotation of a did:web without resolvedSuccessorPub and accepts it with one", async () => {
+    const s = await setup()
+    s.pinStore.set("did:web:a.example", { did: "did:web:a.example", ed25519Pub: s.a.ed25519Pub })
+    const go = (extra: Record<string, unknown>) => evaluateRotation({
+      sodium: s.sodium, pinStore: s.pinStore, fromAgentId: "did:web:a.example", trustOfSource: "friend",
+      newDid: "did:web:a.example", newEd25519Pub: s.c.ed25519Pub,
+      rotationProof: signSuccessor({ sodium: s.sodium, oldEd25519Priv: s.a.ed25519Priv, newDid: "did:web:a.example", newEd25519Pub: s.c.ed25519Pub, issuedAt: T1 }),
+      successorProof: signSuccessorConsent({ sodium: s.sodium, oldDid: "did:web:a.example", newDid: "did:web:a.example", newEd25519Pub: s.c.ed25519Pub, newEd25519Priv: s.c.ed25519Priv, issuedAt: T1 }),
+      issuedAt: T1, now: NOW, ...extra,
+    })
+    expect(go({})).toEqual({ decision: "rejected", reason: "successor_key_mismatch" })
+    expect(go({ resolvedSuccessorPub: s.c.ed25519Pub })).toEqual({ decision: "accepted" })
   })
 })
 
@@ -214,5 +279,55 @@ describe("applyAcceptedRotation keeps the relationship across a rotation (review
       expect(result.ok).toBe(true)
       expect(await store.findByExternalId("a2a-agent", s.c.did)).not.toBeNull()
     }
+  })
+})
+
+describe("applyAcceptedRotation follows back-to-back rotations (re-review item 3)", () => {
+  async function chain() {
+    const s = await setup()
+    expect(s.rotateTo(s.c.did, s.c.ed25519Pub, {}, s.a, "2026-10-01T00:00:00.000Z")).toEqual({ decision: "accepted" })
+    expect(s.rotateTo(s.victim.did, s.victim.ed25519Pub, {}, s.c, "2026-10-02T00:00:00.000Z")).toEqual({ decision: "accepted" })
+    return s // A -> C -> victim (live)
+  }
+
+  it("apply(A, live end) and apply(A, intermediate) both move the record to the live end", async () => {
+    for (const target of ["end", "mid"] as const) {
+      const s = await chain()
+      const store = memStore([peerRecord(s.a.did)])
+      const result = await applyAcceptedRotation({ store, pinStore: s.pinStore, oldDid: s.a.did, newDid: target === "end" ? s.victim.did : s.c.did })
+      expect(result.ok).toBe(true)
+      expect((await store.findByExternalId("a2a-agent", s.victim.did))?.id).toBe("peer-rec")
+      expect(await store.findByExternalId("a2a-agent", s.c.did)).toBeNull()
+      expect(await store.findByExternalId("a2a-agent", s.a.did)).toBeNull()
+    }
+  })
+
+  it("finds a record that was already moved to the intermediate DID", async () => {
+    const s = await setup()
+    const store = memStore([peerRecord(s.a.did)])
+    s.rotateTo(s.c.did, s.c.ed25519Pub, {}, s.a, "2026-10-01T00:00:00.000Z")
+    expect((await applyAcceptedRotation({ store, pinStore: s.pinStore, oldDid: s.a.did, newDid: s.c.did })).ok).toBe(true)
+    s.rotateTo(s.victim.did, s.victim.ed25519Pub, {}, s.c, "2026-10-02T00:00:00.000Z")
+    expect((await applyAcceptedRotation({ store, pinStore: s.pinStore, oldDid: s.a.did, newDid: s.victim.did })).ok).toBe(true)
+    expect((await store.findByExternalId("a2a-agent", s.victim.did))?.id).toBe("peer-rec")
+  })
+
+  it("refuses a DID that is not on the chain, a cycle, a chain over 16 hops, and a dangling hop", async () => {
+    const s = await chain()
+    const store = memStore([peerRecord(s.a.did)])
+    expect(await applyAcceptedRotation({ store, pinStore: s.pinStore, oldDid: s.a.did, newDid: s.me.did })).toEqual({ ok: false, reason: "rotation_not_accepted" })
+
+    const cyc = new MemoryPinStore()
+    cyc.set("x", { did: "x", ed25519Pub: s.a.ed25519Pub, retiredBy: "y" })
+    cyc.set("y", { did: "y", ed25519Pub: s.a.ed25519Pub, retiredBy: "x" })
+    expect(await applyAcceptedRotation({ store, pinStore: cyc, oldDid: "x", newDid: "y" })).toEqual({ ok: false, reason: "rotation_chain_invalid" })
+
+    const long = new MemoryPinStore()
+    for (let i = 0; i < 20; i++) long.set(`d${i}`, { did: `d${i}`, ed25519Pub: s.a.ed25519Pub, ...(i < 19 ? { retiredBy: `d${i + 1}` } : {}) })
+    expect(await applyAcceptedRotation({ store, pinStore: long, oldDid: "d0", newDid: "d19" })).toEqual({ ok: false, reason: "rotation_chain_invalid" })
+
+    const dangling = new MemoryPinStore()
+    dangling.set("p", { did: "p", ed25519Pub: s.a.ed25519Pub, retiredBy: "q" })
+    expect(await applyAcceptedRotation({ store, pinStore: dangling, oldDid: "p", newDid: "q" })).toEqual({ ok: false, reason: "rotation_not_accepted" })
   })
 })
