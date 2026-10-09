@@ -229,6 +229,7 @@ async function main(): Promise<void> {
       recipientDid: B.did,
       recipientIdentity: { x25519Priv: B.x25519Priv, x25519Pub: B.x25519Pub },
       trustOfSource: "friend" as TrustLevel,
+      options: { now: new Date(NOW) },
     })
 
     // ════════════════════════════════════════════════════════════════════════
@@ -316,6 +317,7 @@ async function main(): Promise<void> {
         recipientDid: C.did,
         recipientIdentity: { x25519Priv: C.x25519Priv, x25519Pub: C.x25519Pub },
         trustOfSource: "friend",
+        options: { now: new Date(NOW) },
       })
       assert.equal(cReceive.state, "rejected", "C's full receive of a re-targeted blob must be rejected")
     } finally {
@@ -410,6 +412,7 @@ async function main(): Promise<void> {
         recipientDid: B.did,
         recipientIdentity: { x25519Priv: B.x25519Priv, x25519Pub: B.x25519Pub },
         trustOfSource: "friend",
+        options: { now: new Date(NOW) },
       })
       assert.equal(directReceive.state, "completed", "direct delivery must import (completed)")
       const directRecord = await storeB2.get("subj-P")

@@ -71,7 +71,7 @@ function receiveAt(sodium: Sodium, b: DidKeyIdentity, message: A2AMessage, trust
   return receiveShare({
     sodium, store: untouchedStore, missionStore: untouchedMissions, pinStore: new MemoryPinStore(),
     didResolution: didKeyResolution(sodium), seen, a2aMessage: message,
-    recipientDid: b.did, recipientIdentity: { x25519Priv: b.x25519Priv, x25519Pub: b.x25519Pub }, trustOfSource,
+    recipientDid: b.did, recipientIdentity: { x25519Priv: b.x25519Priv, x25519Pub: b.x25519Pub }, trustOfSource, options: { now: new Date(NOW) },
   })
 }
 
@@ -88,7 +88,7 @@ describe("receiveShare — direct agent messages", () => {
     expect(JSON.stringify(wire)).not.toContain("are you up?") // sealed: text never on the wire in the clear
     const r = await receiveAt(sodium, b, wire, "family")
     expect(r).toEqual({
-      state: "completed", friendsKind: "message", status: "received",
+      state: "completed", friendsKind: "message", status: "received", bound: true, bindingId: expect.any(String),
       message: { fromAgentId: a.did, text: "are you up?", conversationId: "ctx-1", issuedAt: NOW },
     })
   })
@@ -101,7 +101,7 @@ describe("receiveShare — direct agent messages", () => {
     expect(JSON.stringify(wire)).not.toContain("principal")
     const r = await receiveAt(sodium, b, wire, "family")
     expect(r).toEqual({
-      state: "completed", friendsKind: "message", status: "received",
+      state: "completed", friendsKind: "message", status: "received", bound: true, bindingId: expect.any(String),
       message: { fromAgentId: a.did, text: "books on", onBehalfOf: "principal", issuedAt: NOW },
     })
   })

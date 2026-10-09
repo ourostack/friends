@@ -322,3 +322,26 @@ describe("upsertAgentPeer — Bug A: safe-default cold contact", () => {
     }
   })
 })
+
+describe("upsertAgentPeer — legacy delegation grant", () => {
+  const grant = { scope: "principal_commands" as const, grantedAt: "2026-03-14T18:00:00.000Z", source: "owner stated" }
+
+  it("EXPLOIT: an explicit trust below family drops the legacy delegation grant", async () => {
+    const store = new FileFriendStore(join(mkdtempSync(join(tmpdir(), "friends-peer-grant-")), "friends"))
+    const first = await upsertAgentPeer(store, { name: "Peer", agentId: "did:key:zPeer", trustLevel: "family" })
+    await store.put(first.id, { ...first, delegationGrant: grant })
+    const down = await upsertAgentPeer(store, { name: "Peer", agentId: "did:key:zPeer", trustLevel: "stranger" })
+    expect(down.delegationGrant).toBeUndefined()
+    const up = await upsertAgentPeer(store, { name: "Peer", agentId: "did:key:zPeer", trustLevel: "family" })
+    expect(up.delegationGrant).toBeUndefined()
+    expect((await store.get(first.id))?.delegationGrant).toBeUndefined()
+  })
+
+  it("keeps the grant while the peer stays family", async () => {
+    const store = new FileFriendStore(join(mkdtempSync(join(tmpdir(), "friends-peer-grant-")), "friends"))
+    const first = await upsertAgentPeer(store, { name: "Peer", agentId: "did:key:zPeer", trustLevel: "family" })
+    await store.put(first.id, { ...first, delegationGrant: grant })
+    const again = await upsertAgentPeer(store, { name: "Peer", agentId: "did:key:zPeer" })
+    expect(again.delegationGrant).toEqual(grant)
+  })
+})

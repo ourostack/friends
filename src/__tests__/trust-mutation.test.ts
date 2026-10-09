@@ -90,11 +90,35 @@ describe("setFriendTrust", () => {
       const store = new FileFriendStore(join(dir, "friends"))
       const grant = { scope: "principal_commands" as const, grantedAt: NOW, source: "owner stated" }
       await store.put("f-1", friend({ delegationGrant: grant }))
-      await setFriendTrust(store, "f-1", "family")
+      const r = await setFriendTrust(store, "f-1", "family")
+      expect(r.delegationSuspended).toBeUndefined()
       expect((await store.get("f-1"))?.delegationGrant).toEqual(grant)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  it("EXPLOIT finding 10: a downgrade then re-promotion must not resurrect the legacy delegation grant", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "friends-trust-grant-down-"))
+    try {
+      const store = new FileFriendStore(join(dir, "friends"))
+      const grant = { scope: "principal_commands" as const, grantedAt: NOW, source: "owner stated" }
+      await store.put("f-1", friend({ trustLevel: "family", role: "family", delegationGrant: grant }))
+      const down = await setFriendTrust(store, "f-1", "stranger")
+      expect(down.delegationSuspended).toBe(true)
+      expect(down.record?.delegationGrant).toBeUndefined()
+      const up = await setFriendTrust(store, "f-1", "family")
+      expect(up.delegationSuspended).toBeUndefined()
+      expect((await store.get("f-1"))?.delegationGrant).toBeUndefined()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("does not flag delegationSuspended when there was no grant to clear", async () => {
+    const store = new MemoryStore([friend({ trustLevel: "family", role: "family" })])
+    const r = await setFriendTrust(store, "f-1", "friend")
+    expect(r.delegationSuspended).toBeUndefined()
   })
 
   it("returns not_found (no throw) when the friend is missing", async () => {

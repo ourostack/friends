@@ -62,6 +62,17 @@ export type {
   SealedEnvelope,
 } from "./sealed-envelope"
 
+// ── recipient/kind/id/time binding check (R2) ──
+export { checkEnvelopeBinding } from "./envelope-binding"
+export type {
+  BindingSeenLedger,
+  CheckEnvelopeBindingInput,
+  EnvelopeBinding,
+  EnvelopeBindingOptions,
+  EnvelopeBindingRejection,
+  EnvelopeBindingResult,
+} from "./envelope-binding"
+
 // ── A2A DataPart mapping (relay-blind) ──
 export { unwrapDataPart, wrapInDataPart } from "./a2a-message"
 export type { A2ADataPart, A2AMessage, FriendsDataPartPayload } from "./a2a-message"

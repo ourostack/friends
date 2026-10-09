@@ -15,6 +15,8 @@ import type { PinStore } from "./did-verifier"
 import { unwrapDataPart, wrapInDataPart } from "./a2a-message"
 import type { A2AMessage } from "./a2a-message"
 import { resolveReachability } from "./reachability"
+import { assertValidBindingOptions, checkEnvelopeBinding } from "./envelope-binding"
+import type { EnvelopeBindingOptions } from "./envelope-binding"
 import { sealEnvelope, openSealedEnvelope } from "./sealed-envelope"
 import type { FriendsKind, FromIdentity, RecipientIdentity, SealedEnvelope } from "./sealed-envelope"
 import type { Sodium } from "./sodium"
@@ -88,7 +90,7 @@ export async function sendShare(input: SendShareInput): Promise<SendShareResult>
 /** A2A TaskState mapping for an inbound share. `completed` carries the importer
  * status; `rejected` carries the reason code. */
 export type ReceiveShareResult =
-  | { state: "completed"; friendsKind: FriendsKind; status: string; message?: ReceivedMessage }
+  | { state: "completed"; friendsKind: FriendsKind; status: string; message?: ReceivedMessage; bound: boolean; bindingId?: string }
   | {
       state: "rejected"
       reason:
@@ -99,7 +101,16 @@ export type ReceiveShareResult =
         | "sender_binding_mismatch"
         | "resolve_failed"
         | "replayed"
+        | "in_flight"
+        | "bad_signature"
         | "untrusted_source"
+        | "signed_recipient_mismatch"
+        | "signed_kind_mismatch"
+        | "malformed_binding"
+        | "stale_envelope"
+        | "stale_delegation"
+        | "unbound_delegation"
+        | "unbound_envelope"
         | "import_failed"
     }
 
@@ -119,19 +130,58 @@ export interface ReceiveShareInput {
   recipientDid: string
   recipientIdentity: RecipientIdentity
   trustOfSource: TrustLevel
+  /** Binding and freshness settings (clock, age windows, `rejectUnboundEnvelopes`). */
+  options?: EnvelopeBindingOptions
 }
 
-/** Receive a sealed A2A message: unwrap → unseal → resolve+pin the SENDER → build a
- * sync DidVerifier → branch on the (unsealed) friendsKind → call the UNCHANGED
- * importer → map to A2A TaskState. Replay is deduped on the seal nonce. */
+/** In-flight claims, per ledger instance: keys of deliveries that passed their replay
+ * checks and are still being processed. They stop parallel duplicates without touching
+ * the durable ledger, and are always released, so a failed attempt burns nothing. */
+const IN_FLIGHT = new WeakMap<SeenLedgerLike, Set<string>>()
+
+function inFlightFor(seen: SeenLedgerLike): Set<string> {
+  let set = IN_FLIGHT.get(seen)
+  if (!set) {
+    set = new Set<string>()
+    IN_FLIGHT.set(seen, set)
+  }
+  return set
+}
+
+/** The ledger key for one sealed blob: a hash over the whole blob (ePk, nonce and
+ * ciphertext), so a forged blob that reuses a real blob's nonce cannot collide with it. */
+function blobKey(sodium: Sodium, blob: { ePk: string; n: string; ct: string }): string {
+  const digest = sodium.crypto_generichash(24, `${blob.ePk}|${blob.n}|${blob.ct}`, null)
+  return `blob:${sodium.to_base64(digest, sodium.base64_variants.URLSAFE_NO_PADDING)}`
+}
+
+/** Receive a sealed A2A message: unwrap → unseal → check the signed binding → resolve+pin
+ * the SENDER → build a sync DidVerifier → branch on the (unsealed) friendsKind → call the
+ * UNCHANGED importer → map to A2A TaskState.
+ *
+ * Replay protection: before the first `await`, the blob key and the `mid:` key are
+ * checked against the durable ledger and claimed in an in-memory in-flight set (released
+ * on every exit). A duplicate that hits an in-flight claim is rejected as `in_flight`
+ * (retryable); one that hits the durable ledger is `replayed`. The keys are marked in the
+ * durable ledger only once the signature verifies, so a failure BEFORE that (resolve
+ * failure, a throw, a forged blob) leaves the message redeliverable and a forged blob
+ * cannot burn a real one. Once the signature has verified the message is consumed, even
+ * if the trust gate or the import then fails. The keys are marked one at a time, so a
+ * durable write that fails between the blob key and the `mid:` key also consumes the
+ * message. A legacy nonce-only ledger entry still counts as seen, and the bare nonce is
+ * marked too (downgrade guard). Throws a TypeError on invalid `options` (non-finite clock
+ * or windows). */
 export async function receiveShare(input: ReceiveShareInput): Promise<ReceiveShareResult> {
+  if (input.options) assertValidBindingOptions(input.options)
   const payload = unwrapDataPart(input.a2aMessage)
   if (!payload) return { state: "rejected", reason: "malformed_message" }
 
-  // Replay dedup BEFORE any state change, keyed on the seal nonce.
-  if (input.seen.isSeen(payload.sealed.n)) {
+  const inFlight = inFlightFor(input.seen)
+  const nonceKey = blobKey(input.sodium, payload.sealed)
+  if (input.seen.isSeen(payload.sealed.n) || input.seen.isSeen(nonceKey)) {
     return { state: "rejected", reason: "replayed" }
   }
+  if (inFlight.has(nonceKey)) return { state: "rejected", reason: "in_flight" }
 
   const opened = openSealedEnvelope({
     sodium: input.sodium,
@@ -156,6 +206,31 @@ export async function receiveShare(input: ReceiveShareInput): Promise<ReceiveSha
     return { state: "rejected", reason: "sender_binding_mismatch" }
   }
 
+  // Recipient/kind/id/time binding (durable check only), then the synchronous in-flight claim.
+  const binding = checkEnvelopeBinding(opened, { ...input.options, recipientDid: input.recipientDid, seen: input.seen })
+  if (!binding.ok) return { state: "rejected", reason: binding.reason }
+  if (binding.seenKey !== undefined && inFlight.has(binding.seenKey)) {
+    return { state: "rejected", reason: "in_flight" }
+  }
+  const claimed = binding.seenKey === undefined ? [nonceKey] : [nonceKey, binding.seenKey]
+  for (const key of claimed) inFlight.add(key)
+  try {
+    return await processClaimed(input, opened, senderDid, binding, claimed, payload.sealed.n)
+  } finally {
+    for (const key of claimed) inFlight.delete(key)
+  }
+}
+
+async function processClaimed(
+  input: ReceiveShareInput,
+  opened: Extract<ReturnType<typeof openSealedEnvelope>, { ok: true }>,
+  senderDid: string,
+  binding: { bound: boolean; bindingId?: string },
+  claimed: string[],
+  bareNonce: string,
+): Promise<ReceiveShareResult> {
+  const bound = binding.bound
+
   // Resolve + pin the SENDER's DID (async — BEFORE the sync importer/verifier).
   const resolved = await input.didResolution.resolveAndPin({
     fromAgentId: senderDid,
@@ -165,50 +240,66 @@ export async function receiveShare(input: ReceiveShareInput): Promise<ReceiveSha
   })
   if (!resolved) return { state: "rejected", reason: "resolve_failed" }
 
-  // Build the sync verifier bound to THIS envelope + the pinned sender key.
-  const verifier = new DidVerifier({
+  // Build the sync verifier bound to THIS envelope + the pinned sender key. A successful
+  // verification is the moment the delivery becomes durably "seen".
+  const didVerifier = new DidVerifier({
     sodium: input.sodium,
     pinnedEd25519Pub: resolved.ed25519Pub,
     pinnedDid: senderDid,
     envelope: opened.envelope,
   })
-
-  // Mark seen now (idempotent imports + the replay guard above keep this safe).
-  input.seen.markSeen(payload.sealed.n)
+  const verifier = {
+    verify(fromAgentId: string, proof?: string): boolean {
+      const ok = didVerifier.verify(fromAgentId, proof)
+      if (ok) {
+        for (const key of claimed) input.seen.markSeen(key)
+        // Downgrade guard: an older friends version dedupes on the bare seal nonce only,
+        // so mark it too, or it could replay a message this version already accepted.
+        input.seen.markSeen(bareNonce)
+      }
+      return ok
+    },
+  }
 
   // Branch on the unsealed friendsKind → the UNCHANGED importer. fromAgentId is the
   // SIGNED sender DID, so the verifier's binding (proof.signerDid === fromAgentId
   // === pinnedDid) anchors on authentic, signature-covered material.
   const fromAgentId = senderDid
   const importInput = { envelope: opened.envelope as never, fromAgentId, trustOfSource: input.trustOfSource }
+  const done = (r: ReceiveShareResult): ReceiveShareResult =>
+    r.state === "completed" && binding.bindingId !== undefined ? { ...r, bindingId: binding.bindingId } : r
 
   if (opened.friendsKind === "profile_share") {
     const r = await importProfileShare(input.store, importInput, { verifier })
-    return mapImport(r, opened.friendsKind)
+    return done(mapImport(r, opened.friendsKind, bound))
   }
   if (opened.friendsKind === "mission_share") {
     const r = await importMissionShare(input.missionStore, importInput, { verifier })
-    return mapImport(r, opened.friendsKind)
+    return done(mapImport(r, opened.friendsKind, bound))
   }
   if (opened.friendsKind === "message") {
     // A message imports nothing: it returns the verified text for the recipient to act on.
     const m = receiveMessage({ envelope: opened.envelope, fromAgentId, trustOfSource: input.trustOfSource }, { verifier })
-    if (m.ok) return { state: "completed", friendsKind: "message", status: m.status, message: m.message }
+    if (m.ok) return done({ state: "completed", friendsKind: "message", status: m.status, message: m.message, bound })
     if (m.status === "malformed_message") return { state: "rejected", reason: "malformed_plaintext" }
-    return mapImport(m, opened.friendsKind)
+    // receiveMessage reports both a failed signature and a too-low trust as untrusted_source;
+    // tell them apart here so the sender can act on the right one.
+    const proof = typeof opened.envelope.proof === "string" ? opened.envelope.proof : undefined
+    return { state: "rejected", reason: verifier.verify(fromAgentId, proof) ? "untrusted_source" : "bad_signature" }
   }
   // openSealedEnvelope admits only FRIENDS_KINDS, so the remaining kind is coordination.
   const r = await importCoordination(input.missionStore, importInput, { verifier })
-  return mapImport(r, opened.friendsKind)
+  return done(mapImport(r, opened.friendsKind, bound))
 }
 
 /** Map an importer result to the A2A TaskState shape. */
 function mapImport(
   r: { ok: boolean; status: string },
   friendsKind: FriendsKind,
+  bound: boolean,
 ): ReceiveShareResult {
   if (r.ok) {
-    return { state: "completed", friendsKind, status: r.status }
+    return { state: "completed", friendsKind, status: r.status, bound }
   }
   // The importer returns `untrusted_source` when the verifier fails (forge) OR the
   // trust cap is too low (stranger) — both map to the A2A `rejected` taxonomy.

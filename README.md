@@ -102,6 +102,26 @@ hook). Identity is `agentId === did`, pinned trust-on-first-use, with **trust-ti
 (a family/friend peer may present a *signed* successor proof; acquaintances/strangers re-confirm out
 of band).
 
+**Signed binding.** `sealEnvelope` also stamps a reserved, signed `binding: { to, kind, id }` into
+every envelope before signing: the recipient DID, the friends kind, and 128 random bits (base64url).
+Because it is signed, a recipient who opens a message cannot re-seal the same signed envelope to a
+third party, and a relabelled kind fails. `receiveShare` (and `checkEnvelopeBinding`, for hosts with
+their own receive path) rejects with `signed_recipient_mismatch`, `signed_kind_mismatch`,
+`malformed_binding` or `replayed` (same `mid:<sender>:<id>`). Every envelope must also be fresh:
+`issuedAt` (ISO-8601 with a zone) at most 7 days old, and an envelope carrying `onBehalfOf` at most
+10 minutes old (`stale_envelope` / `stale_delegation`), with 2 minutes of clock skew allowed. An
+envelope with no `binding` (an older sender) is accepted with `bound: false` unless it is a
+delegated command (`unbound_delegation`) or the host sets `rejectUnboundEnvelopes` (`unbound_envelope`).
+A completed result carries the signed `bindingId`. `checkEnvelopeBinding` is check-only: a host
+with its own receive path must hold an in-memory claim across its own awaits, and mark the returned
+`seenKey` (and its blob key) in the ledger only after the signature verifies. `receiveShare` does
+this itself: a duplicate that hits an in-flight claim gets the retryable `in_flight`, one that hits
+the ledger gets `replayed`. A failure before the signature verifies (resolve failure, a throw, a
+forged blob) leaves the message redeliverable; once verified, the message is consumed even if the
+trust gate or the import then fails, and so is a message whose ledger write fails between the blob
+key and the `mid:` key. Invalid time options (non-finite `now` or windows)
+throw a `TypeError` rather than skip the check.
+
 **The friends relay (`ourostack/friends-relay`)** is the friends-family communication layer for any
 agent using the friends library — a relay (agents with no reachable endpoint register; it forwards
 A2A messages) plus a directory (discovery). It is built and deployed as a separate component from
@@ -596,6 +616,10 @@ to `"set_trust" | "connect"`.)
 `DEFAULT_ROSTER_VERIFIER`, `evaluateAccountMembership`, `connectAgents`, `authorizeConnect`,
 `prepareMissionResult`, `importMissionResult`.
 
+**Delegation grants:** `checkPinnedDelegationGrant` and the `PinnedDelegationGrant` type are for
+hosts that keep delegated-command grants in their own trusted store; the friend-record
+`DelegationGrant` is deprecated and never authority.
+
 **From `@ouro.bot/friends/mcp`:** `createFriendsMcpServer`, `getToolSchemas`, `runMain` (plus the
 `McpToolSchema`, `FriendsMcpServer`, and `RunMainIo` types).
 
@@ -610,6 +634,7 @@ to `"set_trust" | "connect"`.)
 `verifyCardDidBinding`, `pinOnFirstContact` / `isPinned` / `getPinned`, `MemoryPinStore`; the
 identity helpers `parseDidKey` / `keyAgreementFromDidKey` / `didKeyIdentityFromEd25519` /
 `ed25519PubToDidKey` and `didWebToUrl` / `resolveDidWeb` / `parseDidDocument`; the primitives
+`checkEnvelopeBinding` (with the `rejectUnboundEnvelopes` option on `receiveShare`),
 `sealTo` / `openSealed`, `signEnvelope` / `verifyEnvelopeSignature`, `jcsString` / `jcsBytes`, and
 the `ready` init seam; and the account-roster Ed25519 verify `ed25519RosterVerifier` / `signRoster`
 (the crypto implementation of the core `RosterVerifier` seam — host-injected, so the core stays

@@ -75,12 +75,21 @@ export async function upsertAgentPeer(
     updatedAt: now,
   }
 
-  await store.put(record.id, record)
+  const settled = dropGrantBelowFamily(record)
+  await store.put(settled.id, settled)
   emitNervesEvent({
     component: "friends",
     event: "friends.agent_peer_upserted",
     message: "upserted agent peer record",
-    meta: { friendId: record.id, trustLevel },
+    meta: { friendId: settled.id, trustLevel },
   })
-  return record
+  return settled
+}
+
+/** The legacy record grant is never carried below family (finding 10), or a later
+ * re-promotion would revive it. */
+function dropGrantBelowFamily(record: FriendRecord): FriendRecord {
+  if (record.trustLevel === "family" || record.delegationGrant === undefined) return record
+  const { delegationGrant: _dropped, ...rest } = record
+  return rest
 }
