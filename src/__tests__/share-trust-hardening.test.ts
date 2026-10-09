@@ -190,4 +190,29 @@ describe("importProfileShare seeds at stranger and never indexes the peer's ids 
     expect(again.ok && again.status).toBe("imported")
     expect(store.records.size).toBe(1)
   })
+
+  it("seeds a fresh record when the store cannot list records to dedupe against", async () => {
+    const store = new MemoryStore()
+    ;(store as { listAll?: unknown }).listAll = undefined
+    const first = await importProfileShare(store, { envelope: aboutStranger(), fromAgentId: "peer", trustOfSource: "friend" })
+    expect(first.ok && first.status).toBe("seeded")
+  })
+
+  it("seeds with no claims when the share carried no external ids", async () => {
+    const store = new MemoryStore()
+    const env = { ...aboutStranger(), subject: { externalIds: [], displayName: "Nameless" } }
+    const result = await importProfileShare(store, { envelope: env, fromAgentId: "peer", trustOfSource: "friend" })
+    expect(result.ok && result.record.importedExternalIds).toBeUndefined()
+  })
+
+  it("a claim from a different peer, or with a different tenant, does not match the seeded record", async () => {
+    const store = new MemoryStore([person({ id: "unrelated", name: "Unrelated", externalIds: [] })])
+    await importProfileShare(store, { envelope: aboutStranger(), fromAgentId: "peer", trustOfSource: "friend" })
+    const other = await importProfileShare(store, { envelope: aboutStranger(), fromAgentId: "other", trustOfSource: "friend" })
+    expect(other.ok && other.status).toBe("seeded")
+    const env = aboutStranger()
+    env.subject.externalIds[0].tenantId = "t-other"
+    const tenant = await importProfileShare(store, { envelope: env, fromAgentId: "peer", trustOfSource: "friend" })
+    expect(tenant.ok && tenant.status).toBe("seeded")
+  })
 })

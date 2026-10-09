@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest"
-import { mkdtempSync, rmSync } from "fs"
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "fs"
 import { tmpdir } from "os"
 import { join } from "path"
 
@@ -76,5 +76,42 @@ describe("FileFriendStore round trip", () => {
     expect(recordIncarnation).toBeTruthy()
     expect(recordGeneration).toBe(0)
     expect(rest).toEqual(record)
+  })
+
+  it("drops malformed identity, trustReset and importedExternalIds instead of trusting them", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "friends-malformed-"))
+    dirs.push(dir)
+    const friendsPath = join(dir, "friends")
+    mkdirSync(friendsPath, { recursive: true })
+    const base = fullRecord()
+    const bad = {
+      ...base,
+      id: "bad-1",
+      trustReset: { at: T, reason: "did_changed", previousDid: "did:key:OLD", previousTrust: "emperor" },
+      importedExternalIds: [
+        null,
+        "nope",
+        { provider: "not-a-provider", externalId: "1", importedAt: T, assertedBy: { agentId: "p" } },
+        { provider: "aad", externalId: "2", importedAt: T },
+        { provider: "aad", externalId: "3", importedAt: T, assertedBy: { agentId: "p" }, tenantId: "t" },
+      ],
+      agentMeta: { ...base.agentMeta!, identity: { pinnedKey: "no-did" } },
+    }
+    writeFileSync(join(friendsPath, "bad-1.json"), JSON.stringify(bad))
+    writeFileSync(join(friendsPath, "bad-2.json"), JSON.stringify({ ...bad, id: "bad-2", trustReset: "x", importedExternalIds: "x", agentMeta: { ...base.agentMeta!, identity: "x" } }))
+    const store = new FileFriendStore(friendsPath)
+    const one = await store.get("bad-1")
+    expect(one?.trustReset).toBeUndefined()
+    expect(one?.agentMeta?.identity).toBeUndefined()
+    expect(one?.importedExternalIds).toEqual([{ provider: "aad", externalId: "3", tenantId: "t", importedAt: T, assertedBy: { agentId: "p" } }])
+    writeFileSync(join(friendsPath, "bad-3.json"), JSON.stringify({ ...bad, id: "bad-3", importedExternalIds: [null], agentMeta: { ...base.agentMeta!, identity: { did: "did:key:ONLY" } } }))
+    const three = await store.get("bad-3")
+    expect(three?.importedExternalIds).toBeUndefined()
+    expect(three?.agentMeta?.identity).toEqual({ did: "did:key:ONLY" })
+    await expect(store.releaseExternalId("../escape", { provider: "aad", externalId: "x", linkedAt: T })).rejects.toThrow("invalid")
+    const two = await store.get("bad-2")
+    expect(two?.trustReset).toBeUndefined()
+    expect(two?.importedExternalIds).toBeUndefined()
+    expect(two?.agentMeta?.identity).toBeUndefined()
   })
 })

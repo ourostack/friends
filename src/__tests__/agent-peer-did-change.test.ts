@@ -154,4 +154,12 @@ describe("upsertAgentPeer — a DID change resets authority (audit finding 3)", 
     expect(result.trustLevel).toBe("family")
     expect(result.didChanged).toBeUndefined()
   })
+
+  it("reports previousTrust as stranger when the record had no trust level", async () => {
+    const record = familyPeer()
+    delete record.trustLevel
+    const store = new MemoryStore([record])
+    const result = await upsertAgentPeer(store, { name: "Claude Code", agentId: "peer-1", a2a: { did: "did:key:EVIL" } })
+    expect(result.trustReset?.previousTrust).toBe("stranger")
+  })
 })
