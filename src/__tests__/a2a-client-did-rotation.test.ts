@@ -128,3 +128,26 @@ describe("key rotation to a new DID (audit finding 22)", () => {
     expect(store.get("did:key:nobody")).toBeUndefined()
   })
 })
+
+describe("a successor statement cannot overwrite another peer's pin (review finding 1)", () => {
+  for (const state of ["live", "retired"] as const) {
+    it(`rejects a successor DID that is already pinned (${state}) and leaves both pins untouched`, async () => {
+      const f = await fixture()
+      pinOnFirstContact({ pinStore: f.pinStore, fromAgentId: f.b.did, did: f.b.did, ed25519Pub: f.b.ed25519Pub })
+      if (state === "retired") f.pinStore.retire(f.b.did, f.c.did, T1)
+      const bBefore = f.pinStore.get(f.b.did)
+      const aBefore = f.pinStore.get(f.a.did)
+      // A signs a dated successor statement naming B's DID, but with the attacker's key.
+      const result = rotate(f, f.a, { did: f.b.did, ed25519Pub: f.c.ed25519Pub }, T2)
+      expect(result).toEqual({ decision: "rejected", reason: state === "retired" ? "retired_pin" : "successor_already_pinned" })
+      expect(f.pinStore.get(f.b.did)).toEqual(bBefore)
+      expect(f.pinStore.get(f.a.did)).toEqual(aBefore)
+    })
+  }
+
+  it("still accepts a rotation onto the same DID with a new key", async () => {
+    const f = await fixture()
+    const result = rotate(f, f.a, { did: f.a.did, ed25519Pub: f.c.ed25519Pub }, T2)
+    expect(result).toEqual({ decision: "accepted" })
+  })
+})

@@ -190,7 +190,7 @@ export function getPinned(pinStore: PinStore, fromAgentId: string): PinnedDid | 
 export type RotationDecision =
   | { decision: "unchanged" }
   | { decision: "accepted" }
-  | { decision: "rejected"; reason: "bad_rotation_proof" | "rotation_requires_reconfirm" | "not_pinned" | "stale_rotation" | "undated_rotation" | "retired_pin" }
+  | { decision: "rejected"; reason: "bad_rotation_proof" | "rotation_requires_reconfirm" | "not_pinned" | "stale_rotation" | "undated_rotation" | "retired_pin" | "successor_already_pinned" }
 
 /** Successor statements dated further ahead than this are rejected. */
 const ROTATION_CLOCK_SKEW_MS = 2 * 60 * 1000
@@ -258,6 +258,12 @@ export function evaluateRotation(input: EvaluateRotationInput): RotationDecision
   // A retired DID cannot rotate again, and nothing may rotate back onto one.
   if (current.retiredBy !== undefined || pinStore.get(newDid)?.retiredBy !== undefined) {
     return { decision: "rejected", reason: "retired_pin" }
+  }
+
+  // A successor DID that is already pinned belongs to another peer: a statement signed
+  // by this peer's key must not overwrite that pin.
+  if (newDid !== fromAgentId && pinStore.get(newDid) !== undefined) {
+    return { decision: "rejected", reason: "successor_already_pinned" }
   }
 
   // Unchanged key (same bytes) → nothing to rotate.
