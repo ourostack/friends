@@ -59,10 +59,23 @@ export function sealEnvelope(input: SealEnvelopeInput): SealedEnvelope {
   const { sodium, envelope, friendsKind, fromIdentity, recipientDid, recipientX25519Pub } = input
   const v = input.v ?? 1
 
+  // 0. Stamp the reserved SIGNED binding (recipient + kind + 128-bit message id) BEFORE
+  //    signing, so the signature ties these bytes to ONE recipient/kind/id: a recipient
+  //    who opens the blob cannot re-seal the same signed envelope to someone else.
+  if (Object.hasOwn(envelope, "binding")) {
+    throw new Error("sealEnvelope: `binding` is a reserved envelope field")
+  }
+  const binding = {
+    to: recipientDid,
+    kind: friendsKind,
+    id: sodium.to_base64(sodium.randombytes_buf(16), sodium.base64_variants.URLSAFE_NO_PADDING),
+  }
+  const boundEnvelope = { ...envelope, binding }
+
   // 1. Sign the envelope (proof excluded from the canonical bytes — see sign.ts).
   const proof = signEnvelope({
     sodium,
-    envelope,
+    envelope: boundEnvelope,
     signerEd25519Priv: fromIdentity.ed25519Priv,
     signerDid: fromIdentity.did,
     signerKeyId: fromIdentity.keyId,
@@ -70,7 +83,7 @@ export function sealEnvelope(input: SealEnvelopeInput): SealedEnvelope {
 
   // 2. Put the structured proof in the envelope's reserved slot, so the unsealed
   //    plaintext carries the proof the importer reads via `envelope.proof`.
-  const envelopeWithProof = { ...envelope, proof: serializeProof(proof) }
+  const envelopeWithProof = { ...boundEnvelope, proof: serializeProof(proof) }
 
   // 3. Build the sealed plaintext (friendsKind + the recipient binding ride INSIDE).
   const plaintext: SealedPlaintext = {

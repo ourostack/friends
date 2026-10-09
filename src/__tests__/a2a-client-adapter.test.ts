@@ -256,8 +256,9 @@ describe("send → receive round-trip (honest in-memory transport)", () => {
       recipientDid: b.did,
       recipientIdentity: { x25519Priv: b.x25519Priv, x25519Pub: b.x25519Pub },
       trustOfSource: "friend",
+      options: { now: new Date(NOW) },
     })
-    expect(result).toEqual({ state: "completed", friendsKind: "profile_share", status: "imported" })
+    expect(result).toEqual({ state: "completed", friendsKind: "profile_share", status: "imported", bound: true })
     // first-party untouched; the import landed as an importedNotes entry.
     const subj = store.records.get("subj-1")!
     expect(subj.notes).toEqual({}) // first-party notes untouched
@@ -294,6 +295,7 @@ describe("receiveShare — reject mapping", () => {
       recipientDid: b.did,
       recipientIdentity: { x25519Priv: b.x25519Priv, x25519Pub: b.x25519Pub },
       trustOfSource: "friend" as const,
+      options: { now: new Date(NOW) },
     }
   }
 
@@ -392,6 +394,7 @@ describe("receiveShare — replay is inert", () => {
       recipientDid: b.did,
       recipientIdentity: { x25519Priv: b.x25519Priv, x25519Pub: b.x25519Pub },
       trustOfSource: "friend" as const,
+      options: { now: new Date(NOW) },
     }
     const first = await receiveShare(args)
     expect(first.state).toBe("completed")
@@ -420,6 +423,7 @@ describe("receiveShare — friendsKind routing", () => {
       recipientDid: b.did,
       recipientIdentity: { x25519Priv: b.x25519Priv, x25519Pub: b.x25519Pub },
       trustOfSource: "friend",
+      options: { now: new Date(NOW) },
     })
     // Reached the mission importer (its result is mapped; status is one of its codes).
     expect(r.state === "completed" || r.state === "rejected").toBe(true)
@@ -444,6 +448,7 @@ describe("receiveShare — friendsKind routing", () => {
       recipientDid: b.did,
       recipientIdentity: { x25519Priv: b.x25519Priv, x25519Pub: b.x25519Pub },
       trustOfSource: "friend",
+      options: { now: new Date(NOW) },
     })
     expect(r.state === "completed" || r.state === "rejected").toBe(true)
     if (r.state === "completed") expect(r.friendsKind).toBe("coordination")
@@ -474,6 +479,7 @@ describe("receiveShare — import_failed mapping (non-untrusted importer rejecti
       recipientDid: b.did,
       recipientIdentity: { x25519Priv: b.x25519Priv, x25519Pub: b.x25519Pub },
       trustOfSource: "acquaintance",
+      options: { now: new Date(NOW) },
     })
     expect(r).toEqual({ state: "rejected", reason: "import_failed" })
   })

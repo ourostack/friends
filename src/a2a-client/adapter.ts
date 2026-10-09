@@ -15,6 +15,8 @@ import type { PinStore } from "./did-verifier"
 import { unwrapDataPart, wrapInDataPart } from "./a2a-message"
 import type { A2AMessage } from "./a2a-message"
 import { resolveReachability } from "./reachability"
+import { checkEnvelopeBinding } from "./envelope-binding"
+import type { EnvelopeBindingOptions } from "./envelope-binding"
 import { sealEnvelope, openSealedEnvelope } from "./sealed-envelope"
 import type { FriendsKind, FromIdentity, RecipientIdentity, SealedEnvelope } from "./sealed-envelope"
 import type { Sodium } from "./sodium"
@@ -88,7 +90,7 @@ export async function sendShare(input: SendShareInput): Promise<SendShareResult>
 /** A2A TaskState mapping for an inbound share. `completed` carries the importer
  * status; `rejected` carries the reason code. */
 export type ReceiveShareResult =
-  | { state: "completed"; friendsKind: FriendsKind; status: string; message?: ReceivedMessage }
+  | { state: "completed"; friendsKind: FriendsKind; status: string; message?: ReceivedMessage; bound: boolean }
   | {
       state: "rejected"
       reason:
@@ -99,7 +101,15 @@ export type ReceiveShareResult =
         | "sender_binding_mismatch"
         | "resolve_failed"
         | "replayed"
+        | "bad_signature"
         | "untrusted_source"
+        | "signed_recipient_mismatch"
+        | "signed_kind_mismatch"
+        | "malformed_binding"
+        | "stale_envelope"
+        | "stale_delegation"
+        | "unbound_delegation"
+        | "unbound_envelope"
         | "import_failed"
     }
 
@@ -119,6 +129,8 @@ export interface ReceiveShareInput {
   recipientDid: string
   recipientIdentity: RecipientIdentity
   trustOfSource: TrustLevel
+  /** Binding and freshness settings (clock, age windows, `rejectUnboundEnvelopes`). */
+  options?: EnvelopeBindingOptions
 }
 
 /** Receive a sealed A2A message: unwrap → unseal → resolve+pin the SENDER → build a
@@ -128,7 +140,9 @@ export async function receiveShare(input: ReceiveShareInput): Promise<ReceiveSha
   const payload = unwrapDataPart(input.a2aMessage)
   if (!payload) return { state: "rejected", reason: "malformed_message" }
 
-  // Replay dedup BEFORE any state change, keyed on the seal nonce.
+  // Replay dedup BEFORE any state change, keyed on the seal nonce. The check and the
+  // claim below both run before the first `await`, so parallel deliveries of one blob
+  // cannot both pass.
   if (input.seen.isSeen(payload.sealed.n)) {
     return { state: "rejected", reason: "replayed" }
   }
@@ -156,6 +170,12 @@ export async function receiveShare(input: ReceiveShareInput): Promise<ReceiveSha
     return { state: "rejected", reason: "sender_binding_mismatch" }
   }
 
+  // Recipient/kind/id/time binding, then claim the seal nonce, all synchronously.
+  const binding = checkEnvelopeBinding(opened, { ...input.options, recipientDid: input.recipientDid, seen: input.seen })
+  if (!binding.ok) return { state: "rejected", reason: binding.reason }
+  input.seen.markSeen(payload.sealed.n)
+  const bound = binding.bound
+
   // Resolve + pin the SENDER's DID (async — BEFORE the sync importer/verifier).
   const resolved = await input.didResolution.resolveAndPin({
     fromAgentId: senderDid,
@@ -173,9 +193,6 @@ export async function receiveShare(input: ReceiveShareInput): Promise<ReceiveSha
     envelope: opened.envelope,
   })
 
-  // Mark seen now (idempotent imports + the replay guard above keep this safe).
-  input.seen.markSeen(payload.sealed.n)
-
   // Branch on the unsealed friendsKind → the UNCHANGED importer. fromAgentId is the
   // SIGNED sender DID, so the verifier's binding (proof.signerDid === fromAgentId
   // === pinnedDid) anchors on authentic, signature-covered material.
@@ -184,31 +201,35 @@ export async function receiveShare(input: ReceiveShareInput): Promise<ReceiveSha
 
   if (opened.friendsKind === "profile_share") {
     const r = await importProfileShare(input.store, importInput, { verifier })
-    return mapImport(r, opened.friendsKind)
+    return mapImport(r, opened.friendsKind, bound)
   }
   if (opened.friendsKind === "mission_share") {
     const r = await importMissionShare(input.missionStore, importInput, { verifier })
-    return mapImport(r, opened.friendsKind)
+    return mapImport(r, opened.friendsKind, bound)
   }
   if (opened.friendsKind === "message") {
     // A message imports nothing: it returns the verified text for the recipient to act on.
     const m = receiveMessage({ envelope: opened.envelope, fromAgentId, trustOfSource: input.trustOfSource }, { verifier })
-    if (m.ok) return { state: "completed", friendsKind: "message", status: m.status, message: m.message }
+    if (m.ok) return { state: "completed", friendsKind: "message", status: m.status, message: m.message, bound }
     if (m.status === "malformed_message") return { state: "rejected", reason: "malformed_plaintext" }
-    return mapImport(m, opened.friendsKind)
+    // receiveMessage reports both a failed signature and a too-low trust as untrusted_source;
+    // tell them apart here so the sender can act on the right one.
+    const proof = typeof opened.envelope.proof === "string" ? opened.envelope.proof : undefined
+    return { state: "rejected", reason: verifier.verify(fromAgentId, proof) ? "untrusted_source" : "bad_signature" }
   }
   // openSealedEnvelope admits only FRIENDS_KINDS, so the remaining kind is coordination.
   const r = await importCoordination(input.missionStore, importInput, { verifier })
-  return mapImport(r, opened.friendsKind)
+  return mapImport(r, opened.friendsKind, bound)
 }
 
 /** Map an importer result to the A2A TaskState shape. */
 function mapImport(
   r: { ok: boolean; status: string },
   friendsKind: FriendsKind,
+  bound: boolean,
 ): ReceiveShareResult {
   if (r.ok) {
-    return { state: "completed", friendsKind, status: r.status }
+    return { state: "completed", friendsKind, status: r.status, bound }
   }
   // The importer returns `untrusted_source` when the verifier fails (forge) OR the
   // trust cap is too low (stranger) — both map to the A2A `rejected` taxonomy.
