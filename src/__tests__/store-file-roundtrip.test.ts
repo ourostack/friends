@@ -119,6 +119,12 @@ describe("FileFriendStore round trip", () => {
       { provider: "aad", externalId: "9", importedAt: T, assertedBy: { agentId: "p", agentName: "Peer" } },
       { provider: "aad", externalId: "8", importedAt: T, assertedBy: { agentId: "p" } },
     ])
+    writeFileSync(join(friendsPath, "bad-5.json"), JSON.stringify({ ...bad, id: "bad-5", trustReset: { at: T, reason: "did_adopted", previousTrust: "friend" } }))
+    expect((await store.get("bad-5"))?.trustReset).toEqual({ at: T, reason: "did_adopted", previousTrust: "friend" })
+    writeFileSync(join(friendsPath, "bad-6.json"), JSON.stringify({ ...bad, id: "bad-6", trustReset: { at: T, reason: "did_changed", previousDid: 5, previousTrust: "friend" } }))
+    expect((await store.get("bad-6"))?.trustReset).toBeUndefined()
+    writeFileSync(join(friendsPath, "bad-7.json"), JSON.stringify({ ...bad, id: "bad-7", trustReset: { at: T, reason: "other", previousTrust: "friend" } }))
+    expect((await store.get("bad-7"))?.trustReset).toBeUndefined()
     const two = await store.get("bad-2")
     expect(two?.trustReset).toBeUndefined()
     expect(two?.importedExternalIds).toBeUndefined()

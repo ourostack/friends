@@ -172,6 +172,26 @@ describe("linkExternalId refuses to move a different-trust or revoked identity",
   })
 })
 
+describe("linkExternalId edge cases", () => {
+  it("is a noop for an already-linked id when the store cannot list records", async () => {
+    const store = new MemoryStore([person({ id: "t", name: "Target", externalIds: [ariTelegram] })])
+    ;(store as { listAll?: unknown }).listAll = undefined
+    expect((await linkExternalId(store, "t", { provider: "telegram-user", externalId: "42" })).status).toBe("noop")
+  })
+
+  it("treats a missing trust level as stranger on both sides and does not duplicate shared ids", async () => {
+    const shared = { provider: "email-address" as const, externalId: "a@b.c", linkedAt: NOW }
+    const orphan = owner({ externalIds: [ariTelegram, shared] })
+    delete orphan.trustLevel
+    const target = person({ id: "t", name: "Target", externalIds: [shared] })
+    delete target.trustLevel
+    const store = new MemoryStore([orphan, target])
+    const result = await linkExternalId(store, "t", { provider: "telegram-user", externalId: "42" })
+    expect(result.status).toBe("merged")
+    expect(store.records.get("t")?.externalIds.map((e) => e.externalId).sort()).toEqual(["42", "a@b.c"])
+  })
+})
+
 describe("unlinkExternalId clears the claim journal (audit finding 14)", () => {
   let dir: string
   afterEach(() => {

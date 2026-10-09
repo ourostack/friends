@@ -121,4 +121,10 @@ describe("key rotation to a new DID (audit finding 22)", () => {
     expect(evaluateRotation({ sodium: f.sodium, pinStore: f.pinStore, fromAgentId: f.a.did, trustOfSource: "friend", newDid: f.b.did, newEd25519Pub: f.b.ed25519Pub, rotationProof, issuedAt: T1, now: NOW }))
       .toEqual({ decision: "rejected", reason: "bad_rotation_proof" })
   })
+
+  it("retiring an unknown pin is a no-op", () => {
+    const store = new MemoryPinStore()
+    store.retire("did:key:nobody", "did:key:other", T1)
+    expect(store.get("did:key:nobody")).toBeUndefined()
+  })
 })

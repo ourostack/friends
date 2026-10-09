@@ -295,4 +295,12 @@ describe("setFriendTrust and the DID-change marker", () => {
     const result = await setFriendTrust(store, "x", "stranger")
     expect(result.record?.trustReset).toEqual(reset)
   })
+
+  it("treats a record with no trust level as stranger when deciding whether trust was raised", async () => {
+    const record = stranger()
+    delete record.trustLevel
+    const store = new MemoryStore([record])
+    const result = await setFriendTrust(store, "x", "stranger")
+    expect(result.record?.trustReset).toEqual(reset)
+  })
 })
