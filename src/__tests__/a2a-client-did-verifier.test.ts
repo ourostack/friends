@@ -261,7 +261,7 @@ describe("evaluateRotation — every trust-tier branch (Fork 11)", () => {
   it("friend + VALID signed successor proof → accepted (re-pinned to the new key)", async () => {
     const { sodium, id, pinStore, next } = await pinnedFixture()
     const rotationProof = signSuccessor({ sodium, oldEd25519Priv: id.ed25519Priv, newDid: next.id.did, newEd25519Pub: next.id.ed25519Pub })
-    const d = evaluateRotation({ sodium, pinStore, fromAgentId: id.did, trustOfSource: "friend", newDid: next.id.did, newEd25519Pub: next.id.ed25519Pub, rotationProof })
+    const d = evaluateRotation({ sodium, pinStore, fromAgentId: id.did, trustOfSource: "friend", newDid: next.id.did, newEd25519Pub: next.id.ed25519Pub, rotationProof, acceptUndatedSuccessor: true })
     expect(d).toEqual({ decision: "accepted" })
     // re-pinned under the NEW did; the old pin is retired:
     expect(getPinned(pinStore, next.id.did)!.ed25519Pub).toEqual(next.id.ed25519Pub)
@@ -272,7 +272,7 @@ describe("evaluateRotation — every trust-tier branch (Fork 11)", () => {
   it("family + VALID signed successor proof → accepted", async () => {
     const { sodium, id, pinStore, next } = await pinnedFixture()
     const rotationProof = signSuccessor({ sodium, oldEd25519Priv: id.ed25519Priv, newDid: next.id.did, newEd25519Pub: next.id.ed25519Pub })
-    expect(evaluateRotation({ sodium, pinStore, fromAgentId: id.did, trustOfSource: "family", newDid: next.id.did, newEd25519Pub: next.id.ed25519Pub, rotationProof }).decision).toBe("accepted")
+    expect(evaluateRotation({ sodium, pinStore, fromAgentId: id.did, trustOfSource: "family", newDid: next.id.did, newEd25519Pub: next.id.ed25519Pub, rotationProof, acceptUndatedSuccessor: true }).decision).toBe("accepted")
   })
 
   it("friend + MISSING proof → rejected:bad_rotation_proof", async () => {

@@ -21,9 +21,16 @@ export interface PinnedDid {
   did: string
   ed25519Pub: Uint8Array
   /** When the pin was last moved by a verified rotation: the successor statement's
-   * `issuedAt`, or the acceptance time for the old statement shape. A later successor
-   * statement must be newer than this. Absent until the first rotation. */
+   * `issuedAt` (or the acceptance time for an opted-in undated statement). A later
+   * successor statement must be newer than this. Absent until the first rotation.
+   * HOSTS MUST PERSIST THIS FIELD, or the replay guard does nothing. */
   rotatedAt?: string
+  /** Set only on a RETIRED pin: the DID this one rotated to. A retired pin is a
+   * tombstone kept under the old DID so the old (possibly compromised) key cannot be
+   * pinned again, cannot rotate again, and cannot verify anything. HOSTS MUST PERSIST
+   * THIS FIELD with the rest of the pin, and must treat a pin that carries it as
+   * unusable (including in any `resolveAndPin` implementation). */
+  retiredBy?: string
 }
 
 /** A pin store the host implements (in-memory map in tests; persisted on the
@@ -32,9 +39,10 @@ export interface PinStore {
   get(fromAgentId: string): PinnedDid | undefined
   set(fromAgentId: string, pinned: PinnedDid): void
   /** Retire a pin. A verified rotation moves the pin to the new DID and calls this
-   * for the old one. Optional so existing hosts still compile, but a host that omits
-   * it keeps the old pin alive and should add it. */
-  delete?(fromAgentId: string): void
+   * for the old one. The store must keep a tombstone under `fromAgentId`: the old
+   * `did` and key with `retiredBy` and `rotatedAt` set, persisted. Required: a host
+   * that cannot retire a pin cannot rotate safely. */
+  retire(fromAgentId: string, retiredBy: string, rotatedAt: string): void
 }
 
 /** A simple in-memory PinStore (used by tests + as a host convenience). */
@@ -46,8 +54,10 @@ export class MemoryPinStore implements PinStore {
   set(fromAgentId: string, pinned: PinnedDid): void {
     this.map.set(fromAgentId, pinned)
   }
-  delete(fromAgentId: string): void {
-    this.map.delete(fromAgentId)
+  retire(fromAgentId: string, retiredBy: string, rotatedAt: string): void {
+    const current = this.map.get(fromAgentId)
+    if (!current) return
+    this.map.set(fromAgentId, { ...current, retiredBy, rotatedAt })
   }
 }
 
@@ -155,6 +165,10 @@ export function pinOnFirstContact(input: {
   did: string
   ed25519Pub: Uint8Array
 }): PinnedDid {
+  // A retired DID never comes back: re-pinning its key would undo the rotation.
+  if (input.pinStore.get(input.fromAgentId)?.retiredBy !== undefined || input.pinStore.get(input.did)?.retiredBy !== undefined) {
+    throw new Error("DID pin is retired; it cannot be pinned again")
+  }
   const pinned: PinnedDid = { did: input.did, ed25519Pub: input.ed25519Pub }
   input.pinStore.set(input.fromAgentId, pinned)
   return pinned
@@ -162,12 +176,13 @@ export function pinOnFirstContact(input: {
 
 /** Whether a peer is already pinned. */
 export function isPinned(pinStore: PinStore, fromAgentId: string): boolean {
-  return pinStore.get(fromAgentId) !== undefined
+  return getPinned(pinStore, fromAgentId) !== undefined
 }
 
 /** The pinned record for a peer, or undefined. */
 export function getPinned(pinStore: PinStore, fromAgentId: string): PinnedDid | undefined {
-  return pinStore.get(fromAgentId)
+  const pinned = pinStore.get(fromAgentId)
+  return pinned && pinned.retiredBy === undefined ? pinned : undefined
 }
 
 // ── Trust-tiered key rotation (Fork 11) ────────────────────────────────────────
@@ -175,14 +190,14 @@ export function getPinned(pinStore: PinStore, fromAgentId: string): PinnedDid | 
 export type RotationDecision =
   | { decision: "unchanged" }
   | { decision: "accepted" }
-  | { decision: "rejected"; reason: "bad_rotation_proof" | "rotation_requires_reconfirm" | "not_pinned" | "stale_rotation" }
+  | { decision: "rejected"; reason: "bad_rotation_proof" | "rotation_requires_reconfirm" | "not_pinned" | "stale_rotation" | "undated_rotation" | "retired_pin" }
 
 /** Successor statements dated further ahead than this are rejected. */
 const ROTATION_CLOCK_SKEW_MS = 2 * 60 * 1000
 
 /** The canonical successor statement the OLD key signs to authorize a rotation.
  * With `issuedAt` it is the current shape. Without it, it is the original shape,
- * which `evaluateRotation` accepts only for a peer's very first rotation. */
+ * which `evaluateRotation` accepts only with `acceptUndatedSuccessor: true`. */
 function successorMessage(
   newDid: string,
   newEd25519Pub: Uint8Array,
@@ -199,7 +214,7 @@ function successorMessage(
 
 /** Mint a rotation proof: the OLD private key signs `{successor:newDid, newKey,
  * issuedAt}`. Pass `issuedAt` (ISO time) to mint the current shape; omit it to mint
- * the original shape, accepted only for a first rotation. Returns the base64
+ * the original shape, accepted only with `acceptUndatedSuccessor`. Returns the base64
  * detached signature. (Test/host helper.) */
 export function signSuccessor(input: {
   sodium: Sodium
@@ -223,9 +238,12 @@ export interface EvaluateRotationInput {
   newEd25519Pub: Uint8Array
   /** The base64 signature from `signSuccessor`, if presented. */
   rotationProof?: string
-  /** The `issuedAt` the successor statement was signed with. Omit it for a statement
-   * in the original shape (accepted only while the pin has never rotated). */
+  /** The `issuedAt` the successor statement was signed with. Required unless
+   * `acceptUndatedSuccessor` is set. */
   issuedAt?: string
+  /** Opt in to the original undated statement shape, which cannot be replay-checked.
+   * Default false. */
+  acceptUndatedSuccessor?: boolean
   /** Clock override for tests. */
   now?: Date
 }
@@ -237,6 +255,10 @@ export function evaluateRotation(input: EvaluateRotationInput): RotationDecision
   const { sodium, pinStore, fromAgentId, trustOfSource, newDid, newEd25519Pub } = input
   const current = pinStore.get(fromAgentId)
   if (!current) return { decision: "rejected", reason: "not_pinned" }
+  // A retired DID cannot rotate again, and nothing may rotate back onto one.
+  if (current.retiredBy !== undefined || pinStore.get(newDid)?.retiredBy !== undefined) {
+    return { decision: "rejected", reason: "retired_pin" }
+  }
 
   // Unchanged key (same bytes) → nothing to rotate.
   if (current.did === newDid && bytesEqual(current.ed25519Pub, newEd25519Pub)) {
@@ -269,12 +291,11 @@ export function evaluateRotation(input: EvaluateRotationInput): RotationDecision
   }
   if (!ok) return { decision: "rejected", reason: "bad_rotation_proof" }
 
-  // Replay guard. A current-shape statement must be dated, not in the future, and
-  // newer than the pin's last rotation. The original shape carries no date, so it is
-  // accepted only while the pin has never rotated.
+  // Replay guard. A statement must be dated, not in the future, and newer than the
+  // pin's last rotation. An undated one cannot be checked, so it needs the opt-in.
   const now = input.now ?? new Date()
   if (issuedAt === undefined) {
-    if (current.rotatedAt !== undefined) return { decision: "rejected", reason: "stale_rotation" }
+    if (input.acceptUndatedSuccessor !== true) return { decision: "rejected", reason: "undated_rotation" }
   } else {
     const issued = Date.parse(issuedAt)
     if (!Number.isFinite(issued) || issued > now.getTime() + ROTATION_CLOCK_SKEW_MS) {
@@ -287,7 +308,8 @@ export function evaluateRotation(input: EvaluateRotationInput): RotationDecision
 
   // Valid: move the pin to the new DID and retire the old one, so messages signed by
   // the new DID verify and the old key no longer does.
-  pinStore.set(newDid, { did: newDid, ed25519Pub: newEd25519Pub, rotatedAt: issuedAt ?? now.toISOString() })
-  if (newDid !== fromAgentId) pinStore.delete?.(fromAgentId)
+  const rotatedAt = issuedAt ?? now.toISOString()
+  pinStore.set(newDid, { did: newDid, ed25519Pub: newEd25519Pub, rotatedAt })
+  if (newDid !== fromAgentId) pinStore.retire(fromAgentId, newDid, rotatedAt)
   return { decision: "accepted" }
 }

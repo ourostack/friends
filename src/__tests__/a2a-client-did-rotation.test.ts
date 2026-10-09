@@ -5,6 +5,7 @@ import {
   DidVerifier,
   evaluateRotation,
   getPinned,
+  isPinned,
   MemoryPinStore,
   pinOnFirstContact,
   signSuccessor,
@@ -37,6 +38,7 @@ function rotate(
   from: { did: string; ed25519Priv: Uint8Array },
   to: { did: string; ed25519Pub: Uint8Array },
   issuedAt?: string,
+  opts: { acceptUndatedSuccessor?: boolean } = {},
 ) {
   const rotationProof = signSuccessor({ sodium: f.sodium, oldEd25519Priv: from.ed25519Priv, newDid: to.did, newEd25519Pub: to.ed25519Pub, ...(issuedAt ? { issuedAt } : {}) })
   return evaluateRotation({
@@ -48,6 +50,7 @@ function rotate(
     newEd25519Pub: to.ed25519Pub,
     rotationProof,
     ...(issuedAt ? { issuedAt } : {}),
+    ...opts,
     now: NOW,
   })
 }
@@ -83,12 +86,33 @@ describe("key rotation to a new DID (audit finding 22)", () => {
     expect(rotate(f, f.a, f.b, "2026-12-01T00:00:00.000Z")).toEqual({ decision: "rejected", reason: "stale_rotation" })
   })
 
-  it("accepts the old statement shape (no issuedAt) only for the very first rotation", async () => {
+  it("rejects an undated successor statement by default", async () => {
     const f = await fixture()
-    expect(rotate(f, f.a, f.b).decision).toBe("accepted")
-    expect(rotate(f, f.b, f.c)).toEqual({ decision: "rejected", reason: "stale_rotation" })
-    // A dated statement signed after the first rotation was accepted still works.
-    expect(rotate(f, f.b, f.c, "2026-10-05T00:01:00.000Z").decision).toBe("accepted")
+    expect(rotate(f, f.a, f.b)).toEqual({ decision: "rejected", reason: "undated_rotation" })
+    expect(getPinned(f.pinStore, f.a.did)).toBeDefined()
+  })
+
+  it("accepts an undated successor statement only with the explicit opt-in", async () => {
+    const f = await fixture()
+    expect(rotate(f, f.a, f.b, undefined, { acceptUndatedSuccessor: true }).decision).toBe("accepted")
+    expect(getPinned(f.pinStore, f.b.did)).toBeDefined()
+  })
+
+  it("keeps the old DID as a retired marker that nothing can re-pin or rotate from", async () => {
+    const f = await fixture()
+    expect(rotate(f, f.a, f.b, T1).decision).toBe("accepted")
+    const marker = f.pinStore.get(f.a.did)
+    expect(marker).toMatchObject({ did: f.a.did, retiredBy: f.b.did, rotatedAt: T1 })
+    expect(getPinned(f.pinStore, f.a.did)).toBeUndefined()
+    expect(isPinned(f.pinStore, f.a.did)).toBe(false)
+    // The old (possibly compromised) key cannot be pinned again on first contact.
+    expect(() => pinOnFirstContact({ pinStore: f.pinStore, fromAgentId: f.a.did, did: f.a.did, ed25519Pub: f.a.ed25519Pub })).toThrow("retired")
+    expect(f.pinStore.get(f.a.did)?.retiredBy).toBe(f.b.did)
+    // A retired DID cannot rotate again (no chains).
+    expect(rotate(f, f.a, f.c, T2)).toEqual({ decision: "rejected", reason: "retired_pin" })
+    // Nothing can rotate back onto a retired DID.
+    expect(rotate(f, f.b, f.a, T2)).toEqual({ decision: "rejected", reason: "retired_pin" })
+    expect(getPinned(f.pinStore, f.b.did)).toBeDefined()
   })
 
   it("a statement signed without issuedAt does not verify when issuedAt is claimed", async () => {
