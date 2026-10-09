@@ -1144,8 +1144,8 @@ describe("moat tools/call dispatch", () => {
     expect((r.payload as { status: string }).status).toBe("invalid")
   })
 
-  it("share_profile: produces an envelope when consent is satisfied (identity via trust)", async () => {
-    // The self (owner) is family; the recipient agent is a friend so tiered consents on identity.
+  it("share_profile: produces an envelope when consent is satisfied (identity via an explicit grant)", async () => {
+    // The self (owner) is family; the recipient agent is a friend holding an identity grant.
     const store = makeStore([
       ownerRecord(),
       friendOf(),
@@ -1158,7 +1158,7 @@ describe("moat tools/call dispatch", () => {
         externalIds: [{ provider: "a2a-agent", externalId: "agent-2", linkedAt: NOW }],
       },
     ])
-    start(store, makeGrantStore())
+    start(store, makeGrantStore([{ id: "g-id", subjectKey: "subj-1", recipientAgentId: "agent-2", scope: "identity", grantedAt: NOW }]))
     const r = await h.tool("share_profile", { friendId: "subj-1", toAgentId: "agent-2", scope: "identity" })
     expect(r.isError).toBe(false)
     const payload = r.payload as { ok: boolean; envelope: { subject: { displayName: string }; fromAgentId: string } }
@@ -1189,7 +1189,7 @@ describe("moat tools/call dispatch", () => {
         externalIds: [{ provider: "a2a-agent", externalId: "agent-2", linkedAt: NOW }],
       },
     ])
-    start(store, makeGrantStore())
+    start(store, makeGrantStore([{ id: "g-id", subjectKey: "subj-1", recipientAgentId: "agent-2", scope: "identity", grantedAt: NOW }]))
     const r = await h.tool("share_profile", { friendId: "subj-1", toAgentId: "agent-2", scope: "identity" })
     expect(r.isError).toBe(false)
     const payload = r.payload as { ok: boolean; envelope: { fromAgentId: string } }

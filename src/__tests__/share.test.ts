@@ -144,8 +144,9 @@ describe("prepareProfileShare — producer", () => {
   })
 
   it("names the subject by join key (externalIds), never the local UUID", async () => {
+    // Identity needs a grant below family under tiered (audit finding 18).
     const store = new MemoryStore([subject(), recipientAgent("friend")])
-    const grants = new MemoryGrantStore()
+    const grants = new MemoryGrantStore([grant("identity")])
     const result = await prepareProfileShare(store, grants, {
       friendId: "subj-1",
       toAgentId: "agent-2",
@@ -320,7 +321,7 @@ describe("prepareProfileShare — producer", () => {
 
   it("stamps the proof slot when provided and omits it otherwise", async () => {
     const store = new MemoryStore([subject(), recipientAgent("friend")])
-    const grants = new MemoryGrantStore()
+    const grants = new MemoryGrantStore([grant("identity")])
     const withProof = await prepareProfileShare(store, grants, {
       friendId: "subj-1",
       toAgentId: "agent-2",
@@ -542,7 +543,7 @@ describe("importProfileShare — consumer (the non-clobbering merge)", () => {
     }
   })
 
-  it("seeds an unknown party at acquaintance when a FRIEND peer introduces it (Fork E)", async () => {
+  it("seeds an unknown party at stranger when a FRIEND peer introduces it (Fork E)", async () => {
     const store = new MemoryStore() // unknown party
     const result = await importProfileShare(store, {
       envelope: envelope({ notes: [{ key: "role", value: "PM", originallyAssertedBy: { agentId: "origin" } }] }),
@@ -552,11 +553,13 @@ describe("importProfileShare — consumer (the non-clobbering merge)", () => {
     expect(result.ok).toBe(true)
     if (result.ok) {
       expect(result.status).toBe("seeded")
-      expect(result.record.trustLevel).toBe("acquaintance")
+      expect(result.record.trustLevel).toBe("stranger")
       expect(result.record.role).toBe("acquaintance")
       expect(result.record.kind).toBe("human")
       expect(result.record.name).toBe("Jordan")
-      expect(result.record.externalIds[0].externalId).toBe("jordan-aad")
+      // The peer's ids are unverified claims, not indexed identities (audit findings 9, V3).
+      expect(result.record.externalIds).toEqual([])
+      expect(result.record.importedExternalIds?.[0].externalId).toBe("jordan-aad")
       // The introduced fact lands in the imported namespace, not first-party.
       expect(result.record.notes).toEqual({})
       expect(result.record.importedNotes!["source-agent"].role.value).toBe("PM")

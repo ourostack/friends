@@ -84,13 +84,16 @@ export const trustImpliedPolicy: ConsentPolicy = {
 }
 
 // ── A3: tiered (the recommended default) ──
-// Identity-scope shares (the join key only — "name"/"identity") are consented if
-// the recipient's trust ≥ friend; but any note-content scope (`notes:*`,
-// `outcomes`) ALWAYS requires an explicit grant. Trust agrees on WHO; content
-// still requires consent.
+// The "name" and "coordinate" scopes are consented if the recipient's trust ≥
+// friend. The "identity" scope hands over the subject's external ids (their account
+// handles), so below family it needs an explicit grant; any note-content scope
+// (`notes:*`, `outcomes`) ALWAYS requires an explicit grant too.
 export const tieredPolicy: ConsentPolicy = {
   name: "tiered",
   async consents(input) {
+    if (input.scope === "identity") {
+      return input.recipient.trustLevel === "family" || hasEffectiveGrant(input)
+    }
     if (IDENTITY_SCOPES.has(input.scope)) {
       return isAtLeastFriend(input.recipient.trustLevel)
     }
