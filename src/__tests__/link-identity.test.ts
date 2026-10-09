@@ -116,7 +116,7 @@ describe("linkExternalId", () => {
     })
     const orphan = friend({
       id: "orphan",
-      trustLevel: "family",
+      trustLevel: "acquaintance",
       notes: {
         shared: { value: "orphan loses", savedAt: NOW },
         orphanOnly: { value: "kept", savedAt: NOW },
@@ -148,7 +148,7 @@ describe("linkExternalId", () => {
     const target = friend({ id: "target", externalIds: [{ provider: "aad", externalId: "x1", linkedAt: NOW }] })
     const orphan = friend({
       id: "orphan",
-      trustLevel: "stranger",
+      trustLevel: "friend", // same standing as the target
       externalIds: [{ provider: "aad", externalId: "x2", linkedAt: NOW }], // NO tenantId
     })
     const store = new MemoryStore([target, orphan])
@@ -203,7 +203,7 @@ describe("link/unlink — FileFriendStore end-to-end", () => {
     dir = mkdtempSync(join(tmpdir(), "friends-link-"))
     const store = new FileFriendStore(join(dir, "friends"))
     await store.put("target", friend({ id: "target", trustLevel: "acquaintance", externalIds: [{ provider: "aad", externalId: "x1", linkedAt: NOW }] }))
-    await store.put("orphan", friend({ id: "orphan", trustLevel: "family", externalIds: [{ provider: "teams-conversation", externalId: "c1", linkedAt: NOW }] }))
+    await store.put("orphan", friend({ id: "orphan", trustLevel: "acquaintance", externalIds: [{ provider: "teams-conversation", externalId: "c1", linkedAt: NOW }] }))
 
     const linkResult = await linkExternalId(store, "target", { provider: "teams-conversation", externalId: "c1" })
     expect(linkResult.status).toBe("merged")
