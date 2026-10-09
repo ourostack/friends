@@ -58,7 +58,8 @@ function createGroupExternalId(provider: IdentityProvider, groupExternalId: stri
 }
 
 function shouldPromoteToAcquaintance(friend: FriendRecord): boolean {
-  return (friend.trustLevel ?? "stranger") === "stranger"
+  // A record whose DID reset is pending stays at stranger until the owner raises it.
+  return (friend.trustLevel ?? "stranger") === "stranger" && friend.trustReset === undefined
 }
 
 function createAcquaintanceRecord(
