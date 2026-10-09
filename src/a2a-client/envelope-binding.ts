@@ -43,6 +43,10 @@ export interface EnvelopeBindingOptions {
   maxFutureSkewMs?: number
 }
 
+/** ISO-8601 date-time with an explicit zone (Z or an offset). Anything else (RFC 2822,
+ * zone-less, date-only) is refused, so `Date.parse` quirks cannot move `issuedAt`. */
+const ISO_WITH_ZONE = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?(Z|[+-]\d\d:\d\d)$/
+
 export interface CheckEnvelopeBindingInput extends EnvelopeBindingOptions {
   recipientDid: string
   /** The ledger the `mid:<senderDid>:<id>` key is checked against and claimed in. */
@@ -60,16 +64,36 @@ export type EnvelopeBindingRejection =
   | "replayed"
 
 export type EnvelopeBindingResult =
-  | { ok: true; bound: boolean }
+  /** `bindingId` and `seenKey` are present only when `bound`. `seenKey` is the
+   * `mid:<senderDid>:<id>` ledger key: this function only CHECKS it, so the caller
+   * marks it durably once the signature has verified. */
+  | { ok: true; bound: boolean; bindingId?: string; seenKey?: string }
   | { ok: false; reason: EnvelopeBindingRejection }
 
 type OpenedEnvelope = Extract<OpenSealedEnvelopeResult, { ok: true }>
 
-/** Check an opened envelope's binding and freshness. SYNCHRONOUS on purpose: on success
- * it claims `mid:<senderDid>:<binding.id>` in `seen` before returning, so a caller that
- * runs it (and claims its seal nonce) before its first `await` cannot be raced by a
- * parallel delivery. It does not verify the signature; that stays the verifier's job. */
+/** Throws a TypeError unless every supplied time option is finite (and every window is
+ * non-negative). An invalid option must never turn the freshness check into a pass. */
+export function assertValidBindingOptions(options: EnvelopeBindingOptions): void {
+  if (options.now !== undefined) {
+    const ms = typeof options.now === "number" ? options.now : options.now instanceof Date ? options.now.getTime() : Number.NaN
+    if (!Number.isFinite(ms)) throw new TypeError("envelope binding: `now` must be a finite time")
+  }
+  for (const name of ["maxAgeMs", "delegatedMaxAgeMs", "maxFutureSkewMs"] as const) {
+    const value = options[name]
+    if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value) || value < 0)) {
+      throw new TypeError(`envelope binding: \`${name}\` must be a finite, non-negative number`)
+    }
+  }
+}
+
+/** Check an opened envelope's binding and freshness. SYNCHRONOUS and side-effect free:
+ * it CHECKS `mid:<senderDid>:<binding.id>` against `seen` but does not mark it. The
+ * caller claims it in memory before its first `await` and marks `seenKey` durably only
+ * after the signature verifies. It does not verify the signature itself. Throws a
+ * TypeError on invalid options (non-finite `now` or windows, negative windows). */
 export function checkEnvelopeBinding(opened: OpenedEnvelope, input: CheckEnvelopeBindingInput): EnvelopeBindingResult {
+  assertValidBindingOptions(input)
   const envelope = opened.envelope
   const delegated = envelope.onBehalfOf !== undefined
   const binding = envelope.binding
@@ -83,6 +107,8 @@ export function checkEnvelopeBinding(opened: OpenedEnvelope, input: CheckEnvelop
 
   if (!binding || typeof binding !== "object" || Array.isArray(binding)) return { ok: false, reason: "malformed_binding" }
   const b = binding as Record<string, unknown>
+  const keys = Object.keys(b).sort().join(",")
+  if (keys !== "id,kind,to") return { ok: false, reason: "malformed_binding" }
   if (typeof b.to !== "string" || typeof b.kind !== "string" || typeof b.id !== "string" || !BINDING_ID.test(b.id)) {
     return { ok: false, reason: "malformed_binding" }
   }
@@ -94,8 +120,7 @@ export function checkEnvelopeBinding(opened: OpenedEnvelope, input: CheckEnvelop
 
   const key = `mid:${opened.fromAgentId}:${b.id}`
   if (input.seen.isSeen(key)) return { ok: false, reason: "replayed" }
-  input.seen.markSeen(key)
-  return { ok: true, bound: true }
+  return { ok: true, bound: true, bindingId: b.id, seenKey: key }
 }
 
 function checkFreshness(
@@ -104,7 +129,7 @@ function checkFreshness(
   input: CheckEnvelopeBindingInput,
 ): { ok: false; reason: "stale_envelope" | "stale_delegation" } | null {
   const reason = delegated ? "stale_delegation" : "stale_envelope"
-  const issuedAt = typeof envelope.issuedAt === "string" ? Date.parse(envelope.issuedAt) : Number.NaN
+  const issuedAt = typeof envelope.issuedAt === "string" && ISO_WITH_ZONE.test(envelope.issuedAt) ? Date.parse(envelope.issuedAt) : Number.NaN
   if (!Number.isFinite(issuedAt)) return { ok: false, reason }
   const now = input.now === undefined ? Date.now() : typeof input.now === "number" ? input.now : input.now.getTime()
   const maxAge = delegated ? (input.delegatedMaxAgeMs ?? DEFAULT_DELEGATED_MAX_AGE_MS) : (input.maxAgeMs ?? DEFAULT_MAX_AGE_MS)

@@ -88,7 +88,7 @@ describe("receiveShare — direct agent messages", () => {
     expect(JSON.stringify(wire)).not.toContain("are you up?") // sealed: text never on the wire in the clear
     const r = await receiveAt(sodium, b, wire, "family")
     expect(r).toEqual({
-      state: "completed", friendsKind: "message", status: "received", bound: true,
+      state: "completed", friendsKind: "message", status: "received", bound: true, bindingId: expect.any(String),
       message: { fromAgentId: a.did, text: "are you up?", conversationId: "ctx-1", issuedAt: NOW },
     })
   })
@@ -101,7 +101,7 @@ describe("receiveShare — direct agent messages", () => {
     expect(JSON.stringify(wire)).not.toContain("principal")
     const r = await receiveAt(sodium, b, wire, "family")
     expect(r).toEqual({
-      state: "completed", friendsKind: "message", status: "received", bound: true,
+      state: "completed", friendsKind: "message", status: "received", bound: true, bindingId: expect.any(String),
       message: { fromAgentId: a.did, text: "books on", onBehalfOf: "principal", issuedAt: NOW },
     })
   })

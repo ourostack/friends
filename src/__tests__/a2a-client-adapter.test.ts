@@ -258,7 +258,7 @@ describe("send → receive round-trip (honest in-memory transport)", () => {
       trustOfSource: "friend",
       options: { now: new Date(NOW) },
     })
-    expect(result).toEqual({ state: "completed", friendsKind: "profile_share", status: "imported", bound: true })
+    expect(result).toEqual({ state: "completed", friendsKind: "profile_share", status: "imported", bound: true, bindingId: expect.any(String) })
     // first-party untouched; the import landed as an importedNotes entry.
     const subj = store.records.get("subj-1")!
     expect(subj.notes).toEqual({}) // first-party notes untouched
@@ -426,8 +426,7 @@ describe("receiveShare — friendsKind routing", () => {
       options: { now: new Date(NOW) },
     })
     // Reached the mission importer (its result is mapped; status is one of its codes).
-    expect(r.state === "completed" || r.state === "rejected").toBe(true)
-    if (r.state === "completed") expect(r.friendsKind).toBe("mission_share")
+    expect(r).toMatchObject({ state: "completed", friendsKind: "mission_share", bound: true })
   })
 
   it("coordination routes to importCoordination(missionStore, …)", async () => {
@@ -450,8 +449,7 @@ describe("receiveShare — friendsKind routing", () => {
       trustOfSource: "friend",
       options: { now: new Date(NOW) },
     })
-    expect(r.state === "completed" || r.state === "rejected").toBe(true)
-    if (r.state === "completed") expect(r.friendsKind).toBe("coordination")
+    expect(r).toMatchObject({ state: "completed", friendsKind: "coordination", bound: true })
   })
 })
 
