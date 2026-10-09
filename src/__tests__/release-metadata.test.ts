@@ -3,11 +3,10 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
 const root = fileURLToPath(new URL("../..", import.meta.url))
-const expectedVersion = "0.1.0-alpha.14"
+const expectedVersion = "0.1.0-alpha.15"
 const expectedChanges = [
-  "Add an optional signed delegation marker to agent messages: MessageEnvelope.onBehalfOf \"principal\" is set by prepareMessage, signed and sealed with the text, and returned by receiveMessage; any other value is malformed.",
-  "Add an explicit DelegationGrant on FriendRecord (scope principal_commands). FileFriendStore keeps it only in its exact shape and drops anything else, so trust tier never implies delegation.",
-  "Refuse a delegation grant in an external-identity create candidate, and update brace-expansion to clear its denial-of-service advisories.",
+  "Bind every signed envelope to its recipient, kind, a random message id and its issue time (signed binding field). receiveShare rejects re-sealed, replayed, stale and unbound delegated envelopes, dedupes concurrent deliveries without burning a message on a transient failure, returns the signed id as bindingId, and reports explicit reasons. New checkEnvelopeBinding export and rejectUnboundEnvelopes option; invalid time options throw a TypeError.",
+  "Deprecate the friend-record DelegationGrant as authority; add PinnedDelegationGrant and checkPinnedDelegationGrant for hosts that keep grants in trusted storage. setFriendTrust and upsertAgentPeer clear the legacy grant whenever trust is below family; setFriendTrust reports delegationSuspended.",
 ]
 
 describe("release metadata", () => {
