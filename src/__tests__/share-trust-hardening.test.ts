@@ -252,7 +252,10 @@ describe("importProfileShare seeds at stranger and never indexes the peer's ids 
 
   it("keeps the tenant on a claim appended to an existing record", async () => {
     const store = new MemoryStore([person({ externalIds: [{ provider: "aad", externalId: "other", linkedAt: NOW }] })])
-    const result = await importProfileShare(store, { envelope: aboutStranger(), fromAgentId: "peer", trustOfSource: "friend" })
+    const env = aboutStranger()
+    env.subject.externalIds.push({ provider: "aad", externalId: "other", linkedAt: NOW })
+    const result = await importProfileShare(store, { envelope: env, fromAgentId: "peer", trustOfSource: "friend" })
+    expect(result.ok && result.status).toBe("imported")
     expect(result.ok && result.record.importedExternalIds?.[0].tenantId).toBe("t9")
   })
 })
