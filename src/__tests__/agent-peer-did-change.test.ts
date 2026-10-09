@@ -217,3 +217,39 @@ describe("upsertAgentPeer — a DID change resets authority (audit finding 3)", 
     expect(result.trustReset?.previousTrust).toBe("stranger")
   })
 })
+
+describe("review findings 3 and 4", () => {
+  it("ignores an explicit trust raise on a later onboard while the reset marker is set", async () => {
+    const store = new MemoryStore([familyPeer()])
+    await upsertAgentPeer(store, { name: "Claude Code", agentId: "peer-1", a2a: { did: "did:key:EVIL" } })
+    const again = await upsertAgentPeer(store, { name: "Claude Code", agentId: "peer-1", trustLevel: "family", a2a: { did: "did:key:EVIL" } })
+    expect(again.trustLevel).toBe("stranger")
+    expect(again.admissionState).toBe("unverified")
+    expect(again.trustReset?.reason).toBe("did_changed")
+    expect(store.records.get("claude-code")?.trustLevel).toBe("stranger")
+  })
+
+  it("an acquaintance record with no DID loses its trust when it adopts its first DID", async () => {
+    const record = familyPeer()
+    delete record.agentMeta!.identity
+    delete record.agentMeta!.a2a!.did
+    delete record.capabilityProfileId
+    delete record.delegationGrant
+    record.admissionState = "unverified"
+    record.trustLevel = "acquaintance"
+    const store = new MemoryStore([record])
+    const result = await upsertAgentPeer(store, { name: "Claude Code", agentId: "peer-1", a2a: { did: "did:key:EVIL" } })
+    expect(result.trustLevel).toBe("stranger")
+    expect(result.trustReset?.reason).toBe("did_adopted")
+    expect(result.trustReset?.previousTrust).toBe("acquaintance")
+  })
+
+  it("keeps a reset record without a trust level at stranger on a later onboard", async () => {
+    const record = familyPeer()
+    record.trustReset = { at: NOW, reason: "did_changed", previousDid: "did:key:GOOD", previousTrust: "family" }
+    delete record.trustLevel
+    const store = new MemoryStore([record])
+    const result = await upsertAgentPeer(store, { name: "Claude Code", agentId: "peer-1", trustLevel: "friend" })
+    expect(result.trustLevel).toBe("stranger")
+  })
+})

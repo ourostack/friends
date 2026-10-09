@@ -55,7 +55,7 @@ export async function upsertAgentPeer(
   // whatever DID the caller names first.
   const holdsAuthority = Boolean(
     existing &&
-      ((existing.trustLevel !== undefined && existing.trustLevel !== "stranger" && existing.trustLevel !== "acquaintance") ||
+      ((existing.trustLevel !== undefined && existing.trustLevel !== "stranger") ||
         existing.capabilityProfileId !== undefined ||
         existing.delegationGrant !== undefined ||
         existing.admissionState === "active"),
@@ -70,7 +70,13 @@ export async function upsertAgentPeer(
         previousTrust: existing!.trustLevel ?? "stranger",
       }
     : undefined
-  const trustLevel: TrustLevel = didChanged ? "stranger" : input.trustLevel ?? existing?.trustLevel ?? "stranger"
+  // While a DID-change reset marker is set, an onboard cannot raise trust: raising
+  // goes through setFriendTrust, which clears the marker.
+  const trustLevel: TrustLevel = didChanged
+    ? "stranger"
+    : existing?.trustReset
+      ? existing.trustLevel ?? "stranger"
+      : input.trustLevel ?? existing?.trustLevel ?? "stranger"
   const baseMeta: AgentMeta = existing?.agentMeta ?? {
     bundleName: bundleName ?? name,
     familiarity: 0,
