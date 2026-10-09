@@ -3,23 +3,15 @@
 //
 // Linking is the cross-channel unification mechanic: when another friend record
 // (an "orphan") already holds the external id being linked, the two records are
-// merged into the target — the target's notes win on key collision, the higher
-// trust level is kept, the orphan's other external ids are folded in, and the
-// orphan is deleted. A missing friend is a normal `not_found` result.
+// merged into the target — the target's notes win on key collision, the target
+// keeps its own trust (a link never raises it), the orphan's other external ids
+// are folded in, and the orphan is deleted after the target is written. An orphan
+// holding a capability profile, delegation grant or active admission is refused
+// (`conflict_requires_operator`). A missing friend is a normal `not_found` result.
 import { emitNervesEvent } from "./observability"
 import type { FriendStore } from "./store"
-import type { ExternalId, FriendRecord, IdentityProvider, TrustLevel } from "./types"
+import type { ExternalId, FriendRecord, IdentityProvider } from "./types"
 import type { FriendOpResult } from "./results"
-
-const TRUST_RANK: Record<string, number> = { family: 4, friend: 3, acquaintance: 2, stranger: 1 }
-
-/* v8 ignore start -- defensive: ?? fallbacks are unreachable when inputs are valid TrustLevel values @preserve */
-function higherTrust(a?: TrustLevel, b?: TrustLevel): TrustLevel {
-  const rankA = TRUST_RANK[a ?? "stranger"] ?? 1
-  const rankB = TRUST_RANK[b ?? "stranger"] ?? 1
-  return rankA >= rankB ? (a ?? "stranger") : (b ?? "stranger")
-}
-/* v8 ignore stop */
 
 export interface LinkExternalIdInput {
   provider: IdentityProvider
@@ -65,30 +57,47 @@ export async function linkExternalId(
   // records even when this link carries a tenantId.
   const orphan = await store.findByExternalId(input.provider, input.externalId)
   let mergedNotes: FriendRecord["notes"] = { ...current.notes }
-  let mergedTrust = current.trustLevel
   let orphanExternalIds: ExternalId[] = []
-  let merged = false
+  const mergingOrphan = orphan && orphan.id !== friendId ? orphan : undefined
 
-  if (orphan && orphan.id !== friendId) {
-    mergedNotes = { ...orphan.notes, ...current.notes }
-    mergedTrust = higherTrust(current.trustLevel, orphan.trustLevel)
-    orphanExternalIds = orphan.externalIds.filter(
+  if (mergingOrphan) {
+    // A link never moves authority. An orphan that holds any is the operator's call.
+    if (
+      mergingOrphan.capabilityProfileId !== undefined ||
+      mergingOrphan.delegationGrant !== undefined ||
+      mergingOrphan.admissionState === "active"
+    ) {
+      emitNervesEvent({
+        level: "warn",
+        component: "friends",
+        event: "friends.identity_link_refused",
+        message: "refused to merge a record that holds authority into another record",
+        meta: { orphanId: mergingOrphan.id, targetId: friendId },
+      })
+      return {
+        ok: false,
+        status: "conflict_requires_operator",
+        message: `external id is held by "${mergingOrphan.name}" (${mergingOrphan.id}), which has a capability profile, delegation grant or active admission; it cannot be merged into "${current.name}" (${friendId}) without an operator decision`,
+      }
+    }
+    mergedNotes = { ...mergingOrphan.notes, ...current.notes }
+    orphanExternalIds = mergingOrphan.externalIds.filter(
       (ext) => !(ext.provider === input.provider && ext.externalId === input.externalId),
     )
-    await store.delete(orphan.id)
-    merged = true
   }
 
+  // The target keeps its own trust. Write the merged target BEFORE deleting the
+  // orphan, so a failure between the two steps leaves both records, not neither.
   const updated: FriendRecord = {
     ...current,
     externalIds: [...newExternalIds, ...orphanExternalIds],
     notes: mergedNotes,
-    trustLevel: mergedTrust,
     updatedAt: now,
   }
   await store.put(friendId, updated)
+  if (mergingOrphan) await store.delete(mergingOrphan.id)
 
-  return { ok: true, status: merged ? "merged" : "linked", record: updated }
+  return { ok: true, status: mergingOrphan ? "merged" : "linked", record: updated }
 }
 
 export interface UnlinkExternalIdInput {
@@ -121,6 +130,10 @@ export async function unlinkExternalId(
   }
 
   const filtered = current.externalIds.filter((_, i) => i !== idx)
+  // Drop the claim-journal entry first: if the record write then fails, the id is
+  // still on the record and a retry works; the reverse order lets the journal
+  // bring the id back on the next read.
+  await store.releaseExternalId?.(friendId, current.externalIds[idx])
   const updated: FriendRecord = { ...current, externalIds: filtered, updatedAt: new Date().toISOString() }
   await store.put(friendId, updated)
 

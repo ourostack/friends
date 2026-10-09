@@ -15,6 +15,7 @@ export type FriendOpStatus =
   | "noop"
   | "not_found"
   | "override_required"
+  | "conflict_requires_operator"
   | "redirected_to_name"
   | "invalid"
   | "error"

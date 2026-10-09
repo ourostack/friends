@@ -16,6 +16,7 @@ import type {
 import type {
   AdmissionState,
   AgentMeta,
+  ExternalId,
   ImportedExternalId,
   TrustReset,
   FriendRecord,
@@ -206,6 +207,22 @@ export class FileFriendStore implements ExternalIdClaimStore {
       records.push(await this.normalizeWithClaims(raw))
     }
     return records
+  }
+
+  async releaseExternalId(friendId: string, externalId: ExternalId): Promise<void> {
+    if (!SAFE_RECORD_ID.test(friendId)) throw new Error("external identity claim target id is invalid")
+    const claimPath = this.pendingClaimPath(externalId)
+    try {
+      await this.ensureClaimsDirectory()
+    } catch (error: unknown) {
+      /* v8 ignore next 2 -- no claims directory yet means nothing to release @preserve */
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return
+      throw error
+    }
+    const journal = await this.readClaimIfPresent(claimPath, externalId)
+    if (!journal || journal.friendId !== friendId) return
+    await fsPromises.rm(claimPath, { force: true })
+    this.syncClaimsDirectory()
   }
 
   async claimExternalId(input: ExternalIdClaimInput): Promise<ExternalIdClaimResult> {
