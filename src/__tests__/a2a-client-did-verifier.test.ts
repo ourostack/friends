@@ -263,9 +263,10 @@ describe("evaluateRotation — every trust-tier branch (Fork 11)", () => {
     const rotationProof = signSuccessor({ sodium, oldEd25519Priv: id.ed25519Priv, newDid: next.id.did, newEd25519Pub: next.id.ed25519Pub })
     const d = evaluateRotation({ sodium, pinStore, fromAgentId: id.did, trustOfSource: "friend", newDid: next.id.did, newEd25519Pub: next.id.ed25519Pub, rotationProof })
     expect(d).toEqual({ decision: "accepted" })
-    // re-pinned:
-    expect(getPinned(pinStore, id.did)!.ed25519Pub).toEqual(next.id.ed25519Pub)
-    expect(getPinned(pinStore, id.did)!.did).toBe(next.id.did)
+    // re-pinned under the NEW did; the old pin is retired:
+    expect(getPinned(pinStore, next.id.did)!.ed25519Pub).toEqual(next.id.ed25519Pub)
+    expect(getPinned(pinStore, next.id.did)!.did).toBe(next.id.did)
+    expect(getPinned(pinStore, id.did)).toBeUndefined()
   })
 
   it("family + VALID signed successor proof → accepted", async () => {

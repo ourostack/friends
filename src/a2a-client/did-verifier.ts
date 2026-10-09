@@ -20,6 +20,10 @@ import { verifyEnvelopeSignature, parseProof } from "./sign"
 export interface PinnedDid {
   did: string
   ed25519Pub: Uint8Array
+  /** When the pin was last moved by a verified rotation: the successor statement's
+   * `issuedAt`, or the acceptance time for the old statement shape. A later successor
+   * statement must be newer than this. Absent until the first rotation. */
+  rotatedAt?: string
 }
 
 /** A pin store the host implements (in-memory map in tests; persisted on the
@@ -27,6 +31,10 @@ export interface PinnedDid {
 export interface PinStore {
   get(fromAgentId: string): PinnedDid | undefined
   set(fromAgentId: string, pinned: PinnedDid): void
+  /** Retire a pin. A verified rotation moves the pin to the new DID and calls this
+   * for the old one. Optional so existing hosts still compile, but a host that omits
+   * it keeps the old pin alive and should add it. */
+  delete?(fromAgentId: string): void
 }
 
 /** A simple in-memory PinStore (used by tests + as a host convenience). */
@@ -37,6 +45,9 @@ export class MemoryPinStore implements PinStore {
   }
   set(fromAgentId: string, pinned: PinnedDid): void {
     this.map.set(fromAgentId, pinned)
+  }
+  delete(fromAgentId: string): void {
+    this.map.delete(fromAgentId)
   }
 }
 
@@ -164,24 +175,42 @@ export function getPinned(pinStore: PinStore, fromAgentId: string): PinnedDid | 
 export type RotationDecision =
   | { decision: "unchanged" }
   | { decision: "accepted" }
-  | { decision: "rejected"; reason: "bad_rotation_proof" | "rotation_requires_reconfirm" | "not_pinned" }
+  | { decision: "rejected"; reason: "bad_rotation_proof" | "rotation_requires_reconfirm" | "not_pinned" | "stale_rotation" }
 
-/** The canonical successor statement the OLD key signs to authorize a rotation. */
-function successorMessage(newDid: string, newEd25519Pub: Uint8Array, b64: (b: Uint8Array) => string): Uint8Array {
-  return jcsBytes({ statement: "key-successor", successor: newDid, newKey: b64(newEd25519Pub) })
+/** Successor statements dated further ahead than this are rejected. */
+const ROTATION_CLOCK_SKEW_MS = 2 * 60 * 1000
+
+/** The canonical successor statement the OLD key signs to authorize a rotation.
+ * With `issuedAt` it is the current shape. Without it, it is the original shape,
+ * which `evaluateRotation` accepts only for a peer's very first rotation. */
+function successorMessage(
+  newDid: string,
+  newEd25519Pub: Uint8Array,
+  b64: (b: Uint8Array) => string,
+  issuedAt?: string,
+): Uint8Array {
+  return jcsBytes({
+    statement: "key-successor",
+    successor: newDid,
+    newKey: b64(newEd25519Pub),
+    ...(issuedAt !== undefined ? { issuedAt } : {}),
+  })
 }
 
-/** Mint a rotation proof: the OLD private key signs `{successor:newDid, newKey}`.
- * Returns the base64 detached signature. (Test/host helper.) */
+/** Mint a rotation proof: the OLD private key signs `{successor:newDid, newKey,
+ * issuedAt}`. Pass `issuedAt` (ISO time) to mint the current shape; omit it to mint
+ * the original shape, accepted only for a first rotation. Returns the base64
+ * detached signature. (Test/host helper.) */
 export function signSuccessor(input: {
   sodium: Sodium
   oldEd25519Priv: Uint8Array
   newDid: string
   newEd25519Pub: Uint8Array
+  issuedAt?: string
 }): string {
   const { sodium } = input
   const b64 = (b: Uint8Array) => sodium.to_base64(b, sodium.base64_variants.ORIGINAL)
-  const msg = successorMessage(input.newDid, input.newEd25519Pub, b64)
+  const msg = successorMessage(input.newDid, input.newEd25519Pub, b64, input.issuedAt)
   return b64(sodium.crypto_sign_detached(msg, input.oldEd25519Priv))
 }
 
@@ -194,6 +223,11 @@ export interface EvaluateRotationInput {
   newEd25519Pub: Uint8Array
   /** The base64 signature from `signSuccessor`, if presented. */
   rotationProof?: string
+  /** The `issuedAt` the successor statement was signed with. Omit it for a statement
+   * in the original shape (accepted only while the pin has never rotated). */
+  issuedAt?: string
+  /** Clock override for tests. */
+  now?: Date
 }
 
 /** Evaluate a presented key against the pin (Fork 11). family/friend auto-accept a
@@ -219,7 +253,8 @@ export function evaluateRotation(input: EvaluateRotationInput): RotationDecision
     return { decision: "rejected", reason: "bad_rotation_proof" }
   }
   const b64 = (b: Uint8Array) => sodium.to_base64(b, sodium.base64_variants.ORIGINAL)
-  const msg = successorMessage(newDid, newEd25519Pub, b64)
+  const issuedAt = input.issuedAt
+  const msg = successorMessage(newDid, newEd25519Pub, b64, issuedAt)
   let sig: Uint8Array
   try {
     sig = sodium.from_base64(input.rotationProof, sodium.base64_variants.ORIGINAL)
@@ -234,7 +269,25 @@ export function evaluateRotation(input: EvaluateRotationInput): RotationDecision
   }
   if (!ok) return { decision: "rejected", reason: "bad_rotation_proof" }
 
-  // Valid: re-pin to the new key.
-  pinStore.set(fromAgentId, { did: newDid, ed25519Pub: newEd25519Pub })
+  // Replay guard. A current-shape statement must be dated, not in the future, and
+  // newer than the pin's last rotation. The original shape carries no date, so it is
+  // accepted only while the pin has never rotated.
+  const now = input.now ?? new Date()
+  if (issuedAt === undefined) {
+    if (current.rotatedAt !== undefined) return { decision: "rejected", reason: "stale_rotation" }
+  } else {
+    const issued = Date.parse(issuedAt)
+    if (!Number.isFinite(issued) || issued > now.getTime() + ROTATION_CLOCK_SKEW_MS) {
+      return { decision: "rejected", reason: "stale_rotation" }
+    }
+    if (current.rotatedAt !== undefined && issued <= Date.parse(current.rotatedAt)) {
+      return { decision: "rejected", reason: "stale_rotation" }
+    }
+  }
+
+  // Valid: move the pin to the new DID and retire the old one, so messages signed by
+  // the new DID verify and the old key no longer does.
+  pinStore.set(newDid, { did: newDid, ed25519Pub: newEd25519Pub, rotatedAt: issuedAt ?? now.toISOString() })
+  if (newDid !== fromAgentId) pinStore.delete?.(fromAgentId)
   return { decision: "accepted" }
 }
