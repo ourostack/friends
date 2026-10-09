@@ -296,4 +296,17 @@ describe("link review item 5: first pass and retry match orphans the same way", 
     expect(result.status).toBe("merged")
     expect(store.records.has("orphan")).toBe(false)
   })
+
+  it("does not merge an orphan that belongs to a different tenant, so there is nothing stranded to resume", async () => {
+    const store = new MemoryStore([
+      person({ id: "target", name: "Target" }),
+      person({ id: "orphan", name: "Orphan", externalIds: [{ ...ariTelegram, tenantId: "other" }] }),
+    ])
+    const result = await linkExternalId(store, "target", { provider: "telegram-user", externalId: "42", tenantId })
+    expect(result.status).toBe("linked")
+    expect(store.records.has("orphan")).toBe(true)
+    const retry = await linkExternalId(store, "target", { provider: "telegram-user", externalId: "42", tenantId })
+    expect(retry.status).toBe("noop")
+    expect(store.records.has("orphan")).toBe(true)
+  })
 })

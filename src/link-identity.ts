@@ -70,10 +70,16 @@ export async function linkExternalId(
       return { ok: true, status: "noop", message: "identity already linked", record: current }
     }
   } else {
-    // Same-tenant first, then tenant-unqualified (D4); the retry pass accepts the same two.
+    // Same tenant first, then an id that carries no tenant (D4). The retry pass accepts
+    // exactly the same two, so an interrupted merge can always be resumed.
+    const heldIn = (record: FriendRecord | null, tenantId: string | undefined): FriendRecord | null =>
+      record !== null && record.externalIds.some(
+        (ext) => ext.provider === input.provider && ext.externalId === input.externalId && ext.tenantId === tenantId,
+      ) ? record : null
     const orphan =
-      (input.tenantId !== undefined ? await store.findByExternalId(input.provider, input.externalId, input.tenantId) : null) ??
-      (await store.findByExternalId(input.provider, input.externalId))
+      (input.tenantId !== undefined
+        ? heldIn(await store.findByExternalId(input.provider, input.externalId, input.tenantId), input.tenantId)
+        : null) ?? heldIn(await store.findByExternalId(input.provider, input.externalId), undefined)
     orphans = orphan && orphan.id !== friendId ? [orphan] : []
   }
 
