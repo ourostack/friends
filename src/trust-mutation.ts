@@ -43,8 +43,12 @@ export async function setFriendTrust(
   }
 
   const updatedAt = new Date().toISOString()
+  // Finding 10: a legacy record grant must not survive a move below family, or a
+  // later re-promotion would silently revive it. Drop it on any such change.
+  const suspendsDelegation = level !== "family" && current.delegationGrant !== undefined
+  const { delegationGrant: _dropped, ...withoutGrant } = current
   const updated: FriendRecord = {
-    ...current,
+    ...(suspendsDelegation ? withoutGrant : current),
     trustLevel: level,
     role: level,
     updatedAt,
@@ -77,5 +81,5 @@ export async function setFriendTrust(
     await ctx.sink.append(record)
   }
 
-  return { ok: true, status: "updated", record: updated }
+  return { ok: true, status: "updated", record: updated, ...(suspendsDelegation ? { delegationSuspended: true } : {}) }
 }

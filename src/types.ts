@@ -452,7 +452,12 @@ export interface AgentMeta {
 }
 
 /** An explicit grant letting this friend (an agent) relay commands from the recipient's
- * principal. Trust tier never implies it; only an operator-set grant does. */
+ * principal. Trust tier never implies it; only an operator-set grant does.
+ *
+ * @deprecated A record of intent kept in agent-writable storage; it is never authority.
+ * Hosts must keep delegated-command grants in a trusted store they control and check them
+ * with `checkPinnedDelegationGrant`. This type is frozen (no new keys) and still parsed
+ * only so a rollback keeps working. */
 export interface DelegationGrant {
   scope: "principal_commands"
   grantedAt: string

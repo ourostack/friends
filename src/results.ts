@@ -24,4 +24,6 @@ export interface FriendOpResult {
   status: FriendOpStatus
   message?: string
   record?: FriendRecord
+  /** Set (true) by `setFriendTrust` when the change dropped a legacy friend-record delegation grant. */
+  delegationSuspended?: boolean
 }
