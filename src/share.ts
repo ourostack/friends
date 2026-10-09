@@ -280,7 +280,7 @@ function seedRecord(envelope: ProfileShareEnvelope, fromAgentId: string, now: st
   return {
     id: randomUUID(),
     name: envelope.subject.displayName,
-    role: "acquaintance",
+    role: "stranger",
     trustLevel: "stranger",
     connections: [],
     externalIds: [],

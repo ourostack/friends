@@ -554,7 +554,7 @@ describe("importProfileShare — consumer (the non-clobbering merge)", () => {
     if (result.ok) {
       expect(result.status).toBe("seeded")
       expect(result.record.trustLevel).toBe("stranger")
-      expect(result.record.role).toBe("acquaintance")
+      expect(result.record.role).toBe("stranger")
       expect(result.record.kind).toBe("human")
       expect(result.record.name).toBe("Jordan")
       // The peer's ids are unverified claims, not indexed identities (audit findings 9, V3).

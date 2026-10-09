@@ -467,8 +467,11 @@ export interface DelegationGrant {
 /** Why and when a record's trust was reset. */
 export interface TrustReset {
   at: string
-  reason: "did_changed"
-  previousDid: string
+  /** `did_changed`: the DID differed from the pinned one. `did_adopted`: a record
+   * that held authority but had no DID adopted its first one. */
+  reason: "did_changed" | "did_adopted"
+  /** Absent for `did_adopted`. */
+  previousDid?: string
   previousTrust: TrustLevel
 }
 

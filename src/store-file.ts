@@ -960,12 +960,17 @@ export class FileFriendStore implements ExternalIdClaimStore {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined
     const r = raw as Record<string, unknown>
     if (
-      r.reason !== "did_changed" ||
+      (r.reason !== "did_changed" && r.reason !== "did_adopted") ||
       typeof r.at !== "string" ||
-      typeof r.previousDid !== "string" ||
+      (r.previousDid !== undefined && typeof r.previousDid !== "string") ||
       (r.previousTrust !== "family" && r.previousTrust !== "friend" && r.previousTrust !== "acquaintance" && r.previousTrust !== "stranger")
     ) return undefined
-    return { at: r.at, reason: "did_changed", previousDid: r.previousDid, previousTrust: r.previousTrust }
+    return {
+      at: r.at,
+      reason: r.reason,
+      ...(r.previousDid !== undefined ? { previousDid: r.previousDid } : {}),
+      previousTrust: r.previousTrust,
+    }
   }
 
   private normalizeImportedExternalIds(raw: unknown): ImportedExternalId[] | undefined {

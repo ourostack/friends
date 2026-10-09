@@ -46,10 +46,29 @@ export async function upsertAgentPeer(
   // A different DID on an existing record is a different peer: authority resets and
   // no caller option can exempt it (a rotation goes through the DID verifier's signed
   // successor statement, never through here).
+  //
+  // An empty or whitespace DID counts as "no DID supplied": it neither erases the
+  // pinned DID nor overrides it.
+  const suppliedDid = a2a?.did?.trim() || undefined
   const previousDid = resolveAgentIdentity(existing?.agentMeta).did
-  const didChanged = Boolean(existing && previousDid && a2a?.did && a2a.did !== previousDid)
+  // A record that holds authority but has no DID yet must not keep it by adopting
+  // whatever DID the caller names first.
+  const holdsAuthority = Boolean(
+    existing &&
+      ((existing.trustLevel !== undefined && existing.trustLevel !== "stranger" && existing.trustLevel !== "acquaintance") ||
+        existing.capabilityProfileId !== undefined ||
+        existing.delegationGrant !== undefined ||
+        existing.admissionState === "active"),
+  )
+  const dropped = Boolean(existing && suppliedDid && (previousDid ? suppliedDid !== previousDid : holdsAuthority))
+  const didChanged = dropped
   const trustReset: TrustReset | undefined = didChanged
-    ? { at: now, reason: "did_changed", previousDid: previousDid!, previousTrust: existing!.trustLevel ?? "stranger" }
+    ? {
+        at: now,
+        reason: previousDid ? "did_changed" : "did_adopted",
+        ...(previousDid ? { previousDid } : {}),
+        previousTrust: existing!.trustLevel ?? "stranger",
+      }
     : undefined
   const trustLevel: TrustLevel = didChanged ? "stranger" : input.trustLevel ?? existing?.trustLevel ?? "stranger"
   const baseMeta: AgentMeta = existing?.agentMeta ?? {
@@ -59,13 +78,14 @@ export async function upsertAgentPeer(
     outcomes: [],
   }
 
-  const { identity: _staleIdentity, ...metaWithoutIdentity } = baseMeta
+  const { identity: _staleIdentity, mailbox: _staleMailbox, ...metaWithoutIdentity } = baseMeta
   const carriedMeta: AgentMeta = didChanged ? metaWithoutIdentity : baseMeta
   // The other coordinates are rebuilt from the input, but a re-onboard that names no
   // DID keeps the pinned one. When the DID changed, none of the old peer's coordinates
   // carry over.
-  const keptDid = !didChanged && !a2a?.did && baseMeta.a2a?.did ? { did: baseMeta.a2a.did } : {}
-  const mergedA2a = { ...keptDid, ...(a2a ?? {}) }
+  const keptDid = !didChanged && !suppliedDid && baseMeta.a2a?.did ? { did: baseMeta.a2a.did } : {}
+  const { did: _ignoredDid, ...a2aWithoutDid } = a2a ?? {}
+  const mergedA2a = { ...keptDid, ...a2aWithoutDid, ...(suppliedDid ? { did: suppliedDid } : {}) }
 
   const record: FriendRecord = {
     ...(existing ?? {
