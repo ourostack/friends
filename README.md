@@ -1,6 +1,6 @@
 <!-- ourostack:brand:start -->
 <p align="center">
-  <a href="https://github.com/ourostack"><img src="https://raw.githubusercontent.com/ourostack/.github/main/brand/ouro.png" alt="Ourostack" width="96" height="96"></a>
+  <a href="https://github.com/ourostack"><img src="https://raw.githubusercontent.com/ourostack/.github/main/brand/headers/friends.webp" alt="Ouro on a picnic blanket with two people and two robots, all waving, while envelopes float to another picnic on the next hill" width="100%"></a>
 </p>
 <!-- ourostack:brand:end -->
 
