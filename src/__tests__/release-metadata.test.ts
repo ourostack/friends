@@ -3,11 +3,9 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
 const root = fileURLToPath(new URL("../..", import.meta.url))
-const expectedVersion = "0.1.0-alpha.16"
+const expectedVersion = "0.1.0-alpha.17"
 const expectedChanges = [
-  "Re-onboarding a peer under a different DID resets its trust and grants (an onboard cannot raise a reset peer; onboard_agent and connect_to audit the stored level and report an ignored raise), and group context no longer promotes a reset record.",
-  "Rotated DID pins are kept as retired tombstones that receiveShare rejects; a rotation needs the old key's statement and the successor's own signed consent (signSuccessorConsent, signFullSuccessor; the consent is signed over a domain-separation prefix), the successor DID must belong to its key and cannot overwrite another peer's pin; applyAcceptedRotation follows back-to-back rotations and carries the peer's record, trust and grants to the live DID.",
-  "Linking an id no longer moves an orphan's other ids onto a record that holds authority and resumes an interrupted merge the same way it started (a store without listAll reports retry_unsupported), and each peer's imported id claims on a record are capped at 32."
+  "Development dependencies only, to clear npm audit: vite 8.3.5 (GHSA-587h-7wmj-h5pm, which includes its bundled launch-editor; GHSA-9jrq-w75r-8gcw; GHSA-rq7h-c2jc-7f22), vitest and @vitest/coverage-v8 4.1.12 (GHSA-qxg6-89mg-rqv8, GHSA-xp26-3454-mjgp), and an override pinning minimatch to ^11.0.1 under eslint and typescript-eslint (GHSA-g3hv-75wg-m249). The published library is unchanged."
 ]
 
 describe("release metadata", () => {
