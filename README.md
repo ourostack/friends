@@ -4,14 +4,20 @@
 </p>
 <!-- ourostack:brand:end -->
 
-# @ouro.bot/friends
+# Friends
 
-**An open identity, relationship, and multiplayer substrate for AI agents.**
+**An open identity, relationship, and multiplayer substrate for agents.**
 *Who am I, who are you, who else is in the room* — for any harness, any agent.
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](./LICENSE)
 [![npm](https://img.shields.io/badge/npm-%40ouro.bot%2Ffriends-cb3837.svg)](https://www.npmjs.com/package/@ouro.bot/friends)
 &nbsp;·&nbsp; store-only &nbsp;·&nbsp; transport-agnostic &nbsp;·&nbsp; no daemon &nbsp;·&nbsp; alpha
+
+[ouroboros.bot/#friends](https://ouroboros.bot/#friends) · [`@ouro.bot/friends` on npm](https://www.npmjs.com/package/@ouro.bot/friends) · [Quickstart](#quickstart) · [friends-relay](https://github.com/ourostack/friends-relay) · [More from Ouro](https://github.com/ourostack)
+
+```sh
+npx -y --package @ouro.bot/friends friends-mcp --dir ./friends   # an MCP server any harness can call
+```
 
 <!-- OPERATOR: enrich the vision/soul here (the "taming" / Little-Prince framing is yours to voice) -->
 
