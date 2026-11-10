@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { execFile } from "node:child_process"
 import { createHash } from "node:crypto"
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { promisify } from "node:util"
@@ -737,6 +737,46 @@ describe("household policy defensive coverage", () => {
     })).rejects.toThrow("claims did not converge")
   })
 
+  it("tightens a cloned bundle's claims directory and journals to private modes and keeps working", async () => {
+    const first = store()
+    await first.store.put("target", record("target"))
+    await first.store.claimExternalId({
+      externalId: { provider: "telegram-user", externalId: "41", linkedAt: NOW },
+      target: { kind: "link", friendId: "target" },
+    })
+    const claimsDirectory = join(first.friendsPath, "_external-id-claims")
+    const journals = readdirSync(claimsDirectory).filter((entry) => entry.endsWith(".json")).map((entry) => join(claimsDirectory, entry))
+    expect(journals.length).toBeGreaterThan(0)
+    // What a git checkout of the bundle on another machine gives: 755 directories and 644 files.
+    chmodSync(claimsDirectory, 0o755)
+    for (const journal of journals) chmodSync(journal, 0o644)
+
+    const cloned = new FileFriendStore(first.friendsPath)
+    await expect(cloned.get("target")).resolves.toMatchObject({ id: "target" })
+    expect(statSync(claimsDirectory).mode % 0o1000).toBe(0o700)
+    for (const journal of journals) expect(statSync(journal).mode % 0o1000).toBe(0o600)
+    await expect(cloned.claimExternalId({
+      externalId: { provider: "telegram-user", externalId: "43", linkedAt: NOW },
+      target: { kind: "link", friendId: "target" },
+    })).resolves.toBeTruthy()
+  })
+
+  it("leaves a loose claims directory it does not own untouched", async () => {
+    const first = store()
+    mkdirSync(join(first.friendsPath, "_external-id-claims"), { mode: 0o700 })
+    chmodSync(join(first.friendsPath, "_external-id-claims"), 0o755)
+    const getuid = vi.spyOn(process, "getuid").mockReturnValue(process.getuid!() + 1)
+    try {
+      await expect(first.store.claimExternalId({
+        externalId: { provider: "telegram-user", externalId: "42", linkedAt: NOW },
+        target: { kind: "create", record: record("candidate") },
+      })).rejects.toThrow("claims directory has unsafe")
+    } finally {
+      getuid.mockRestore()
+    }
+    expect(statSync(join(first.friendsPath, "_external-id-claims")).mode % 0o1000).toBe(0o755)
+  })
+
   it("rejects unsafe claim directories, journal modes, and target paths", async () => {
     const first = store()
     const elsewhere = mkdtempSync(join(tmpdir(), "friends-claims-target-"))
@@ -749,18 +789,21 @@ describe("household policy defensive coverage", () => {
       target: { kind: "create", record: record("candidate") },
     })).rejects.toThrow("claims directory has unsafe")
 
+    // Group- or world-writable is refused: someone else could have written into it.
     const second = store()
-    mkdirSync(join(second.friendsPath, "_external-id-claims"), { mode: 0o755 })
+    mkdirSync(join(second.friendsPath, "_external-id-claims"), { mode: 0o700 })
+    chmodSync(join(second.friendsPath, "_external-id-claims"), 0o775)
     await expect(second.store.claimExternalId({
       externalId: { provider: "telegram-user", externalId: "42", linkedAt: NOW },
       target: { kind: "create", record: record("candidate") },
     })).rejects.toThrow("claims directory has unsafe")
+    expect(statSync(join(second.friendsPath, "_external-id-claims")).mode % 0o1000).toBe(0o775)
 
     const third = store()
     const pending = claimPath(third.friendsPath)
     mkdirSync(join(third.friendsPath, "_external-id-claims"), { mode: 0o700 })
     writeFileSync(pending.path, "{}", { mode: 0o600 })
-    chmodSync(pending.path, 0o644)
+    chmodSync(pending.path, 0o664)
     await expect(third.store.claimExternalId({
       externalId: { provider: "telegram-user", externalId: "42", linkedAt: NOW },
       target: { kind: "create", record: record("candidate") },

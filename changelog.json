@@ -1,6 +1,12 @@
 {
   "versions": [
     {
+      "version": "0.1.0-alpha.18",
+      "changes": [
+        "A bundle checked out from git no longer breaks external identity claims: the store tightens a claims directory it owns from 755 to 700 and its claim journals from 644 to 600 by itself (git records neither mode). A symlink, another owner, or a group- or world-writable entry is still refused."
+      ]
+    },
+    {
       "version": "0.1.0-alpha.17",
       "changes": [
         "Development dependencies only, to clear npm audit: vite 8.3.5 (GHSA-587h-7wmj-h5pm, which includes its bundled launch-editor; GHSA-9jrq-w75r-8gcw; GHSA-rq7h-c2jc-7f22), vitest and @vitest/coverage-v8 4.1.12 (GHSA-qxg6-89mg-rqv8, GHSA-xp26-3454-mjgp), and an override pinning minimatch to ^11.0.1 under eslint and typescript-eslint (GHSA-g3hv-75wg-m249). The published library is unchanged."
