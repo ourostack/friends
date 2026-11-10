@@ -520,7 +520,11 @@ export class FileFriendStore implements ExternalIdClaimStore {
   private async readPendingClaim(claimPath: string, identityDigest: string): Promise<ExternalIdClaimJournal> {
     this.assertClaimsDirectoryIdentity()
     const handle = await fsPromises.open(claimPath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW)
-    const stat = await handle.stat()
+    let stat = await handle.stat()
+    if (stat.isFile() && stat.mode % 0o1000 !== 0o600 && (stat.mode & 0o022) === 0 && (!process.getuid || stat.uid === process.getuid())) {
+      await handle.chmod(0o600)
+      stat = await handle.stat()
+    }
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_CLAIM_BYTES || stat.mode % 0o1000 !== 0o600 || (process.getuid && stat.uid !== process.getuid())) {
       await handle.close()
       throw new Error("external identity claim journal has unsafe ownership, mode, type, or size")
@@ -735,7 +739,7 @@ export class FileFriendStore implements ExternalIdClaimStore {
     this.assertFriendsDirectoryIdentity()
     const claimsDir = path.join(this.friendsPath, CLAIMS_DIR_NAME)
     await fsPromises.mkdir(claimsDir, { recursive: true, mode: 0o700 })
-    this.assertPrivateClaimsDirectory(await fsPromises.lstat(claimsDir))
+    this.assertPrivateClaimsDirectory(this.tightenOwnClaimsDirectoryMode(claimsDir))
     if (this.claimsDirectoryFd === undefined) {
       const flags = fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW
       this.claimsDirectoryFd = fs.openSync(claimsDir, flags)
@@ -744,6 +748,27 @@ export class FileFriendStore implements ExternalIdClaimStore {
     }
     this.assertClaimsDirectoryIdentity()
     this.syncFriendsDirectory()
+  }
+
+  /**
+   * Git records neither 700 nor 600, so a bundle checked out on another machine has the claims directory at 755 and
+   * its journals at 644. A real directory this process owns that nobody else can write is tightened to 700 here,
+   * through a no-follow descriptor whose identity matches what was inspected. Anything else is returned as found for
+   * the caller's check to refuse: a symlink, another type, another owner, or group- or world-writable bits.
+   */
+  private tightenOwnClaimsDirectoryMode(claimsDir: string): fs.Stats {
+    const found = fs.lstatSync(claimsDir)
+    if (!found.isDirectory() || found.mode % 0o1000 === 0o700 || (found.mode & 0o022) !== 0 || (process.getuid && found.uid !== process.getuid())) return found
+    const fd = fs.openSync(claimsDir, fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW)
+    try {
+      const opened = fs.fstatSync(fd)
+      /* v8 ignore next -- a directory swapped between lstat and open is left loose for the caller to refuse @preserve */
+      if (opened.dev !== found.dev || opened.ino !== found.ino) return found
+      fs.fchmodSync(fd, 0o700)
+      return fs.fstatSync(fd)
+    } finally {
+      fs.closeSync(fd)
+    }
   }
 
   private assertPrivateClaimsDirectory(stat: fs.Stats): void {
@@ -850,7 +875,7 @@ export class FileFriendStore implements ExternalIdClaimStore {
     const claimsDir = path.join(this.friendsPath, CLAIMS_DIR_NAME)
     try {
       if (this.claimsDirectoryFd === undefined) {
-        this.assertPrivateClaimsDirectory(await fsPromises.lstat(claimsDir))
+        this.assertPrivateClaimsDirectory(this.tightenOwnClaimsDirectoryMode(claimsDir))
         const flags = fs.constants.O_RDONLY | fs.constants.O_DIRECTORY | fs.constants.O_NOFOLLOW
         this.claimsDirectoryFd = fs.openSync(claimsDir, flags)
         const retained = fs.fstatSync(this.claimsDirectoryFd)
