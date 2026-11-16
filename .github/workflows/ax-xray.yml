@@ -1,0 +1,78 @@
+name: AX X-ray
+
+# Ouro AX's X-ray against friends' stdio MCP server, and the action claims over its ouro-actions declarations, on every
+# pull request and on main. Each report is uploaded as an artifact whose name contains "xray", for the adoption ledger.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ax-xray-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  ax-xray:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      # The inventory is the server's own tools/list, so a tool it serves without a declaration, or a declaration it
+      # doesn't serve, fails the X-ray's inventory claim.
+      - name: Inventory from the live tools/list
+        run: |
+          mkdir -p xray
+          DIR="$RUNNER_TEMP/xray-home/friends"
+          printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | node dist/mcp/bin.js --dir "$DIR" | jq '.result' > xray/tools-list.json
+          jq '{mcp: [.tools[].name]}' xray/tools-list.json > xray/inventory.json
+
+      # Exits 0 only when the server conforms, and writes the report to xray/report.json.
+      - name: Ouro AX X-ray
+        run: |
+          set -o pipefail
+          node lib/ouro-ui/registry/ouro/ax/xray.ts \
+            --mcp "node $PWD/dist/mcp/bin.js --dir $RUNNER_TEMP/xray-home/friends" \
+            --inventory xray/inventory.json --conformance \
+            --home "$RUNNER_TEMP/xray-home" --timeout 60000 \
+            --commit "$GITHUB_SHA" --json --md xray/xray.md > xray/report.json
+
+      - name: Action claims over the declarations
+        run: |
+          mkdir -p xray-actions
+          node tools/ouro-actions/ouro-actions.mts check actions/friends.actions.mts actions/generated \
+            --report xray-actions/report.json --app "friends" --commit "$GITHUB_SHA"
+
+      - name: Upload the X-ray
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: xray
+          path: xray/
+          retention-days: 90
+
+      - name: Upload the action claims
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: actions-xray
+          path: xray-actions/
+          retention-days: 90
