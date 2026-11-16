@@ -1,0 +1,1075 @@
+{
+  "generator": "ouro-actions 0.17.1",
+  "set": "friends",
+  "tools": [
+    {
+      "name": "resolve_party",
+      "title": "Resolve party",
+      "description": "Resolve an external identity (provider + externalId on a channel) into a friend record, creating one on first contact. Returns { friend, channel, created }.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "description": "identity provider, e.g. aad, local, teams-conversation, imessage-handle, email-address, a2a-agent"
+          },
+          "externalId": {
+            "type": "string",
+            "description": "the external identity within the provider"
+          },
+          "displayName": {
+            "type": "string",
+            "description": "display name for the party (use 'Unknown' if not known)"
+          },
+          "channel": {
+            "type": "string",
+            "description": "the channel/sense the session belongs to, e.g. cli, teams, mcp"
+          },
+          "tenantId": {
+            "type": "string",
+            "description": "optional tenant id"
+          }
+        },
+        "required": [
+          "provider",
+          "externalId"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "describe_trust",
+      "title": "Describe trust",
+      "description": "Explain the trust context for a friend: level, basis (direct/shared_group/unknown), what it permits and constrains.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "friendId": {
+            "type": "string",
+            "description": "friend uuid or name"
+          },
+          "channel": {
+            "type": "string",
+            "description": "the channel/sense for the explanation"
+          },
+          "isGroupChat": {
+            "type": "string",
+            "description": "set to 'true' when the conversation is a group chat"
+          }
+        },
+        "required": [
+          "friendId",
+          "channel"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "assess_standing",
+      "title": "Assess standing",
+      "description": "Assess a peer's earned standing from your FIRST-PARTY outcomes with them: a tier (proven/reliable/mixed/untested/troubled), the basis count, and the tally. Advisory only — never changes trust, never shared. Returns a Standing, or { ok:false, status:'not_found' } when the friend is missing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "friendId": {
+            "type": "string",
+            "description": "friend uuid or name"
+          }
+        },
+        "required": [
+          "friendId"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "explain_standing",
+      "title": "Explain standing",
+      "description": "Explain a peer's earned standing in words: the tier with a human summary, why, and advisory notes that frame it as input to a MANUAL trust decision (never an instruction to change trust). Returns a StandingExplanation, or { ok:false, status:'not_found' } when the friend is missing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "friendId": {
+            "type": "string",
+            "description": "friend uuid or name"
+          }
+        },
+        "required": [
+          "friendId"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "get_friend",
+      "title": "Get friend",
+      "description": "Fetch a single friend record by uuid or by name.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "friendId": {
+            "type": "string",
+            "description": "friend uuid or name"
+          }
+        },
+        "required": [
+          "friendId"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_friends",
+      "title": "List friends",
+      "description": "List friend records, optionally filtered by trust level and kind, optionally limited.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "trust": {
+            "type": "string",
+            "description": "filter by trust level: family/friend/acquaintance/stranger"
+          },
+          "kind": {
+            "type": "string",
+            "description": "filter by kind: human/agent"
+          },
+          "limit": {
+            "type": "string",
+            "description": "max number of records to return"
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "save_note",
+      "title": "Save note",
+      "description": "Save a friend's name, a tool preference, or a general note. Use override='true' to overwrite an existing value.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "friendId": {
+            "type": "string",
+            "description": "friend uuid or name"
+          },
+          "type": {
+            "type": "string",
+            "description": "what to save",
+            "enum": [
+              "name",
+              "tool_preference",
+              "note"
+            ]
+          },
+          "key": {
+            "type": "string",
+            "description": "key for tool_preference or note"
+          },
+          "content": {
+            "type": "string",
+            "description": "the value to save"
+          },
+          "override": {
+            "type": "string",
+            "description": "set to 'true' to overwrite an existing value",
+            "enum": [
+              "true",
+              "false"
+            ]
+          },
+          "provenance": {
+            "type": "object",
+            "description": "optional attribution { assertedBy: { agentId, agentName } }"
+          }
+        },
+        "required": [
+          "friendId",
+          "type",
+          "content"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "record_interaction",
+      "title": "Record interaction",
+      "description": "Record a turn with a friend: accumulate token usage and/or append a shared-mission outcome (bumping familiarity).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "friendId": {
+            "type": "string",
+            "description": "friend uuid or name"
+          },
+          "usage": {
+            "type": "object",
+            "description": "token usage; only output_tokens is counted"
+          },
+          "outcome": {
+            "type": "object",
+            "description": "shared-mission outcome { missionId, result, note? }"
+          },
+          "familiarityDelta": {
+            "type": "string",
+            "description": "how much to bump familiarity (default 1)"
+          },
+          "provenance": {
+            "type": "object",
+            "description": "optional attribution for the outcome"
+          }
+        },
+        "required": [
+          "friendId"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "upsert_group",
+      "title": "Upsert group",
+      "description": "Upsert shared-group participant context: link each participant to the group, promoting strangers to acquaintances.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "groupExternalId": {
+            "type": "string",
+            "description": "the group's external id"
+          },
+          "participants": {
+            "type": "array",
+            "description": "participants [{ provider, externalId, displayName? }]"
+          }
+        },
+        "required": [
+          "groupExternalId",
+          "participants"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "set_trust",
+      "title": "Set trust",
+      "description": "Set a friend's trust level (also mirrors it onto the record's role).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "friendId": {
+            "type": "string",
+            "description": "friend uuid or name"
+          },
+          "trustLevel": {
+            "type": "string",
+            "description": "the trust level to set",
+            "enum": [
+              "family",
+              "friend",
+              "acquaintance",
+              "stranger"
+            ]
+          }
+        },
+        "required": [
+          "friendId",
+          "trustLevel"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "link_identity",
+      "title": "Link identity",
+      "description": "Link an external identity to a friend, merging any orphan record that already holds it (cross-channel unification).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "friendId": {
+            "type": "string",
+            "description": "friend uuid or name"
+          },
+          "provider": {
+            "type": "string",
+            "description": "identity provider, e.g. aad, local, teams-conversation, imessage-handle, email-address, a2a-agent"
+          },
+          "externalId": {
+            "type": "string",
+            "description": "the external identity within the provider"
+          },
+          "tenantId": {
+            "type": "string",
+            "description": "optional tenant id"
+          }
+        },
+        "required": [
+          "friendId",
+          "provider",
+          "externalId"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "unlink_identity",
+      "title": "Unlink identity",
+      "description": "Remove an external identity from a friend.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "friendId": {
+            "type": "string",
+            "description": "friend uuid or name"
+          },
+          "provider": {
+            "type": "string",
+            "description": "identity provider, e.g. aad, local, teams-conversation, imessage-handle, email-address, a2a-agent"
+          },
+          "externalId": {
+            "type": "string",
+            "description": "the external identity within the provider"
+          }
+        },
+        "required": [
+          "friendId",
+          "provider",
+          "externalId"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "onboard_agent",
+      "title": "Onboard agent",
+      "description": "Upsert an agent-peer friend record from already-resolved coordinates (no HTTP card fetch).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "the peer agent's name"
+          },
+          "agentId": {
+            "type": "string",
+            "description": "the a2a agent id"
+          },
+          "trustLevel": {
+            "type": "string",
+            "description": "trust level (default stranger (cold contact))"
+          },
+          "a2a": {
+            "type": "object",
+            "description": "a2a coordinates { cardUrl?, endpointUrl?, protocolVersion? }"
+          },
+          "mailbox": {
+            "type": "object",
+            "description": "optional A2A git-mailbox coords { repo, selfOutboxAgentId }"
+          },
+          "bundleName": {
+            "type": "string",
+            "description": "optional bundle name"
+          }
+        },
+        "required": [
+          "name",
+          "agentId"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "connect_to",
+      "title": "Connect to",
+      "description": "Management-sense control plane (brick 8): the owner links one of their OWN agents into this agent's fleet — introduce a peer by agentId/did/name at a trust level (default family for own-fleet). Authority-gated: commits inline ONLY from a local (owner-only stdio) or roster-verified same-account closed sense; an open sense never commits inline (it downgrades to a confirm-prompt); a bare name with no resolvable handle/DID and no record hit returns needs_handle_or_introduction (never fabricates a target). Writes one control-plane audit record (action:'connect') through the wired sink. Returns { ok:true, status:'connected', record } or { ok:false, status:'downgraded'|'needs_handle_or_introduction', downgrade? }.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "description": "the peer agent's join-key agentId (an owner-supplied handle)"
+          },
+          "did": {
+            "type": "string",
+            "description": "the peer's DID (an alternative handle; must resolve to an existing record)"
+          },
+          "name": {
+            "type": "string",
+            "description": "the peer's colloquial name (resolves ONLY by matching an existing record — never fabricated)"
+          },
+          "trustLevel": {
+            "type": "string",
+            "description": "the trust to link at (default family for own-fleet linked agents)",
+            "enum": [
+              "family",
+              "friend",
+              "acquaintance",
+              "stranger"
+            ]
+          },
+          "proof": {
+            "type": "string",
+            "description": "optional opaque proof slot (reserved; the TOFU path ignores it)"
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "whoami",
+      "title": "Who am I",
+      "description": "Resolve who the machine owner is and which friend record represents the self.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "channel_caps",
+      "title": "Channel capabilities",
+      "description": "Return the capabilities of a channel (integrations, markdown, streaming, rich cards, max length).",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "type": "string",
+            "description": "the channel to look up"
+          }
+        },
+        "required": [
+          "channel"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "resolve_room",
+      "title": "Resolve room",
+      "description": "Resolve a room (a group's external id) into its members, each with their trust context and how they're known (direct/group_only). Pure read.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "groupExternalId": {
+            "type": "string",
+            "description": "the group's external id (e.g. group:project;+;g1)"
+          },
+          "channel": {
+            "type": "string",
+            "description": "channel lens for the trust explanation (default mcp)"
+          }
+        },
+        "required": [
+          "groupExternalId"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "share_profile",
+      "title": "Share profile",
+      "description": "Producer: prepare a consent-gated, scope-filtered, provenance-preserving profile-share envelope for another agent (names the party by join key, never the local uuid). Self identity comes from whoami. Returns { ok, envelope } or { ok:false, status }.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "friendId": {
+            "type": "string",
+            "description": "the local friend to share (uuid or name)"
+          },
+          "toAgentId": {
+            "type": "string",
+            "description": "the recipient agent's join-key agentId"
+          },
+          "scope": {
+            "type": "string",
+            "description": "what to share: identity scopes carry only the join key; notes:* / outcomes require an explicit grant under the default tiered policy",
+            "enum": [
+              "name",
+              "identity",
+              "notes:safe",
+              "notes:all",
+              "outcomes"
+            ]
+          },
+          "proof": {
+            "type": "string",
+            "description": "optional opaque proof to stamp on the envelope (for a non-TOFU recipient verifier)"
+          }
+        },
+        "required": [
+          "friendId",
+          "toAgentId",
+          "scope"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "import_profile",
+      "title": "Import profile",
+      "description": "Consumer (non-clobbering merge): import a profile-share envelope. Resolves the party by join key; lands facts in the imported namespace WITHOUT touching first-party notes; source trust caps acceptance; never changes the party's trust. Returns { ok, status, record }.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "envelope": {
+            "type": "object",
+            "description": "the ProfileShareEnvelope to import"
+          },
+          "fromAgentId": {
+            "type": "string",
+            "description": "the agent the envelope arrived from (join-key agentId)"
+          },
+          "trustOfSource": {
+            "type": "string",
+            "description": "this agent's resolved trust in the source agent — the acceptance cap",
+            "enum": [
+              "family",
+              "friend",
+              "acquaintance",
+              "stranger"
+            ]
+          }
+        },
+        "required": [
+          "envelope",
+          "fromAgentId",
+          "trustOfSource"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "grant_share",
+      "title": "Grant share",
+      "description": "Mint an explicit, revocable consent grant: an agent may receive a scope of a subject (a friend's profile, keyed by friend uuid; or a mission, keyed by its missionKey). The consent half of the moat.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "subjectKey": {
+            "type": "string",
+            "description": "whose data may be shared — a local friend uuid for a profile, or a missionKey for a mission (the legacy arg name subjectFriendId is still accepted)"
+          },
+          "recipientAgentId": {
+            "type": "string",
+            "description": "the agent that may receive it (join-key agentId)"
+          },
+          "scope": {
+            "type": "string",
+            "description": "the scope consented to",
+            "enum": [
+              "name",
+              "identity",
+              "notes:safe",
+              "notes:all",
+              "outcomes",
+              "mission"
+            ]
+          },
+          "expiresAt": {
+            "type": "string",
+            "description": "optional ISO expiry; absent ⇒ never expires"
+          }
+        },
+        "required": [
+          "subjectKey",
+          "recipientAgentId",
+          "scope"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "revoke_share",
+      "title": "Revoke share",
+      "description": "Revoke a consent grant by id (tombstones it; the audit trail survives). The right-to-be-forgotten lever.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "grantId": {
+            "type": "string",
+            "description": "the grant id to revoke"
+          }
+        },
+        "required": [
+          "grantId"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_shares",
+      "title": "List shares",
+      "description": "List consent grants with their effective state, optionally filtered by subject / recipient / effectiveness. The audit + revoke surface.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "subjectKey": {
+            "type": "string",
+            "description": "filter to one subject — a friend uuid or a missionKey (the legacy arg name subjectFriendId is still accepted)"
+          },
+          "recipientAgentId": {
+            "type": "string",
+            "description": "filter to one recipient agent"
+          },
+          "effectiveOnly": {
+            "type": "string",
+            "description": "set to 'true' to return only grants that currently consent",
+            "enum": [
+              "true",
+              "false"
+            ]
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "record_mission",
+      "title": "Record mission",
+      "description": "Upsert a shared mission (brick 3) by its cross-agent missionKey: create one when the key is unknown, else merge into the existing record. Appends first-party learnings / participants / outcomes and sets status. The mission analogue of record_interaction's outcome writer.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "missionKey": {
+            "type": "string",
+            "description": "the cross-agent join key for the mission (a ticket id / repo+PR / slugged name)"
+          },
+          "title": {
+            "type": "string",
+            "description": "human title; used only when CREATING (ignored on upsert)"
+          },
+          "status": {
+            "type": "string",
+            "description": "the mission status (first-party)",
+            "enum": [
+              "active",
+              "succeeded",
+              "partial",
+              "failed",
+              "abandoned"
+            ]
+          },
+          "participants": {
+            "type": "array",
+            "description": "agent attributions [{ agentId?, agentName? }], merged deduped by agentId"
+          },
+          "learnings": {
+            "type": "array",
+            "description": "first-party learnings [{ key, value, shareable? }] appended to the mission"
+          },
+          "outcomes": {
+            "type": "array",
+            "description": "first-party outcomes [{ missionId, result, note? }] appended to the mission"
+          }
+        },
+        "required": [
+          "missionKey"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "get_mission",
+      "title": "Get mission",
+      "description": "Fetch a single mission record by its local uuid id.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "missionId": {
+            "type": "string",
+            "description": "the mission's local uuid id"
+          }
+        },
+        "required": [
+          "missionId"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "list_missions",
+      "title": "List missions",
+      "description": "List mission records, optionally limited.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "string",
+            "description": "max number of records to return"
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "share_mission",
+      "title": "Share mission",
+      "description": "Producer: prepare a consent-gated, scope-filtered, provenance-preserving mission-share envelope for another agent (names the mission by its missionKey, never the local uuid). Self identity comes from whoami. 'mission' carries the shareable learnings; 'outcomes' carries the mission's outcomes. Returns { ok, envelope } or { ok:false, status }.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "missionId": {
+            "type": "string",
+            "description": "the local mission to share (its local uuid id)"
+          },
+          "toAgentId": {
+            "type": "string",
+            "description": "the recipient agent's join-key agentId"
+          },
+          "scope": {
+            "type": "string",
+            "description": "what to share: 'mission' (title/status + shareable learnings) or 'outcomes' (the result rows); both require an explicit grant under the tiered policy",
+            "enum": [
+              "mission",
+              "outcomes"
+            ]
+          },
+          "proof": {
+            "type": "string",
+            "description": "optional opaque proof to stamp on the envelope (for a non-TOFU recipient verifier)"
+          }
+        },
+        "required": [
+          "missionId",
+          "toAgentId",
+          "scope"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "import_mission",
+      "title": "Import mission",
+      "description": "Consumer (non-clobbering merge): import a mission-share envelope. Resolves the mission by missionKey; lands learnings in the imported namespace WITHOUT touching first-party learnings; append-merges + dedupes outcomes; source trust caps acceptance; never recomputes status/participants. Returns { ok, status, record }.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "envelope": {
+            "type": "object",
+            "description": "the MissionShareEnvelope to import"
+          },
+          "fromAgentId": {
+            "type": "string",
+            "description": "the agent the envelope arrived from (join-key agentId)"
+          },
+          "trustOfSource": {
+            "type": "string",
+            "description": "this agent's resolved trust in the source agent — the acceptance cap",
+            "enum": [
+              "family",
+              "friend",
+              "acquaintance",
+              "stranger"
+            ]
+          }
+        },
+        "required": [
+          "envelope",
+          "fromAgentId",
+          "trustOfSource"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "coordinate",
+      "title": "Coordinate",
+      "description": "Producer (brick 5): prepare a coordination message that negotiates WHO does a mission — one of request/offer/accept/decline/handoff, named by the mission's missionKey (never the local uuid). Consent-gated via the identity-tier 'coordinate' scope (trust ≥ friend suffices). 'accept' claims the assignment for self; 'handoff' (you must hold the assignment) proposes a new assignee whose own accept confirms it (non-transitive). Self identity comes from whoami. Returns { ok, envelope } or { ok:false, status: not_found|no_consent|not_assignee }.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "missionId": {
+            "type": "string",
+            "description": "the local mission to coordinate (its local uuid id)"
+          },
+          "toAgentId": {
+            "type": "string",
+            "description": "the recipient agent's join-key agentId"
+          },
+          "intent": {
+            "type": "string",
+            "description": "the coordination verb: request (will you take this?) / offer (I'll take this) / accept (yes, I'm on it — sets assignee=self) / decline (no) / handoff (it's yours now — you must hold the assignment; proposes a new assignee)",
+            "enum": [
+              "request",
+              "offer",
+              "accept",
+              "decline",
+              "handoff"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "description": "optional free text carried on the message + logged"
+          },
+          "proposedAssignee": {
+            "type": "object",
+            "description": "the proposed new assignee { agentId?, agentName? } — meaningful ONLY on intent=handoff"
+          },
+          "task": {
+            "type": "object",
+            "description": "optional delegation task-spec { summary, details?, inputs? } — meaningful ONLY on intent=request (gap-2); the producer mints a requestId, stamps it on the envelope, and records the delegation first-party for the result-return to correlate against"
+          },
+          "proof": {
+            "type": "string",
+            "description": "optional opaque proof to stamp on the envelope (for a non-TOFU recipient verifier)"
+          }
+        },
+        "required": [
+          "missionId",
+          "toAgentId",
+          "intent"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "import_coordination",
+      "title": "Import coordination",
+      "description": "Consumer (brick 5, non-clobbering merge): import a coordination message. Resolves the mission by missionKey; appends the intent to coordination.log stamped origin:imported WITHOUT touching first-party learnings/notes/status; only an 'accept' sets the assignee (last-writer-wins by issuedAt); a 'handoff' never forces an assignee onto you (only your own accept does); never recomputes status/trust/standing; source trust caps acceptance; a friend/family peer may seed an unknown mission. Returns { ok, status: logged|assigned|seeded, record } or { ok:false, status }.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "envelope": {
+            "type": "object",
+            "description": "the CoordinationEnvelope to import"
+          },
+          "fromAgentId": {
+            "type": "string",
+            "description": "the agent the envelope arrived from (join-key agentId)"
+          },
+          "trustOfSource": {
+            "type": "string",
+            "description": "this agent's resolved trust in the source agent — the acceptance cap",
+            "enum": [
+              "family",
+              "friend",
+              "acquaintance",
+              "stranger"
+            ]
+          }
+        },
+        "required": [
+          "envelope",
+          "fromAgentId",
+          "trustOfSource"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "get_coordination",
+      "title": "Get coordination",
+      "description": "Read lens (brick 5): return a mission's coordination state — its current assignee (who holds it; absent ⇒ unclaimed) + the append-only log of every request/offer/accept/decline/handoff that flowed. Returns { assignee, assignedAt?, log } (the empty default { assignee: undefined, log: [] } when never coordinated), or { ok:false, status:'not_found' } when the mission is missing.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "missionId": {
+            "type": "string",
+            "description": "the mission's local uuid id"
+          }
+        },
+        "required": [
+          "missionId"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "send_result",
+      "title": "Send result",
+      "description": "Producer (gap-2 — the result-return): B returns its DELIVERABLE for a delegation, attributed to B (from whoami) + correlated to A's task-spec by requestId, named by the mission's missionKey (never the local uuid). Consent-gated via the identity-tier 'coordinate' scope (a result is B answering A's own delegation — trust ≥ friend suffices; NO new scope). Records the result first-party on B's own mission. Returns { ok, envelope } or { ok:false, status: not_found|no_consent }.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "missionId": {
+            "type": "string",
+            "description": "the local mission B is returning a result for (its local uuid id)"
+          },
+          "toAgentId": {
+            "type": "string",
+            "description": "the recipient agent's join-key agentId — A, the delegator"
+          },
+          "requestId": {
+            "type": "string",
+            "description": "the delegation correlation key (the task-spec's requestId)"
+          },
+          "result": {
+            "type": "object",
+            "description": "B's deliverable { summary, artifact?, outputs? }"
+          },
+          "proof": {
+            "type": "string",
+            "description": "optional opaque proof to stamp on the envelope (for a non-TOFU recipient verifier)"
+          }
+        },
+        "required": [
+          "missionId",
+          "toAgentId",
+          "requestId",
+          "result"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "import_result",
+      "title": "Import result",
+      "description": "Consumer (gap-2, non-clobbering merge): A imports B's result-return. Resolves the mission by missionKey; lands B's deliverable QUARANTINED + attributed under importedResults WITHOUT touching first-party; source trust caps acceptance (checked before correlation); a result whose requestId matches no prior first-party delegation is REJECTED (no_delegation — A only accepts results for work it delegated); an unknown mission is no_mission (a result never seeds a mission); never recomputes status/participants. Returns { ok, status, record } or { ok:false, status: untrusted_source|no_mission|no_delegation|invalid }.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "envelope": {
+            "type": "object",
+            "description": "the MissionResultEnvelope to import"
+          },
+          "fromAgentId": {
+            "type": "string",
+            "description": "the agent the envelope arrived from (join-key agentId) — B"
+          },
+          "trustOfSource": {
+            "type": "string",
+            "description": "this agent's resolved trust in the source agent — the acceptance cap",
+            "enum": [
+              "family",
+              "friend",
+              "acquaintance",
+              "stranger"
+            ]
+          }
+        },
+        "required": [
+          "envelope",
+          "fromAgentId",
+          "trustOfSource"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "openWorldHint": false
+      }
+    }
+  ],
+  "refusals": {}
+}
