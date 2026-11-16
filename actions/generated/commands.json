@@ -1,0 +1,777 @@
+{
+  "generator": "ouro-actions 0.17.1",
+  "set": "friends",
+  "tool": "friends-mcp",
+  "commands": [
+    {
+      "name": "resolve-party",
+      "summary": "Resolve an external identity (provider + externalId on a channel) into a friend record, creating one on first contact. Returns { friend, channel, created }.",
+      "effect": "private",
+      "flags": {
+        "provider": {
+          "type": "string",
+          "description": "identity provider, e.g. aad, local, teams-conversation, imessage-handle, email-address, a2a-agent",
+          "required": true
+        },
+        "external-id": {
+          "type": "string",
+          "description": "the external identity within the provider",
+          "required": true
+        },
+        "display-name": {
+          "type": "string",
+          "description": "display name for the party (use 'Unknown' if not known)"
+        },
+        "channel": {
+          "type": "string",
+          "description": "the channel/sense the session belongs to, e.g. cli, teams, mcp"
+        },
+        "tenant-id": {
+          "type": "string",
+          "description": "optional tenant id"
+        }
+      }
+    },
+    {
+      "name": "describe-trust",
+      "summary": "Explain the trust context for a friend: level, basis (direct/shared_group/unknown), what it permits and constrains.",
+      "effect": "private",
+      "readOnly": true,
+      "flags": {
+        "friend-id": {
+          "type": "string",
+          "description": "friend uuid or name",
+          "required": true
+        },
+        "channel": {
+          "type": "string",
+          "description": "the channel/sense for the explanation",
+          "required": true
+        },
+        "is-group-chat": {
+          "type": "string",
+          "description": "set to 'true' when the conversation is a group chat"
+        }
+      }
+    },
+    {
+      "name": "assess-standing",
+      "summary": "Assess a peer's earned standing from your FIRST-PARTY outcomes with them: a tier (proven/reliable/mixed/untested/troubled), the basis count, and the tally. Advisory only — never changes trust, never shared. Returns a Standing, or { ok:false, status:'not_found' } when the friend is missing.",
+      "effect": "private",
+      "readOnly": true,
+      "flags": {
+        "friend-id": {
+          "type": "string",
+          "description": "friend uuid or name",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "explain-standing",
+      "summary": "Explain a peer's earned standing in words: the tier with a human summary, why, and advisory notes that frame it as input to a MANUAL trust decision (never an instruction to change trust). Returns a StandingExplanation, or { ok:false, status:'not_found' } when the friend is missing.",
+      "effect": "private",
+      "readOnly": true,
+      "flags": {
+        "friend-id": {
+          "type": "string",
+          "description": "friend uuid or name",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "get-friend",
+      "summary": "Fetch a single friend record by uuid or by name.",
+      "effect": "private",
+      "readOnly": true,
+      "flags": {
+        "friend-id": {
+          "type": "string",
+          "description": "friend uuid or name",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "list-friends",
+      "summary": "List friend records, optionally filtered by trust level and kind, optionally limited.",
+      "effect": "private",
+      "readOnly": true,
+      "flags": {
+        "trust": {
+          "type": "string",
+          "description": "filter by trust level: family/friend/acquaintance/stranger"
+        },
+        "kind": {
+          "type": "string",
+          "description": "filter by kind: human/agent"
+        },
+        "limit": {
+          "type": "string",
+          "description": "max number of records to return"
+        }
+      }
+    },
+    {
+      "name": "save-note",
+      "summary": "Save a friend's name, a tool preference, or a general note. Use override='true' to overwrite an existing value.",
+      "effect": "private",
+      "flags": {
+        "friend-id": {
+          "type": "string",
+          "description": "friend uuid or name",
+          "required": true
+        },
+        "type": {
+          "type": "enum",
+          "description": "what to save",
+          "values": [
+            "name",
+            "tool_preference",
+            "note"
+          ],
+          "required": true
+        },
+        "key": {
+          "type": "string",
+          "description": "key for tool_preference or note"
+        },
+        "content": {
+          "type": "string",
+          "description": "the value to save",
+          "required": true
+        },
+        "override": {
+          "type": "enum",
+          "description": "set to 'true' to overwrite an existing value",
+          "values": [
+            "true",
+            "false"
+          ]
+        },
+        "provenance": {
+          "type": "string",
+          "description": "optional attribution { assertedBy: { agentId, agentName } }, as JSON."
+        }
+      }
+    },
+    {
+      "name": "record-interaction",
+      "summary": "Record a turn with a friend: accumulate token usage and/or append a shared-mission outcome (bumping familiarity).",
+      "effect": "private",
+      "flags": {
+        "friend-id": {
+          "type": "string",
+          "description": "friend uuid or name",
+          "required": true
+        },
+        "usage": {
+          "type": "string",
+          "description": "token usage; only output_tokens is counted, as JSON."
+        },
+        "outcome": {
+          "type": "string",
+          "description": "shared-mission outcome { missionId, result, note? }, as JSON."
+        },
+        "familiarity-delta": {
+          "type": "string",
+          "description": "how much to bump familiarity (default 1)"
+        },
+        "provenance": {
+          "type": "string",
+          "description": "optional attribution for the outcome, as JSON."
+        }
+      }
+    },
+    {
+      "name": "upsert-group",
+      "summary": "Upsert shared-group participant context: link each participant to the group, promoting strangers to acquaintances.",
+      "effect": "private",
+      "flags": {
+        "group-external-id": {
+          "type": "string",
+          "description": "the group's external id",
+          "required": true
+        },
+        "participants": {
+          "type": "string",
+          "description": "participants [{ provider, externalId, displayName? }], as JSON.",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "set-trust",
+      "summary": "Set a friend's trust level (also mirrors it onto the record's role).",
+      "effect": "private",
+      "flags": {
+        "friend-id": {
+          "type": "string",
+          "description": "friend uuid or name",
+          "required": true
+        },
+        "trust-level": {
+          "type": "enum",
+          "description": "the trust level to set",
+          "values": [
+            "family",
+            "friend",
+            "acquaintance",
+            "stranger"
+          ],
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "link-identity",
+      "summary": "Link an external identity to a friend, merging any orphan record that already holds it (cross-channel unification).",
+      "effect": "private",
+      "flags": {
+        "friend-id": {
+          "type": "string",
+          "description": "friend uuid or name",
+          "required": true
+        },
+        "provider": {
+          "type": "string",
+          "description": "identity provider, e.g. aad, local, teams-conversation, imessage-handle, email-address, a2a-agent",
+          "required": true
+        },
+        "external-id": {
+          "type": "string",
+          "description": "the external identity within the provider",
+          "required": true
+        },
+        "tenant-id": {
+          "type": "string",
+          "description": "optional tenant id"
+        }
+      }
+    },
+    {
+      "name": "unlink-identity",
+      "summary": "Remove an external identity from a friend.",
+      "effect": "private",
+      "flags": {
+        "friend-id": {
+          "type": "string",
+          "description": "friend uuid or name",
+          "required": true
+        },
+        "provider": {
+          "type": "string",
+          "description": "identity provider, e.g. aad, local, teams-conversation, imessage-handle, email-address, a2a-agent",
+          "required": true
+        },
+        "external-id": {
+          "type": "string",
+          "description": "the external identity within the provider",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "onboard-agent",
+      "summary": "Upsert an agent-peer friend record from already-resolved coordinates (no HTTP card fetch).",
+      "effect": "private",
+      "flags": {
+        "name": {
+          "type": "string",
+          "description": "the peer agent's name",
+          "required": true
+        },
+        "agent-id": {
+          "type": "string",
+          "description": "the a2a agent id",
+          "required": true
+        },
+        "trust-level": {
+          "type": "string",
+          "description": "trust level (default stranger (cold contact))"
+        },
+        "a2a": {
+          "type": "string",
+          "description": "a2a coordinates { cardUrl?, endpointUrl?, protocolVersion? }, as JSON."
+        },
+        "mailbox": {
+          "type": "string",
+          "description": "optional A2A git-mailbox coords { repo, selfOutboxAgentId }, as JSON."
+        },
+        "bundle-name": {
+          "type": "string",
+          "description": "optional bundle name"
+        }
+      }
+    },
+    {
+      "name": "connect-to",
+      "summary": "Management-sense control plane (brick 8): the owner links one of their OWN agents into this agent's fleet — introduce a peer by agentId/did/name at a trust level (default family for own-fleet). Authority-gated: commits inline ONLY from a local (owner-only stdio) or roster-verified same-account closed sense; an open sense never commits inline (it downgrades to a confirm-prompt); a bare name with no resolvable handle/DID and no record hit returns needs_handle_or_introduction (never fabricates a target). Writes one control-plane audit record (action:'connect') through the wired sink. Returns { ok:true, status:'connected', record } or { ok:false, status:'downgraded'|'needs_handle_or_introduction', downgrade? }.",
+      "effect": "private",
+      "flags": {
+        "agent-id": {
+          "type": "string",
+          "description": "the peer agent's join-key agentId (an owner-supplied handle)"
+        },
+        "did": {
+          "type": "string",
+          "description": "the peer's DID (an alternative handle; must resolve to an existing record)"
+        },
+        "name": {
+          "type": "string",
+          "description": "the peer's colloquial name (resolves ONLY by matching an existing record — never fabricated)"
+        },
+        "trust-level": {
+          "type": "enum",
+          "description": "the trust to link at (default family for own-fleet linked agents)",
+          "values": [
+            "family",
+            "friend",
+            "acquaintance",
+            "stranger"
+          ]
+        },
+        "proof": {
+          "type": "string",
+          "description": "optional opaque proof slot (reserved; the TOFU path ignores it)"
+        }
+      }
+    },
+    {
+      "name": "whoami",
+      "summary": "Resolve who the machine owner is and which friend record represents the self.",
+      "effect": "private",
+      "readOnly": true
+    },
+    {
+      "name": "channel-caps",
+      "summary": "Return the capabilities of a channel (integrations, markdown, streaming, rich cards, max length).",
+      "effect": "private",
+      "readOnly": true,
+      "flags": {
+        "channel": {
+          "type": "string",
+          "description": "the channel to look up",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "resolve-room",
+      "summary": "Resolve a room (a group's external id) into its members, each with their trust context and how they're known (direct/group_only). Pure read.",
+      "effect": "private",
+      "readOnly": true,
+      "flags": {
+        "group-external-id": {
+          "type": "string",
+          "description": "the group's external id (e.g. group:project;+;g1)",
+          "required": true
+        },
+        "channel": {
+          "type": "string",
+          "description": "channel lens for the trust explanation (default mcp)"
+        }
+      }
+    },
+    {
+      "name": "share-profile",
+      "summary": "Producer: prepare a consent-gated, scope-filtered, provenance-preserving profile-share envelope for another agent (names the party by join key, never the local uuid). Self identity comes from whoami. Returns { ok, envelope } or { ok:false, status }.",
+      "effect": "others",
+      "flags": {
+        "friend-id": {
+          "type": "string",
+          "description": "the local friend to share (uuid or name)",
+          "required": true
+        },
+        "to-agent-id": {
+          "type": "string",
+          "description": "the recipient agent's join-key agentId",
+          "required": true
+        },
+        "scope": {
+          "type": "enum",
+          "description": "what to share: identity scopes carry only the join key; notes:* / outcomes require an explicit grant under the default tiered policy",
+          "values": [
+            "name",
+            "identity",
+            "notes:safe",
+            "notes:all",
+            "outcomes"
+          ],
+          "required": true
+        },
+        "proof": {
+          "type": "string",
+          "description": "optional opaque proof to stamp on the envelope (for a non-TOFU recipient verifier)"
+        }
+      }
+    },
+    {
+      "name": "import-profile",
+      "summary": "Consumer (non-clobbering merge): import a profile-share envelope. Resolves the party by join key; lands facts in the imported namespace WITHOUT touching first-party notes; source trust caps acceptance; never changes the party's trust. Returns { ok, status, record }.",
+      "effect": "private",
+      "flags": {
+        "envelope": {
+          "type": "string",
+          "description": "the ProfileShareEnvelope to import, as JSON.",
+          "required": true
+        },
+        "from-agent-id": {
+          "type": "string",
+          "description": "the agent the envelope arrived from (join-key agentId)",
+          "required": true
+        },
+        "trust-of-source": {
+          "type": "enum",
+          "description": "this agent's resolved trust in the source agent — the acceptance cap",
+          "values": [
+            "family",
+            "friend",
+            "acquaintance",
+            "stranger"
+          ],
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "grant-share",
+      "summary": "Mint an explicit, revocable consent grant: an agent may receive a scope of a subject (a friend's profile, keyed by friend uuid; or a mission, keyed by its missionKey). The consent half of the moat.",
+      "effect": "others",
+      "flags": {
+        "subject-key": {
+          "type": "string",
+          "description": "whose data may be shared — a local friend uuid for a profile, or a missionKey for a mission (the legacy arg name subjectFriendId is still accepted)",
+          "required": true
+        },
+        "recipient-agent-id": {
+          "type": "string",
+          "description": "the agent that may receive it (join-key agentId)",
+          "required": true
+        },
+        "scope": {
+          "type": "enum",
+          "description": "the scope consented to",
+          "values": [
+            "name",
+            "identity",
+            "notes:safe",
+            "notes:all",
+            "outcomes",
+            "mission"
+          ],
+          "required": true
+        },
+        "expires-at": {
+          "type": "string",
+          "description": "optional ISO expiry; absent ⇒ never expires"
+        }
+      }
+    },
+    {
+      "name": "revoke-share",
+      "summary": "Revoke a consent grant by id (tombstones it; the audit trail survives). The right-to-be-forgotten lever.",
+      "effect": "private",
+      "flags": {
+        "grant-id": {
+          "type": "string",
+          "description": "the grant id to revoke",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "list-shares",
+      "summary": "List consent grants with their effective state, optionally filtered by subject / recipient / effectiveness. The audit + revoke surface.",
+      "effect": "private",
+      "readOnly": true,
+      "flags": {
+        "subject-key": {
+          "type": "string",
+          "description": "filter to one subject — a friend uuid or a missionKey (the legacy arg name subjectFriendId is still accepted)"
+        },
+        "recipient-agent-id": {
+          "type": "string",
+          "description": "filter to one recipient agent"
+        },
+        "effective-only": {
+          "type": "enum",
+          "description": "set to 'true' to return only grants that currently consent",
+          "values": [
+            "true",
+            "false"
+          ]
+        }
+      }
+    },
+    {
+      "name": "record-mission",
+      "summary": "Upsert a shared mission (brick 3) by its cross-agent missionKey: create one when the key is unknown, else merge into the existing record. Appends first-party learnings / participants / outcomes and sets status. The mission analogue of record_interaction's outcome writer.",
+      "effect": "private",
+      "flags": {
+        "mission-key": {
+          "type": "string",
+          "description": "the cross-agent join key for the mission (a ticket id / repo+PR / slugged name)",
+          "required": true
+        },
+        "title": {
+          "type": "string",
+          "description": "human title; used only when CREATING (ignored on upsert)"
+        },
+        "status": {
+          "type": "enum",
+          "description": "the mission status (first-party)",
+          "values": [
+            "active",
+            "succeeded",
+            "partial",
+            "failed",
+            "abandoned"
+          ]
+        },
+        "participants": {
+          "type": "string",
+          "description": "agent attributions [{ agentId?, agentName? }], merged deduped by agentId, as JSON."
+        },
+        "learnings": {
+          "type": "string",
+          "description": "first-party learnings [{ key, value, shareable? }] appended to the mission, as JSON."
+        },
+        "outcomes": {
+          "type": "string",
+          "description": "first-party outcomes [{ missionId, result, note? }] appended to the mission, as JSON."
+        }
+      }
+    },
+    {
+      "name": "get-mission",
+      "summary": "Fetch a single mission record by its local uuid id.",
+      "effect": "private",
+      "readOnly": true,
+      "flags": {
+        "mission-id": {
+          "type": "string",
+          "description": "the mission's local uuid id",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "list-missions",
+      "summary": "List mission records, optionally limited.",
+      "effect": "private",
+      "readOnly": true,
+      "flags": {
+        "limit": {
+          "type": "string",
+          "description": "max number of records to return"
+        }
+      }
+    },
+    {
+      "name": "share-mission",
+      "summary": "Producer: prepare a consent-gated, scope-filtered, provenance-preserving mission-share envelope for another agent (names the mission by its missionKey, never the local uuid). Self identity comes from whoami. 'mission' carries the shareable learnings; 'outcomes' carries the mission's outcomes. Returns { ok, envelope } or { ok:false, status }.",
+      "effect": "others",
+      "flags": {
+        "mission-id": {
+          "type": "string",
+          "description": "the local mission to share (its local uuid id)",
+          "required": true
+        },
+        "to-agent-id": {
+          "type": "string",
+          "description": "the recipient agent's join-key agentId",
+          "required": true
+        },
+        "scope": {
+          "type": "enum",
+          "description": "what to share: 'mission' (title/status + shareable learnings) or 'outcomes' (the result rows); both require an explicit grant under the tiered policy",
+          "values": [
+            "mission",
+            "outcomes"
+          ],
+          "required": true
+        },
+        "proof": {
+          "type": "string",
+          "description": "optional opaque proof to stamp on the envelope (for a non-TOFU recipient verifier)"
+        }
+      }
+    },
+    {
+      "name": "import-mission",
+      "summary": "Consumer (non-clobbering merge): import a mission-share envelope. Resolves the mission by missionKey; lands learnings in the imported namespace WITHOUT touching first-party learnings; append-merges + dedupes outcomes; source trust caps acceptance; never recomputes status/participants. Returns { ok, status, record }.",
+      "effect": "private",
+      "flags": {
+        "envelope": {
+          "type": "string",
+          "description": "the MissionShareEnvelope to import, as JSON.",
+          "required": true
+        },
+        "from-agent-id": {
+          "type": "string",
+          "description": "the agent the envelope arrived from (join-key agentId)",
+          "required": true
+        },
+        "trust-of-source": {
+          "type": "enum",
+          "description": "this agent's resolved trust in the source agent — the acceptance cap",
+          "values": [
+            "family",
+            "friend",
+            "acquaintance",
+            "stranger"
+          ],
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "coordinate",
+      "summary": "Producer (brick 5): prepare a coordination message that negotiates WHO does a mission — one of request/offer/accept/decline/handoff, named by the mission's missionKey (never the local uuid). Consent-gated via the identity-tier 'coordinate' scope (trust ≥ friend suffices). 'accept' claims the assignment for self; 'handoff' (you must hold the assignment) proposes a new assignee whose own accept confirms it (non-transitive). Self identity comes from whoami. Returns { ok, envelope } or { ok:false, status: not_found|no_consent|not_assignee }.",
+      "effect": "others",
+      "flags": {
+        "mission-id": {
+          "type": "string",
+          "description": "the local mission to coordinate (its local uuid id)",
+          "required": true
+        },
+        "to-agent-id": {
+          "type": "string",
+          "description": "the recipient agent's join-key agentId",
+          "required": true
+        },
+        "intent": {
+          "type": "enum",
+          "description": "the coordination verb: request (will you take this?) / offer (I'll take this) / accept (yes, I'm on it — sets assignee=self) / decline (no) / handoff (it's yours now — you must hold the assignment; proposes a new assignee)",
+          "values": [
+            "request",
+            "offer",
+            "accept",
+            "decline",
+            "handoff"
+          ],
+          "required": true
+        },
+        "note": {
+          "type": "string",
+          "description": "optional free text carried on the message + logged"
+        },
+        "proposed-assignee": {
+          "type": "string",
+          "description": "the proposed new assignee { agentId?, agentName? } — meaningful ONLY on intent=handoff, as JSON."
+        },
+        "task": {
+          "type": "string",
+          "description": "optional delegation task-spec { summary, details?, inputs? } — meaningful ONLY on intent=request (gap-2); the producer mints a requestId, stamps it on the envelope, and records the delegation first-party for the result-return to correlate against, as JSON."
+        },
+        "proof": {
+          "type": "string",
+          "description": "optional opaque proof to stamp on the envelope (for a non-TOFU recipient verifier)"
+        }
+      }
+    },
+    {
+      "name": "import-coordination",
+      "summary": "Consumer (brick 5, non-clobbering merge): import a coordination message. Resolves the mission by missionKey; appends the intent to coordination.log stamped origin:imported WITHOUT touching first-party learnings/notes/status; only an 'accept' sets the assignee (last-writer-wins by issuedAt); a 'handoff' never forces an assignee onto you (only your own accept does); never recomputes status/trust/standing; source trust caps acceptance; a friend/family peer may seed an unknown mission. Returns { ok, status: logged|assigned|seeded, record } or { ok:false, status }.",
+      "effect": "private",
+      "flags": {
+        "envelope": {
+          "type": "string",
+          "description": "the CoordinationEnvelope to import, as JSON.",
+          "required": true
+        },
+        "from-agent-id": {
+          "type": "string",
+          "description": "the agent the envelope arrived from (join-key agentId)",
+          "required": true
+        },
+        "trust-of-source": {
+          "type": "enum",
+          "description": "this agent's resolved trust in the source agent — the acceptance cap",
+          "values": [
+            "family",
+            "friend",
+            "acquaintance",
+            "stranger"
+          ],
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "get-coordination",
+      "summary": "Read lens (brick 5): return a mission's coordination state — its current assignee (who holds it; absent ⇒ unclaimed) + the append-only log of every request/offer/accept/decline/handoff that flowed. Returns { assignee, assignedAt?, log } (the empty default { assignee: undefined, log: [] } when never coordinated), or { ok:false, status:'not_found' } when the mission is missing.",
+      "effect": "private",
+      "readOnly": true,
+      "flags": {
+        "mission-id": {
+          "type": "string",
+          "description": "the mission's local uuid id",
+          "required": true
+        }
+      }
+    },
+    {
+      "name": "send-result",
+      "summary": "Producer (gap-2 — the result-return): B returns its DELIVERABLE for a delegation, attributed to B (from whoami) + correlated to A's task-spec by requestId, named by the mission's missionKey (never the local uuid). Consent-gated via the identity-tier 'coordinate' scope (a result is B answering A's own delegation — trust ≥ friend suffices; NO new scope). Records the result first-party on B's own mission. Returns { ok, envelope } or { ok:false, status: not_found|no_consent }.",
+      "effect": "others",
+      "flags": {
+        "mission-id": {
+          "type": "string",
+          "description": "the local mission B is returning a result for (its local uuid id)",
+          "required": true
+        },
+        "to-agent-id": {
+          "type": "string",
+          "description": "the recipient agent's join-key agentId — A, the delegator",
+          "required": true
+        },
+        "request-id": {
+          "type": "string",
+          "description": "the delegation correlation key (the task-spec's requestId)",
+          "required": true
+        },
+        "result": {
+          "type": "string",
+          "description": "B's deliverable { summary, artifact?, outputs? }, as JSON.",
+          "required": true
+        },
+        "proof": {
+          "type": "string",
+          "description": "optional opaque proof to stamp on the envelope (for a non-TOFU recipient verifier)"
+        }
+      }
+    },
+    {
+      "name": "import-result",
+      "summary": "Consumer (gap-2, non-clobbering merge): A imports B's result-return. Resolves the mission by missionKey; lands B's deliverable QUARANTINED + attributed under importedResults WITHOUT touching first-party; source trust caps acceptance (checked before correlation); a result whose requestId matches no prior first-party delegation is REJECTED (no_delegation — A only accepts results for work it delegated); an unknown mission is no_mission (a result never seeds a mission); never recomputes status/participants. Returns { ok, status, record } or { ok:false, status: untrusted_source|no_mission|no_delegation|invalid }.",
+      "effect": "private",
+      "flags": {
+        "envelope": {
+          "type": "string",
+          "description": "the MissionResultEnvelope to import, as JSON.",
+          "required": true
+        },
+        "from-agent-id": {
+          "type": "string",
+          "description": "the agent the envelope arrived from (join-key agentId) — B",
+          "required": true
+        },
+        "trust-of-source": {
+          "type": "enum",
+          "description": "this agent's resolved trust in the source agent — the acceptance cap",
+          "values": [
+            "family",
+            "friend",
+            "acquaintance",
+            "stranger"
+          ],
+          "required": true
+        }
+      }
+    }
+  ],
+  "personOnly": {}
+}

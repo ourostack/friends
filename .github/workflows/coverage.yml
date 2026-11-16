@@ -44,6 +44,16 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Ouro actions are current
+        run: node tools/ouro-actions/ouro-actions.mts check actions/friends.actions.mts actions/generated
+
+      - name: MCP tools/list matches the declarations
+        run: |
+          npm run build
+          DIR="$(mktemp -d)"
+          printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | node dist/mcp/bin.js --dir "$DIR" | jq '.result' > tools-list.json
+          node tools/ouro-actions/ouro-actions.mts compare-mcp actions/friends.actions.mts tools-list.json
+
       - name: Run Coverage Gate
         run: npm run test:coverage
 

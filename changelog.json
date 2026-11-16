@@ -1,6 +1,12 @@
 {
   "versions": [
     {
+      "version": "0.1.0-alpha.19",
+      "changes": [
+        "Each MCP tool now carries annotations from its kind: reads say read-only; writes that remove something (unlink_identity, revoke_share) say destructive; tools that reach other agents (share_profile, grant_share, share_mission, coordinate, send_result) say destructive and open-world. Tool names, inputs and descriptions are unchanged, except that the provider and externalId inputs of link_identity and unlink_identity now have descriptions."
+      ]
+    },
+    {
       "version": "0.1.0-alpha.18",
       "changes": [
         "A bundle checked out from git no longer breaks external identity claims: the store tightens a claims directory it owns from 755 to 700 and its claim journals from 644 to 600 by itself (git records neither mode). A symlink, another owner, or a group- or world-writable entry is still refused."
