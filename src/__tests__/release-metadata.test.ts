@@ -3,9 +3,9 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
 const root = fileURLToPath(new URL("../..", import.meta.url))
-const expectedVersion = "0.1.0-alpha.19"
+const expectedVersion = "0.1.0-alpha.20"
 const expectedChanges = [
-  "Each MCP tool now carries annotations from its kind: reads say read-only; writes that remove something (unlink_identity, revoke_share) say destructive; tools that reach other agents (share_profile, grant_share, share_mission, coordinate, send_result) say destructive and open-world. Tool names, inputs and descriptions are unchanged, except that the provider and externalId inputs of link_identity and unlink_identity now have descriptions."
+  "Release preflight's npm audit allows an advisory with no fixed version through audit-allowance.json, for an exact package version until a set date: today picomatch's ReDoS (GHSA-fc5q-39xc-vjpf), until 2026-12-17. Any other advisory, or an expired or incomplete allowance, still fails."
 ]
 
 describe("release metadata", () => {

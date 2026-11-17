@@ -4,6 +4,7 @@ const { execSync } = require("child_process")
 const path = require("path")
 const fs = require("fs")
 
+const { runAudit } = require("./audit-allowance.cjs")
 const { validateChangelog } = require("./changelog-gate.cjs")
 const { validateTrustedPublisherLocalContract } = require("./npm-trusted-publishers.cjs")
 
@@ -184,26 +185,16 @@ function publishedVersionFor(packageName, version, execSyncImpl) {
   }
 }
 
+// npm audit, with the time-boxed allowances in audit-allowance.json (scripts/audit-allowance.cjs).
 function runRootDependencyAudit(packageRoot, execSyncImpl) {
-  try {
-    const output = execSyncImpl("npm audit --audit-level=moderate", {
-      cwd: packageRoot,
-      encoding: "utf-8",
-      stdio: ["ignore", "pipe", "pipe"],
-    })
-    const summary = splitLines(String(output)).find((line) => /^found \d+ vulnerabilities$/.test(line)) ??
-      "no moderate-or-higher vulnerabilities"
-    return { ok: true, message: `root npm audit: pass (${summary})` }
-  } catch (error) {
-    const stdout = typeof error?.stdout?.toString === "function" ? error.stdout.toString() : ""
-    const stderr = typeof error?.stderr?.toString === "function" ? error.stderr.toString() : ""
-    const details = splitLines(`${stdout}\n${stderr}`).slice(-10).join("\n")
-    return {
-      ok: false,
-      message:
-        `root npm audit failed: npm audit --audit-level=moderate reported vulnerable dependencies` +
-        (details ? `\n${details}` : ""),
-    }
+  const result = runAudit({ root: packageRoot, execSyncImpl })
+  if (result.ok) {
+    const allowed = result.allowed.length ? `; ${result.allowed.join("; ")}` : ""
+    return { ok: true, message: `root npm audit: pass (no moderate-or-higher vulnerabilities outside audit-allowance.json${allowed})` }
+  }
+  return {
+    ok: false,
+    message: `root npm audit failed: npm audit reported moderate-or-higher advisories that audit-allowance.json does not allow\n${result.errors.join("\n")}`,
   }
 }
 
