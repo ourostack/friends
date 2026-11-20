@@ -79,12 +79,14 @@ class Harness {
   async call(msg: Record<string, unknown>): Promise<JsonRpcResponse> {
     const id = msg.id
     this.writeContentLength(msg)
-    for (let i = 0; i < 50; i++) {
+    // Wait by time, not by ticks: a real directory scan on a loaded runner can outlast any fixed tick count.
+    const deadline = Date.now() + 5_000
+    do {
       await flush()
       const found = this.parseAll().find((r) => r.id === id)
       if (found) return found
-    }
-    throw new Error(`no response for id ${String(id)}`)
+    } while (Date.now() < deadline)
+    throw new Error(`no response for id ${String(id)} within 5 s`)
   }
 
   /** Call a tool and return the parsed JSON payload from result.content[0].text. */
