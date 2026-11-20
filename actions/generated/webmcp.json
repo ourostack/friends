@@ -1,9 +1,10 @@
 {
-  "generator": "ouro-actions 0.17.1",
+  "generator": "ouro-actions 1.4.1",
   "set": "friends",
   "tools": [
     {
       "name": "resolve_party",
+      "title": "Resolve party",
       "description": "Resolve an external identity (provider + externalId on a channel) into a friend record, creating one on first contact. Returns { friend, channel, created }.",
       "inputSchema": {
         "type": "object",
@@ -41,6 +42,7 @@
     },
     {
       "name": "describe_trust",
+      "title": "Describe trust",
       "description": "Explain the trust context for a friend: level, basis (direct/shared_group/unknown), what it permits and constrains.",
       "inputSchema": {
         "type": "object",
@@ -70,6 +72,7 @@
     },
     {
       "name": "assess_standing",
+      "title": "Assess standing",
       "description": "Assess a peer's earned standing from your FIRST-PARTY outcomes with them: a tier (proven/reliable/mixed/untested/troubled), the basis count, and the tally. Advisory only — never changes trust, never shared. Returns a Standing, or { ok:false, status:'not_found' } when the friend is missing.",
       "inputSchema": {
         "type": "object",
@@ -90,6 +93,7 @@
     },
     {
       "name": "explain_standing",
+      "title": "Explain standing",
       "description": "Explain a peer's earned standing in words: the tier with a human summary, why, and advisory notes that frame it as input to a MANUAL trust decision (never an instruction to change trust). Returns a StandingExplanation, or { ok:false, status:'not_found' } when the friend is missing.",
       "inputSchema": {
         "type": "object",
@@ -110,6 +114,7 @@
     },
     {
       "name": "get_friend",
+      "title": "Get friend",
       "description": "Fetch a single friend record by uuid or by name.",
       "inputSchema": {
         "type": "object",
@@ -130,6 +135,7 @@
     },
     {
       "name": "list_friends",
+      "title": "List friends",
       "description": "List friend records, optionally filtered by trust level and kind, optionally limited.",
       "inputSchema": {
         "type": "object",
@@ -155,6 +161,7 @@
     },
     {
       "name": "save_note",
+      "title": "Save note",
       "description": "Save a friend's name, a tool preference, or a general note. Use override='true' to overwrite an existing value.",
       "inputSchema": {
         "type": "object",
@@ -206,6 +213,7 @@
     },
     {
       "name": "record_interaction",
+      "title": "Record interaction",
       "description": "Record a turn with a friend: accumulate token usage and/or append a shared-mission outcome (bumping familiarity).",
       "inputSchema": {
         "type": "object",
@@ -242,6 +250,7 @@
     },
     {
       "name": "upsert_group",
+      "title": "Upsert group",
       "description": "Upsert shared-group participant context: link each participant to the group, promoting strangers to acquaintances.",
       "inputSchema": {
         "type": "object",
@@ -267,6 +276,7 @@
     },
     {
       "name": "set_trust",
+      "title": "Set trust",
       "description": "Set a friend's trust level (also mirrors it onto the record's role).",
       "inputSchema": {
         "type": "object",
@@ -298,6 +308,7 @@
     },
     {
       "name": "link_identity",
+      "title": "Link identity",
       "description": "Link an external identity to a friend, merging any orphan record that already holds it (cross-channel unification).",
       "inputSchema": {
         "type": "object",
@@ -332,6 +343,7 @@
     },
     {
       "name": "unlink_identity",
+      "title": "Unlink identity",
       "description": "Remove an external identity from a friend.",
       "inputSchema": {
         "type": "object",
@@ -362,6 +374,7 @@
     },
     {
       "name": "onboard_agent",
+      "title": "Onboard agent",
       "description": "Upsert an agent-peer friend record from already-resolved coordinates (no HTTP card fetch).",
       "inputSchema": {
         "type": "object",
@@ -403,6 +416,7 @@
     },
     {
       "name": "connect_to",
+      "title": "Connect to",
       "description": "Management-sense control plane (brick 8): the owner links one of their OWN agents into this agent's fleet — introduce a peer by agentId/did/name at a trust level (default family for own-fleet). Authority-gated: commits inline ONLY from a local (owner-only stdio) or roster-verified same-account closed sense; an open sense never commits inline (it downgrades to a confirm-prompt); a bare name with no resolvable handle/DID and no record hit returns needs_handle_or_introduction (never fabricates a target). Writes one control-plane audit record (action:'connect') through the wired sink. Returns { ok:true, status:'connected', record } or { ok:false, status:'downgraded'|'needs_handle_or_introduction', downgrade? }.",
       "inputSchema": {
         "type": "object",
@@ -442,6 +456,7 @@
     },
     {
       "name": "whoami",
+      "title": "Who am I",
       "description": "Resolve who the machine owner is and which friend record represents the self.",
       "inputSchema": {
         "type": "object",
@@ -454,6 +469,7 @@
     },
     {
       "name": "channel_caps",
+      "title": "Channel capabilities",
       "description": "Return the capabilities of a channel (integrations, markdown, streaming, rich cards, max length).",
       "inputSchema": {
         "type": "object",
@@ -474,6 +490,7 @@
     },
     {
       "name": "resolve_room",
+      "title": "Resolve room",
       "description": "Resolve a room (a group's external id) into its members, each with their trust context and how they're known (direct/group_only). Pure read.",
       "inputSchema": {
         "type": "object",
@@ -498,6 +515,7 @@
     },
     {
       "name": "share_profile",
+      "title": "Share profile",
       "description": "Producer: prepare a consent-gated, scope-filtered, provenance-preserving profile-share envelope for another agent (names the party by join key, never the local uuid). Self identity comes from whoami. Returns { ok, envelope } or { ok:false, status }.",
       "inputSchema": {
         "type": "object",
@@ -535,10 +553,14 @@
       "annotations": {
         "readOnlyHint": false,
         "consequentialHint": true
+      },
+      "_meta": {
+        "ouro.bot/confirm": "Prepare a profile to send to another agent, within your consent."
       }
     },
     {
       "name": "import_profile",
+      "title": "Import profile",
       "description": "Consumer (non-clobbering merge): import a profile-share envelope. Resolves the party by join key; lands facts in the imported namespace WITHOUT touching first-party notes; source trust caps acceptance; never changes the party's trust. Returns { ok, status, record }.",
       "inputSchema": {
         "type": "object",
@@ -575,6 +597,7 @@
     },
     {
       "name": "grant_share",
+      "title": "Grant share",
       "description": "Mint an explicit, revocable consent grant: an agent may receive a scope of a subject (a friend's profile, keyed by friend uuid; or a mission, keyed by its missionKey). The consent half of the moat.",
       "inputSchema": {
         "type": "object",
@@ -613,10 +636,14 @@
       "annotations": {
         "readOnlyHint": false,
         "consequentialHint": true
+      },
+      "_meta": {
+        "ouro.bot/confirm": "Let another agent receive a scope of your data, revocably."
       }
     },
     {
       "name": "revoke_share",
+      "title": "Revoke share",
       "description": "Revoke a consent grant by id (tombstones it; the audit trail survives). The right-to-be-forgotten lever.",
       "inputSchema": {
         "type": "object",
@@ -637,6 +664,7 @@
     },
     {
       "name": "list_shares",
+      "title": "List shares",
       "description": "List consent grants with their effective state, optionally filtered by subject / recipient / effectiveness. The audit + revoke surface.",
       "inputSchema": {
         "type": "object",
@@ -666,6 +694,7 @@
     },
     {
       "name": "record_mission",
+      "title": "Record mission",
       "description": "Upsert a shared mission (brick 3) by its cross-agent missionKey: create one when the key is unknown, else merge into the existing record. Appends first-party learnings / participants / outcomes and sets status. The mission analogue of record_interaction's outcome writer.",
       "inputSchema": {
         "type": "object",
@@ -713,6 +742,7 @@
     },
     {
       "name": "get_mission",
+      "title": "Get mission",
       "description": "Fetch a single mission record by its local uuid id.",
       "inputSchema": {
         "type": "object",
@@ -733,6 +763,7 @@
     },
     {
       "name": "list_missions",
+      "title": "List missions",
       "description": "List mission records, optionally limited.",
       "inputSchema": {
         "type": "object",
@@ -750,6 +781,7 @@
     },
     {
       "name": "share_mission",
+      "title": "Share mission",
       "description": "Producer: prepare a consent-gated, scope-filtered, provenance-preserving mission-share envelope for another agent (names the mission by its missionKey, never the local uuid). Self identity comes from whoami. 'mission' carries the shareable learnings; 'outcomes' carries the mission's outcomes. Returns { ok, envelope } or { ok:false, status }.",
       "inputSchema": {
         "type": "object",
@@ -784,10 +816,14 @@
       "annotations": {
         "readOnlyHint": false,
         "consequentialHint": true
+      },
+      "_meta": {
+        "ouro.bot/confirm": "Prepare a mission to send to another agent, within your consent."
       }
     },
     {
       "name": "import_mission",
+      "title": "Import mission",
       "description": "Consumer (non-clobbering merge): import a mission-share envelope. Resolves the mission by missionKey; lands learnings in the imported namespace WITHOUT touching first-party learnings; append-merges + dedupes outcomes; source trust caps acceptance; never recomputes status/participants. Returns { ok, status, record }.",
       "inputSchema": {
         "type": "object",
@@ -824,6 +860,7 @@
     },
     {
       "name": "coordinate",
+      "title": "Coordinate",
       "description": "Producer (brick 5): prepare a coordination message that negotiates WHO does a mission — one of request/offer/accept/decline/handoff, named by the mission's missionKey (never the local uuid). Consent-gated via the identity-tier 'coordinate' scope (trust ≥ friend suffices). 'accept' claims the assignment for self; 'handoff' (you must hold the assignment) proposes a new assignee whose own accept confirms it (non-transitive). Self identity comes from whoami. Returns { ok, envelope } or { ok:false, status: not_found|no_consent|not_assignee }.",
       "inputSchema": {
         "type": "object",
@@ -873,10 +910,14 @@
       "annotations": {
         "readOnlyHint": false,
         "consequentialHint": true
+      },
+      "_meta": {
+        "ouro.bot/confirm": "Offer, accept, decline or hand off a mission to another agent."
       }
     },
     {
       "name": "import_coordination",
+      "title": "Import coordination",
       "description": "Consumer (brick 5, non-clobbering merge): import a coordination message. Resolves the mission by missionKey; appends the intent to coordination.log stamped origin:imported WITHOUT touching first-party learnings/notes/status; only an 'accept' sets the assignee (last-writer-wins by issuedAt); a 'handoff' never forces an assignee onto you (only your own accept does); never recomputes status/trust/standing; source trust caps acceptance; a friend/family peer may seed an unknown mission. Returns { ok, status: logged|assigned|seeded, record } or { ok:false, status }.",
       "inputSchema": {
         "type": "object",
@@ -913,6 +954,7 @@
     },
     {
       "name": "get_coordination",
+      "title": "Get coordination",
       "description": "Read lens (brick 5): return a mission's coordination state — its current assignee (who holds it; absent ⇒ unclaimed) + the append-only log of every request/offer/accept/decline/handoff that flowed. Returns { assignee, assignedAt?, log } (the empty default { assignee: undefined, log: [] } when never coordinated), or { ok:false, status:'not_found' } when the mission is missing.",
       "inputSchema": {
         "type": "object",
@@ -933,6 +975,7 @@
     },
     {
       "name": "send_result",
+      "title": "Send result",
       "description": "Producer (gap-2 — the result-return): B returns its DELIVERABLE for a delegation, attributed to B (from whoami) + correlated to A's task-spec by requestId, named by the mission's missionKey (never the local uuid). Consent-gated via the identity-tier 'coordinate' scope (a result is B answering A's own delegation — trust ≥ friend suffices; NO new scope). Records the result first-party on B's own mission. Returns { ok, envelope } or { ok:false, status: not_found|no_consent }.",
       "inputSchema": {
         "type": "object",
@@ -968,10 +1011,14 @@
       "annotations": {
         "readOnlyHint": false,
         "consequentialHint": true
+      },
+      "_meta": {
+        "ouro.bot/confirm": "Return your finished work for a mission to the agent that delegated it."
       }
     },
     {
       "name": "import_result",
+      "title": "Import result",
       "description": "Consumer (gap-2, non-clobbering merge): A imports B's result-return. Resolves the mission by missionKey; lands B's deliverable QUARANTINED + attributed under importedResults WITHOUT touching first-party; source trust caps acceptance (checked before correlation); a result whose requestId matches no prior first-party delegation is REJECTED (no_delegation — A only accepts results for work it delegated); an unknown mission is no_mission (a result never seeds a mission); never recomputes status/participants. Returns { ok, status, record } or { ok:false, status: untrusted_source|no_mission|no_delegation|invalid }.",
       "inputSchema": {
         "type": "object",

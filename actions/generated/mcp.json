@@ -1,5 +1,5 @@
 {
-  "generator": "ouro-actions 0.17.1",
+  "generator": "ouro-actions 1.4.1",
   "set": "friends",
   "tools": [
     {
@@ -571,6 +571,9 @@
         "readOnlyHint": false,
         "destructiveHint": true,
         "openWorldHint": true
+      },
+      "_meta": {
+        "ouro.bot/confirm": "Prepare a profile to send to another agent, within your consent."
       }
     },
     {
@@ -653,6 +656,9 @@
         "readOnlyHint": false,
         "destructiveHint": true,
         "openWorldHint": true
+      },
+      "_meta": {
+        "ouro.bot/confirm": "Let another agent receive a scope of your data, revocably."
       }
     },
     {
@@ -836,6 +842,9 @@
         "readOnlyHint": false,
         "destructiveHint": true,
         "openWorldHint": true
+      },
+      "_meta": {
+        "ouro.bot/confirm": "Prepare a mission to send to another agent, within your consent."
       }
     },
     {
@@ -929,6 +938,9 @@
         "readOnlyHint": false,
         "destructiveHint": true,
         "openWorldHint": true
+      },
+      "_meta": {
+        "ouro.bot/confirm": "Offer, accept, decline or hand off a mission to another agent."
       }
     },
     {
@@ -1030,6 +1042,9 @@
         "readOnlyHint": false,
         "destructiveHint": true,
         "openWorldHint": true
+      },
+      "_meta": {
+        "ouro.bot/confirm": "Return your finished work for a mission to the agent that delegated it."
       }
     },
     {
