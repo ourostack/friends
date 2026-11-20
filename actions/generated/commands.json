@@ -1,5 +1,5 @@
 {
-  "generator": "ouro-actions 0.17.1",
+  "generator": "ouro-actions 1.4.1",
   "set": "friends",
   "tool": "friends-mcp",
   "commands": [
