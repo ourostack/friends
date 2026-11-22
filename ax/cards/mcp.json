@@ -16,6 +16,12 @@
       "upsert_group",
       "resolve_room",
       "whoami"
+    ],
+    "friends-trust": [
+      "describe_trust",
+      "assess_standing",
+      "explain_standing",
+      "unlink_identity"
     ]
   }
 }

@@ -56,7 +56,7 @@
     },
     {
       "name": "assess-standing",
-      "summary": "Assess a peer's earned standing from your FIRST-PARTY outcomes with them: a tier (proven/reliable/mixed/untested/troubled), the basis count, and the tally. Advisory only — never changes trust, never shared. Returns a Standing, or { ok:false, status:'not_found' } when the friend is missing.",
+      "summary": "Assess a peer's earned standing from your FIRST-PARTY outcomes with them: a tier (proven/reliable/mixed/untested/troubled), the basis count, and the tally. Advisory only: it changes no trust and is not shared. Returns a Standing, or { ok:false, status:'not_found' } when the friend is missing.",
       "effect": "private",
       "readOnly": true,
       "flags": {
@@ -69,7 +69,7 @@
     },
     {
       "name": "explain-standing",
-      "summary": "Explain a peer's earned standing in words: the tier with a human summary, why, and advisory notes that frame it as input to a MANUAL trust decision (never an instruction to change trust). Returns a StandingExplanation, or { ok:false, status:'not_found' } when the friend is missing.",
+      "summary": "Explain a peer's earned standing in words: the tier with a human summary, why, and advisory notes that frame it as input to a MANUAL trust decision (not an instruction to change trust). Returns a StandingExplanation, or { ok:false, status:'not_found' } when the friend is missing.",
       "effect": "private",
       "readOnly": true,
       "flags": {
