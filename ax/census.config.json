@@ -8,7 +8,8 @@
     { "walker": "argv-entries", "module": "dist", "source": "src" }
   ],
   "groups": [
-    { "id": "friends-people", "when": "Friends' MCP tools that find, list and annotate the people and agents this agent knows, and the rooms they share" }
+    { "id": "friends-people", "when": "Friends' MCP tools that find, list and annotate the people and agents this agent knows, and the rooms they share" },
+    { "id": "friends-trust", "when": "Friends' MCP tools that explain how far someone is trusted, weigh a peer's record, and fix which ids name whom" }
   ],
   "bookletWords": { "allow": [] }
 }

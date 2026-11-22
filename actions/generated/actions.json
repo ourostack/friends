@@ -56,6 +56,19 @@
       "label": "Describe trust",
       "description": "Explain how much a friend is trusted and why.",
       "agent": "Explain the trust context for a friend: level, basis (direct/shared_group/unknown), what it permits and constrains.",
+      "when": "Deciding how openly to talk with someone: their trust level, its basis, and what that level permits",
+      "errors": [
+        {
+          "code": "not-found",
+          "means": "No friend record has that uuid or name, so there is no trust to explain.",
+          "fix": "Call list_friends to find the record, then describe its trust by uuid or name."
+        },
+        {
+          "code": "tool-failed",
+          "means": "The record's file could not be read or parsed when looked up by uuid; the message says why.",
+          "fix": "Check the file the message names in the friends directory, then describe the trust again."
+        }
+      ],
       "openInput": true,
       "input": {
         "friendId": {
@@ -82,7 +95,20 @@
       "consent": "read",
       "label": "Assess standing",
       "description": "Judge a peer's standing from your own past outcomes with them.",
-      "agent": "Assess a peer's earned standing from your FIRST-PARTY outcomes with them: a tier (proven/reliable/mixed/untested/troubled), the basis count, and the tally. Advisory only — never changes trust, never shared. Returns a Standing, or { ok:false, status:'not_found' } when the friend is missing.",
+      "agent": "Assess a peer's earned standing from your FIRST-PARTY outcomes with them: a tier (proven/reliable/mixed/untested/troubled), the basis count, and the tally. Advisory only: it changes no trust and is not shared. Returns a Standing, or { ok:false, status:'not_found' } when the friend is missing.",
+      "when": "Weighing a peer's track record as data: a tier and tally from this agent's own past outcomes with them",
+      "errors": [
+        {
+          "code": "not-found",
+          "means": "No friend record has that uuid or name, so there is no track record to tally.",
+          "fix": "Call list_friends with kind agent to find the peer, then assess it by id."
+        },
+        {
+          "code": "tool-failed",
+          "means": "The peer's record file could not be read or parsed when looked up by uuid; the message says why.",
+          "fix": "Check the file the message names in the friends directory, then assess the standing again."
+        }
+      ],
       "openInput": true,
       "input": {
         "friendId": {
@@ -98,7 +124,20 @@
       "consent": "read",
       "label": "Explain standing",
       "description": "Explain a peer's standing in words, as input to a manual trust decision.",
-      "agent": "Explain a peer's earned standing in words: the tier with a human summary, why, and advisory notes that frame it as input to a MANUAL trust decision (never an instruction to change trust). Returns a StandingExplanation, or { ok:false, status:'not_found' } when the friend is missing.",
+      "agent": "Explain a peer's earned standing in words: the tier with a human summary, why, and advisory notes that frame it as input to a MANUAL trust decision (not an instruction to change trust). Returns a StandingExplanation, or { ok:false, status:'not_found' } when the friend is missing.",
+      "when": "Putting a peer's track record to a person in words, as input to their own manual call on trust",
+      "errors": [
+        {
+          "code": "not-found",
+          "means": "No friend record has that uuid or name, so there is no standing to explain.",
+          "fix": "Call list_friends with kind agent to find the peer, then explain its standing by id."
+        },
+        {
+          "code": "tool-failed",
+          "means": "The peer's record file, or its outcomes, could not be read when looked up by uuid; the message says why.",
+          "fix": "Check the file the message names in the friends directory, then explain the standing again."
+        }
+      ],
       "openInput": true,
       "input": {
         "friendId": {
@@ -391,6 +430,24 @@
       "label": "Unlink identity",
       "description": "Remove an external identity from a friend.",
       "agent": "Remove an external identity from a friend.",
+      "when": "An external id was attached to the wrong person: detach that one provider id from their record",
+      "errors": [
+        {
+          "code": "not-found",
+          "means": "No friend record has that uuid or name, so nothing was unlinked.",
+          "fix": "Call list_friends to find the record, then unlink the identity from it by uuid."
+        },
+        {
+          "code": "noop",
+          "means": "The record has no identity with that provider and external id, so nothing changed.",
+          "fix": "Call get_friend to see the record's linked identities, then unlink one of those."
+        },
+        {
+          "code": "tool-failed",
+          "means": "The record could not be written; it can't when friendId is a name rather than a uuid, and the message says why.",
+          "fix": "Call again with the friend's uuid from list_friends; if that fails too, check that the friends directory is writable."
+        }
+      ],
       "openInput": true,
       "input": {
         "friendId": {

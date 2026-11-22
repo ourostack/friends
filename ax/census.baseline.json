@@ -2,12 +2,9 @@
   "census": "census/1",
   "gaps": [
     "cli:node dist/mcp/bin.js",
-    "mcp:assess_standing",
     "mcp:channel_caps",
     "mcp:connect_to",
     "mcp:coordinate",
-    "mcp:describe_trust",
-    "mcp:explain_standing",
     "mcp:get_coordination",
     "mcp:get_mission",
     "mcp:grant_share",
@@ -25,7 +22,6 @@
     "mcp:send_result",
     "mcp:set_trust",
     "mcp:share_mission",
-    "mcp:share_profile",
-    "mcp:unlink_identity"
+    "mcp:share_profile"
   ]
 }
