@@ -143,7 +143,8 @@ describe("runMain", () => {
     const server = runMain(["node", "bin.js"], {}, { stdin, stdout, onError })
     expect(server).toBeNull()
     expect(onError).toHaveBeenCalledTimes(1)
-    expect(onError.mock.calls[0][0]).toContain("--dir")
+    // The message leads with its stable code, missing-dir.
+    expect(onError.mock.calls[0][0]).toBe("missing-dir: friends-mcp requires --dir <path> or FRIENDS_DIR")
     stdin.destroy()
     stdout.destroy()
   })
@@ -153,6 +154,23 @@ describe("runMain", () => {
     const server = runMain(["node", "bin.js", "--dir"], {}, { stdin, stdout, onError })
     expect(server).toBeNull()
     expect(onError).toHaveBeenCalledTimes(1)
+    expect(onError.mock.calls[0][0]).toBe("missing-dir: friends-mcp requires --dir <path> or FRIENDS_DIR")
+    stdin.destroy()
+    stdout.destroy()
+  })
+
+  it("refuses an argument it doesn't know with unknown-door, and constructs nothing", () => {
+    const { stdin, stdout } = harness()
+    const dir = tmpDir("unknown")
+    for (const argv of [["--help"], ["--dir", dir, "serve"], ["--verbose", "--dir", dir]]) {
+      onError.mockClear()
+      const server = runMain(["node", "bin.js", ...argv], {}, { stdin, stdout, onError })
+      expect(server).toBeNull()
+      expect(onError).toHaveBeenCalledTimes(1)
+      const unknown = argv.find((a) => a !== "--dir" && a !== dir)
+      expect(onError.mock.calls[0][0]).toBe(`unknown-door: friends-mcp takes only --dir <path>, not '${unknown}'`)
+    }
+    expect(existsSync(dir)).toBe(false)
     stdin.destroy()
     stdout.destroy()
   })

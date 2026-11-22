@@ -3,7 +3,8 @@
 // Resolves the friends directory from `--dir <path>` (flag wins) or the
 // `FRIENDS_DIR` environment variable, constructs a FileFriendStore over it, and
 // starts an MCP server on the given streams. If neither source supplies a
-// directory, it reports via `onError` and constructs nothing (returns null).
+// directory (missing-dir), or argv holds anything but `--dir <path>`
+// (unknown-door), it reports via `onError` and constructs nothing (returns null).
 import { emitNervesEvent } from "../observability"
 import { openFileBundle } from "../file-bundle"
 import { createFriendsMcpServer } from "./server"
@@ -15,14 +16,22 @@ export interface RunMainIo {
   onError: (message: string) => void
 }
 
-/** Parse `--dir <value>` from argv. Returns the value, or undefined if the flag
- * is absent or has no following value. */
-function parseDirFlag(argv: string[]): string | undefined {
-  const idx = argv.indexOf("--dir")
-  if (idx === -1) return undefined
-  const value = argv[idx + 1]
-  if (value === undefined) return undefined
-  return value
+/** The codes an error message leads with, so an agent can match the failure without parsing its words. */
+const MISSING_DIR = "missing-dir"
+const UNKNOWN_DOOR = "unknown-door"
+
+/** Parse `--dir <value>` from argv, the only argument the bin takes. Returns the
+ * value (undefined if the flag is absent or has no following value), or the
+ * first argument that isn't `--dir <value>`. */
+function parseArgs(argv: string[]): { dir: string | undefined; unknown?: string } {
+  const args = argv.slice(2)
+  let dir: string | undefined
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i] !== "--dir") return { dir, unknown: args[i] }
+    dir = args[i + 1]
+    i += 1
+  }
+  return { dir }
 }
 
 export function runMain(
@@ -30,12 +39,16 @@ export function runMain(
   env: NodeJS.ProcessEnv,
   io: RunMainIo,
 ): FriendsMcpServer | null {
-  const flagDir = parseDirFlag(argv)
+  const { dir: flagDir, unknown } = parseArgs(argv)
+  if (unknown !== undefined) {
+    io.onError(`${UNKNOWN_DOOR}: friends-mcp takes only --dir <path>, not '${unknown}'`)
+    return null
+  }
   const dir = flagDir ?? env.FRIENDS_DIR
   const source = flagDir !== undefined ? "flag" : "env"
 
   if (!dir) {
-    io.onError("friends-mcp requires --dir <path> or FRIENDS_DIR")
+    io.onError(`${MISSING_DIR}: friends-mcp requires --dir <path> or FRIENDS_DIR`)
     return null
   }
 
