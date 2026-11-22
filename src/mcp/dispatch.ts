@@ -624,7 +624,11 @@ export async function dispatchTool(
     }
 
     default: {
-      return { result: { error: `Unknown tool: ${name}` }, isError: true }
+      // `unknown_door` is the stable code (Ouro AX's unknown-door); `error` keeps the text older clients read.
+      return {
+        result: { ok: false, status: "unknown_door", message: `Unknown tool: ${name}. Call one of the tools tools/list names.`, error: `Unknown tool: ${name}` },
+        isError: true,
+      }
     }
   }
 }
