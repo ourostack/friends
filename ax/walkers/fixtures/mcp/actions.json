@@ -1,0 +1,26 @@
+{
+  "generator": "ouro-actions 1.12.0",
+  "set": "fixture",
+  "actions": [
+    {
+      "id": "get_friend",
+      "consent": "read",
+      "agent": "Fetch a friend.",
+      "when": "Reading one friend record by its uuid or name before acting on it",
+      "errors": [
+        { "code": "not-found", "means": "No friend has that uuid or name.", "fix": "List friends and call again with one of theirs." },
+        { "code": "never-raised", "means": "Declared but raised nowhere.", "fix": "Drop it from the card." }
+      ]
+    },
+    {
+      "id": "save_note",
+      "consent": "write",
+      "agent": "Save a note.",
+      "when": "Writing a name, tool preference or note onto a friend record",
+      "destructive": true,
+      "idempotent": true,
+      "errors": [{ "code": "invalid", "means": "The note type is not one the tool knows.", "fix": "Pass name, tool_preference or note." }]
+    },
+    { "id": "whoami", "consent": "read", "agent": "Say who you are." }
+  ]
+}

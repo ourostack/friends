@@ -1,0 +1,12 @@
+{
+  "product": "friends",
+  "walkers": {
+    "friends-mcp": { "module": "ax/walkers/mcp.mts", "kinds": ["mcp"] }
+  },
+  "sources": [
+    { "walker": "friends-mcp", "module": "actions/generated/mcp.json", "source": "actions/friends.actions.mts", "cards": "ax/cards/mcp.json", "handlers": ["src"] },
+    { "walker": "argv-entries", "module": "dist", "source": "src" }
+  ],
+  "groups": [],
+  "bookletWords": { "allow": [] }
+}
