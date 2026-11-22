@@ -9,7 +9,8 @@ import { runMain } from "./run-main"
 runMain(process.argv, process.env, {
   stdin: process.stdin,
   stdout: process.stdout,
-  onError: () => {
+  onError: (message) => {
+    process.stderr.write(`friends-mcp: ${message}\n`)
     process.exitCode = 1
   },
 })
