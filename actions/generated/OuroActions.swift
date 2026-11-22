@@ -2508,7 +2508,7 @@ public enum ShareMissionAction {
     /// The app's handler; every door calls it.
     public static var perform: (@MainActor @Sendable (ShareMissionInput) async throws -> ShareMissionOutput)?
     /// The question the person is asked, the declaration's confirm: the same words as the confirm sheet and the card.
-    public static let confirmation: LocalizedStringResource = "Prepare a mission to send to another agent, within your consent."
+    public static let confirmation: LocalizedStringResource = "Prepare this scope of the mission to send to that agent?"
     /// How the intent asks the person before it acts. Unset, it asks `confirmation`. A test sets it: return to
     /// confirm, or throw to cancel, and the handler never runs. The app can also set it to ask in its own way.
     public static var confirm: (@MainActor @Sendable (ShareMissionInput) async throws -> Void)?
@@ -2733,7 +2733,7 @@ public enum CoordinateAction {
     /// The app's handler; every door calls it.
     public static var perform: (@MainActor @Sendable (CoordinateInput) async throws -> CoordinateOutput)?
     /// The question the person is asked, the declaration's confirm: the same words as the confirm sheet and the card.
-    public static let confirmation: LocalizedStringResource = "Offer, accept, decline or hand off a mission to another agent."
+    public static let confirmation: LocalizedStringResource = "Prepare this coordination message about the mission for that agent?"
     /// How the intent asks the person before it acts. Unset, it asks `confirmation`. A test sets it: return to
     /// confirm, or throw to cancel, and the handler never runs. The app can also set it to ask in its own way.
     public static var confirm: (@MainActor @Sendable (CoordinateInput) async throws -> Void)?
@@ -3026,7 +3026,7 @@ public enum SendResultAction {
     /// The app's handler; every door calls it.
     public static var perform: (@MainActor @Sendable (SendResultInput) async throws -> SendResultOutput)?
     /// The question the person is asked, the declaration's confirm: the same words as the confirm sheet and the card.
-    public static let confirmation: LocalizedStringResource = "Return your finished work for a mission to the agent that delegated it."
+    public static let confirmation: LocalizedStringResource = "Record this result on the mission and prepare it for the agent that asked?"
     /// How the intent asks the person before it acts. Unset, it asks `confirmation`. A test sets it: return to
     /// confirm, or throw to cancel, and the handler never runs. The app can also set it to ask in its own way.
     public static var confirm: (@MainActor @Sendable (SendResultInput) async throws -> Void)?

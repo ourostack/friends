@@ -807,7 +807,7 @@
     {
       "name": "share_mission",
       "title": "Share mission",
-      "description": "Producer: prepare a consent-gated, scope-filtered, provenance-preserving mission-share envelope for another agent (names the mission by its missionKey, never the local uuid). Self identity comes from whoami. 'mission' carries the shareable learnings; 'outcomes' carries the mission's outcomes. Returns { ok, envelope } or { ok:false, status }.",
+      "description": "Producer: prepare a consent-gated, scope-filtered, provenance-preserving mission-share envelope for another agent (names the mission by its missionKey, not the local uuid). Self identity comes from whoami. 'mission' carries the shareable learnings; 'outcomes' carries the mission's outcomes. Returns { ok, envelope } or { ok:false, status }.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -844,13 +844,13 @@
         "openWorldHint": true
       },
       "_meta": {
-        "ouro.bot/confirm": "Prepare a mission to send to another agent, within your consent."
+        "ouro.bot/confirm": "Prepare this scope of the mission to send to that agent?"
       }
     },
     {
       "name": "import_mission",
       "title": "Import mission",
-      "description": "Consumer (non-clobbering merge): import a mission-share envelope. Resolves the mission by missionKey; lands learnings in the imported namespace WITHOUT touching first-party learnings; append-merges + dedupes outcomes; source trust caps acceptance; never recomputes status/participants. Returns { ok, status, record }.",
+      "description": "Consumer (non-clobbering merge): import a mission-share envelope. Resolves the mission by missionKey; lands learnings in the imported namespace WITHOUT touching first-party learnings; append-merges + dedupes outcomes; source trust caps acceptance; leaves status/participants as they were. Returns { ok, status, record }.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -888,7 +888,7 @@
     {
       "name": "coordinate",
       "title": "Coordinate",
-      "description": "Producer (brick 5): prepare a coordination message that negotiates WHO does a mission — one of request/offer/accept/decline/handoff, named by the mission's missionKey (never the local uuid). Consent-gated via the identity-tier 'coordinate' scope (trust ≥ friend suffices). 'accept' claims the assignment for self; 'handoff' (you must hold the assignment) proposes a new assignee whose own accept confirms it (non-transitive). Self identity comes from whoami. Returns { ok, envelope } or { ok:false, status: not_found|no_consent|not_assignee }.",
+      "description": "Producer (brick 5): prepare a coordination message that negotiates WHO does a mission — one of request/offer/accept/decline/handoff, named by the mission's missionKey (not the local uuid). Consent-gated via the identity-tier 'coordinate' scope (trust ≥ friend suffices). 'accept' claims the assignment for self; 'handoff' (only by the agent holding the assignment) proposes a new assignee whose own accept confirms it (non-transitive). Self identity comes from whoami. Returns { ok, envelope } or { ok:false, status: not_found|no_consent|not_assignee }.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -940,13 +940,13 @@
         "openWorldHint": true
       },
       "_meta": {
-        "ouro.bot/confirm": "Offer, accept, decline or hand off a mission to another agent."
+        "ouro.bot/confirm": "Prepare this coordination message about the mission for that agent?"
       }
     },
     {
       "name": "import_coordination",
       "title": "Import coordination",
-      "description": "Consumer (brick 5, non-clobbering merge): import a coordination message. Resolves the mission by missionKey; appends the intent to coordination.log stamped origin:imported WITHOUT touching first-party learnings/notes/status; only an 'accept' sets the assignee (last-writer-wins by issuedAt); a 'handoff' never forces an assignee onto you (only your own accept does); never recomputes status/trust/standing; source trust caps acceptance; a friend/family peer may seed an unknown mission. Returns { ok, status: logged|assigned|seeded, record } or { ok:false, status }.",
+      "description": "Consumer (brick 5, non-clobbering merge): import a coordination message. Resolves the mission by missionKey; appends the intent to coordination.log stamped origin:imported WITHOUT touching first-party learnings/notes/status; only an 'accept' sets the assignee (last-writer-wins by issuedAt); a 'handoff' doesn't set the assignee on its own (only an accept does); status/trust/standing stay as they were; source trust caps acceptance; a friend/family peer may seed an unknown mission. Returns { ok, status: logged|assigned|seeded, record } or { ok:false, status }.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -984,7 +984,7 @@
     {
       "name": "get_coordination",
       "title": "Get coordination",
-      "description": "Read lens (brick 5): return a mission's coordination state — its current assignee (who holds it; absent ⇒ unclaimed) + the append-only log of every request/offer/accept/decline/handoff that flowed. Returns { assignee, assignedAt?, log } (the empty default { assignee: undefined, log: [] } when never coordinated), or { ok:false, status:'not_found' } when the mission is missing.",
+      "description": "Read lens (brick 5): return a mission's coordination state — its current assignee (who holds it; absent ⇒ unclaimed) + the append-only log of every request/offer/accept/decline/handoff that flowed. Returns { assignee, assignedAt?, log } (the empty default { assignee: undefined, log: [] } when it has had no coordination), or { ok:false, status:'not_found' } when the mission is missing.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1006,7 +1006,7 @@
     {
       "name": "send_result",
       "title": "Send result",
-      "description": "Producer (gap-2 — the result-return): B returns its DELIVERABLE for a delegation, attributed to B (from whoami) + correlated to A's task-spec by requestId, named by the mission's missionKey (never the local uuid). Consent-gated via the identity-tier 'coordinate' scope (a result is B answering A's own delegation — trust ≥ friend suffices; NO new scope). Records the result first-party on B's own mission. Returns { ok, envelope } or { ok:false, status: not_found|no_consent }.",
+      "description": "Producer (gap-2 — the result-return): B returns its DELIVERABLE for a delegation, attributed to B (from whoami) + correlated to A's task-spec by requestId, named by the mission's missionKey (not the local uuid). Consent-gated via the identity-tier 'coordinate' scope (a result is B answering A's own delegation — trust ≥ friend suffices; NO new scope). Records the result first-party on B's own mission. Returns { ok, envelope } or { ok:false, status: not_found|no_consent }.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -1044,7 +1044,7 @@
         "openWorldHint": true
       },
       "_meta": {
-        "ouro.bot/confirm": "Return your finished work for a mission to the agent that delegated it."
+        "ouro.bot/confirm": "Record this result on the mission and prepare it for the agent that asked?"
       }
     },
     {

@@ -106,12 +106,12 @@ export const controls = {
   "record-mission": { label: "Record mission", description: "Create or update a shared mission by its cross-agent key.", consent: "write", props: { "data-ax-action": "record-mission" } },
   "get-mission": { label: "Get mission", description: "Look up one mission record.", consent: "read", props: { "data-ax-action": "get-mission" } },
   "list-missions": { label: "List missions", description: "List the mission records.", consent: "read", props: { "data-ax-action": "list-missions" } },
-  "share-mission": { label: "Share mission", description: "Prepare a mission to send to another agent, within your consent.", consent: "consequential", confirm: "Prepare a mission to send to another agent, within your consent.", props: { "data-ax-action": "share-mission" } },
+  "share-mission": { label: "Share mission", description: "Prepare a mission to send to another agent, within your consent.", consent: "consequential", confirm: "Prepare this scope of the mission to send to that agent?", props: { "data-ax-action": "share-mission" } },
   "import-mission": { label: "Import mission", description: "Take in a mission another agent shared, without changing your own record.", consent: "write", props: { "data-ax-action": "import-mission" } },
-  "coordinate": { label: "Coordinate", description: "Offer, accept, decline or hand off a mission to another agent.", consent: "consequential", confirm: "Offer, accept, decline or hand off a mission to another agent.", props: { "data-ax-action": "coordinate" } },
+  "coordinate": { label: "Coordinate", description: "Offer, accept, decline or hand off a mission to another agent.", consent: "consequential", confirm: "Prepare this coordination message about the mission for that agent?", props: { "data-ax-action": "coordinate" } },
   "import-coordination": { label: "Import coordination", description: "Take in a coordination message from another agent.", consent: "write", props: { "data-ax-action": "import-coordination" } },
   "get-coordination": { label: "Get coordination", description: "See who holds a mission and its coordination log.", consent: "read", props: { "data-ax-action": "get-coordination" } },
-  "send-result": { label: "Send result", description: "Return your finished work for a mission to the agent that delegated it.", consent: "consequential", confirm: "Return your finished work for a mission to the agent that delegated it.", props: { "data-ax-action": "send-result" } },
+  "send-result": { label: "Send result", description: "Return your finished work for a mission to the agent that delegated it.", consent: "consequential", confirm: "Record this result on the mission and prepare it for the agent that asked?", props: { "data-ax-action": "send-result" } },
   "import-result": { label: "Import result", description: "Take in a result another agent returned for work you delegated.", consent: "write", props: { "data-ax-action": "import-result" } },
 } as const;
 
