@@ -209,7 +209,8 @@ export function createFriendsMcpServer(options: FriendsMcpServerOptions): Friend
       writeResponse({
         jsonrpc: "2.0",
         id: request.id!,
-        result: { content: [{ type: "text", text: `Error: ${message}` }], isError: true },
+        // A throw (the store couldn't read or write, say) is the tool_failed status, apart from a tool's own outcomes.
+        result: { content: [{ type: "text", text: JSON.stringify({ ok: false, status: "tool_failed", message }) }], isError: true },
       })
     }
   }

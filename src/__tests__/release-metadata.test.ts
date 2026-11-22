@@ -3,9 +3,9 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
 const root = fileURLToPath(new URL("../..", import.meta.url))
-const expectedVersion = "0.1.0-alpha.20"
+const expectedVersion = "0.1.0-alpha.21"
 const expectedChanges = [
-  "Release preflight's npm audit allows an advisory with no fixed version through audit-allowance.json, for an exact package version until a set date: today picomatch's ReDoS (GHSA-fc5q-39xc-vjpf), until 2026-12-17. Any other advisory, or an expired or incomplete allowance, still fails."
+  "An MCP call to a tool the server doesn't serve now answers with status unknown_door (ok false) and a message that points at tools/list; its error text is unchanged. A tool that throws (the store can't read or write, say) now answers with status tool_failed and the thrown message, as JSON, where it used to answer with the bare text \"Error: <message>\". Both are error results, as before."
 ]
 
 describe("release metadata", () => {

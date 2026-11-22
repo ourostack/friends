@@ -654,14 +654,20 @@ describe("tools/call dispatch", () => {
     expect((r.payload as { status: string }).status).toBe("unsupported")
   })
 
-  it("unknown tool name: isError with an Unknown tool message", async () => {
+  it("unknown tool name: isError with the unknown_door status and an Unknown tool message", async () => {
     const store = makeStore()
     seedOwner(store)
     start(store)
     const res = await h.call({ jsonrpc: "2.0", id: nextId(), method: "tools/call", params: { name: "no_such_tool", arguments: {} } })
     const result = res.result as { content: Array<{ text: string }>; isError: boolean }
     expect(result.isError).toBe(true)
-    expect(result.content[0].text).toContain("Unknown tool")
+    // The status is the stable code an agent matches; `error` keeps the text older clients read.
+    expect(JSON.parse(result.content[0].text)).toEqual({
+      ok: false,
+      status: "unknown_door",
+      message: "Unknown tool: no_such_tool. Call one of the tools tools/list names.",
+      error: "Unknown tool: no_such_tool",
+    })
   })
 
   it("a tool whose library fn throws is caught and returned as isError", async () => {
@@ -682,7 +688,8 @@ describe("tools/call dispatch", () => {
     const res = await h.call({ jsonrpc: "2.0", id: nextId(), method: "tools/call", params: { name: "get_friend", arguments: { friendId: "x" } } })
     const result = res.result as { content: Array<{ text: string }>; isError: boolean }
     expect(result.isError).toBe(true)
-    expect(result.content[0].text).toContain("boom")
+    // A throw is the tool_failed status with the thrown message, so an agent can tell it from a tool's own outcome.
+    expect(JSON.parse(result.content[0].text)).toEqual({ ok: false, status: "tool_failed", message: "boom" })
   })
 })
 
