@@ -1,5 +1,21 @@
 {
   "declarations": "actions/generated/actions.json",
-  "errors": [],
-  "groups": {}
+  "errors": [
+    {
+      "code": "unknown-door",
+      "means": "The server serves no tool by that name; the result says so with status unknown_door.",
+      "fix": "Call one of the tools that tools/list names."
+    }
+  ],
+  "groups": {
+    "friends-people": [
+      "resolve_party",
+      "get_friend",
+      "list_friends",
+      "save_note",
+      "upsert_group",
+      "resolve_room",
+      "whoami"
+    ]
+  }
 }

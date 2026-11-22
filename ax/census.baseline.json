@@ -9,7 +9,6 @@
     "mcp:describe_trust",
     "mcp:explain_standing",
     "mcp:get_coordination",
-    "mcp:get_friend",
     "mcp:get_mission",
     "mcp:grant_share",
     "mcp:import_coordination",
@@ -17,22 +16,16 @@
     "mcp:import_profile",
     "mcp:import_result",
     "mcp:link_identity",
-    "mcp:list_friends",
     "mcp:list_missions",
     "mcp:list_shares",
     "mcp:onboard_agent",
     "mcp:record_interaction",
     "mcp:record_mission",
-    "mcp:resolve_party",
-    "mcp:resolve_room",
     "mcp:revoke_share",
-    "mcp:save_note",
     "mcp:send_result",
     "mcp:set_trust",
     "mcp:share_mission",
     "mcp:share_profile",
-    "mcp:unlink_identity",
-    "mcp:upsert_group",
-    "mcp:whoami"
+    "mcp:unlink_identity"
   ]
 }

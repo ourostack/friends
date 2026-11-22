@@ -7,6 +7,8 @@
     { "walker": "friends-mcp", "module": "actions/generated/mcp.json", "source": "actions/friends.actions.mts", "cards": "ax/cards/mcp.json", "handlers": ["src"] },
     { "walker": "argv-entries", "module": "dist", "source": "src" }
   ],
-  "groups": [],
+  "groups": [
+    { "id": "friends-people", "when": "Friends' MCP tools that find, list and annotate the people and agents this agent knows, and the rooms they share" }
+  ],
   "bookletWords": { "allow": [] }
 }
