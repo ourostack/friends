@@ -1707,7 +1707,7 @@ public enum ShareProfileAction {
     /// The app's handler; every door calls it.
     public static var perform: (@MainActor @Sendable (ShareProfileInput) async throws -> ShareProfileOutput)?
     /// The question the person is asked, the declaration's confirm: the same words as the confirm sheet and the card.
-    public static let confirmation: LocalizedStringResource = "Prepare a profile to send to another agent, within your consent."
+    public static let confirmation: LocalizedStringResource = "Prepare this scope of what you know about this person to send to that agent?"
     /// How the intent asks the person before it acts. Unset, it asks `confirmation`. A test sets it: return to
     /// confirm, or throw to cancel, and the handler never runs. The app can also set it to ask in its own way.
     public static var confirm: (@MainActor @Sendable (ShareProfileInput) async throws -> Void)?
@@ -1932,7 +1932,7 @@ public enum GrantShareAction {
     /// The app's handler; every door calls it.
     public static var perform: (@MainActor @Sendable (GrantShareInput) async throws -> GrantShareOutput)?
     /// The question the person is asked, the declaration's confirm: the same words as the confirm sheet and the card.
-    public static let confirmation: LocalizedStringResource = "Let another agent receive a scope of your data, revocably."
+    public static let confirmation: LocalizedStringResource = "Let that agent receive this scope from now on, until the grant expires or is revoked?"
     /// How the intent asks the person before it acts. Unset, it asks `confirmation`. A test sets it: return to
     /// confirm, or throw to cancel, and the handler never runs. The app can also set it to ask in its own way.
     public static var confirm: (@MainActor @Sendable (GrantShareInput) async throws -> Void)?

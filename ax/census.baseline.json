@@ -7,21 +7,18 @@
     "mcp:coordinate",
     "mcp:get_coordination",
     "mcp:get_mission",
-    "mcp:grant_share",
     "mcp:import_coordination",
     "mcp:import_mission",
     "mcp:import_profile",
     "mcp:import_result",
     "mcp:link_identity",
     "mcp:list_missions",
-    "mcp:list_shares",
     "mcp:onboard_agent",
     "mcp:record_interaction",
     "mcp:record_mission",
     "mcp:revoke_share",
     "mcp:send_result",
     "mcp:set_trust",
-    "mcp:share_mission",
-    "mcp:share_profile"
+    "mcp:share_mission"
   ]
 }

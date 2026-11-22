@@ -376,7 +376,7 @@
     },
     {
       "name": "share-profile",
-      "summary": "Producer: prepare a consent-gated, scope-filtered, provenance-preserving profile-share envelope for another agent (names the party by join key, never the local uuid). Self identity comes from whoami. Returns { ok, envelope } or { ok:false, status }.",
+      "summary": "Producer: prepare a consent-gated, scope-filtered, provenance-preserving profile-share envelope for another agent (names the party by join key, not the local uuid). Self identity comes from whoami. Returns { ok, envelope } or { ok:false, status }.",
       "effect": "others",
       "flags": {
         "friend-id": {
