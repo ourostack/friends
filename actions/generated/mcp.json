@@ -533,7 +533,7 @@
     {
       "name": "share_profile",
       "title": "Share profile",
-      "description": "Producer: prepare a consent-gated, scope-filtered, provenance-preserving profile-share envelope for another agent (names the party by join key, never the local uuid). Self identity comes from whoami. Returns { ok, envelope } or { ok:false, status }.",
+      "description": "Producer: prepare a consent-gated, scope-filtered, provenance-preserving profile-share envelope for another agent (names the party by join key, not the local uuid). Self identity comes from whoami. Returns { ok, envelope } or { ok:false, status }.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -573,7 +573,7 @@
         "openWorldHint": true
       },
       "_meta": {
-        "ouro.bot/confirm": "Prepare a profile to send to another agent, within your consent."
+        "ouro.bot/confirm": "Prepare this scope of what you know about this person to send to that agent?"
       }
     },
     {
@@ -658,7 +658,7 @@
         "openWorldHint": true
       },
       "_meta": {
-        "ouro.bot/confirm": "Let another agent receive a scope of your data, revocably."
+        "ouro.bot/confirm": "Let that agent receive this scope from now on, until the grant expires or is revoked?"
       }
     },
     {

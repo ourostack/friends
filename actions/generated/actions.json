@@ -631,7 +631,36 @@
       "consent": "consequential",
       "label": "Share profile",
       "description": "Prepare a profile to send to another agent, within your consent.",
-      "agent": "Producer: prepare a consent-gated, scope-filtered, provenance-preserving profile-share envelope for another agent (names the party by join key, never the local uuid). Self identity comes from whoami. Returns { ok, envelope } or { ok:false, status }.",
+      "agent": "Producer: prepare a consent-gated, scope-filtered, provenance-preserving profile-share envelope for another agent (names the party by join key, not the local uuid). Self identity comes from whoami. Returns { ok, envelope } or { ok:false, status }.",
+      "when": "Another agent should learn what this agent knows about someone, as far as the owner's consent policy allows",
+      "errors": [
+        {
+          "code": "unsupported",
+          "means": "The host built this server without a grant store, so it can't check consent and share; friends-mcp --dir always wires one.",
+          "fix": "Construct the server with a grant store (or run friends-mcp --dir <path>), then check consent and share again."
+        },
+        {
+          "code": "invalid",
+          "means": "The scope is not a share scope friends knows, so nothing was prepared.",
+          "fix": "Pass scope name, identity, notes:safe, notes:all or outcomes."
+        },
+        {
+          "code": "not-found",
+          "means": "No friend record has that uuid or name, or its file can't be read, so there is nothing to share.",
+          "fix": "Call list_friends to find the record, then share it by uuid."
+        },
+        {
+          "code": "no-consent",
+          "means": "The consent policy refuses this scope to that recipient: name needs trust of friend or above, identity needs family or a grant, and the notes and outcomes scopes need a grant.",
+          "fix": "Ask the owner to grant_share the scope with the friend's uuid as subjectKey and this toAgentId; a grant can't unlock name, which needs a friend."
+        },
+        {
+          "code": "tool-failed",
+          "means": "A friend record or the grant store threw while the share was built; the message says why.",
+          "fix": "Check the file or folder the message names in the friends directory, then share the profile again."
+        }
+      ],
+      "confirm": "Prepare this scope of what you know about this person to send to that agent?",
       "openInput": true,
       "input": {
         "friendId": {
@@ -704,6 +733,25 @@
       "label": "Grant share",
       "description": "Let another agent receive a scope of your data, revocably.",
       "agent": "Mint an explicit, revocable consent grant: an agent may receive a scope of a subject (a friend's profile, keyed by friend uuid; or a mission, keyed by its missionKey). The consent half of the moat.",
+      "when": "The owner agreed that one agent may receive one scope of a person's profile or of a mission",
+      "errors": [
+        {
+          "code": "unsupported",
+          "means": "The host built this server without a grant store, so it can't keep a grant; friends-mcp --dir always wires one.",
+          "fix": "Construct the server with a grant store (or run friends-mcp --dir <path>), then keep a grant again."
+        },
+        {
+          "code": "invalid",
+          "means": "The scope is not one friends knows, so no grant was made.",
+          "fix": "Pass scope identity, notes:safe, notes:all, outcomes or mission (the scopes a grant can unlock)."
+        },
+        {
+          "code": "tool-failed",
+          "means": "The grant store could not write the grant; the message says why.",
+          "fix": "Check that the friends directory's _grants folder is writable, then grant again."
+        }
+      ],
+      "confirm": "Let that agent receive this scope from now on, until the grant expires or is revoked?",
       "openInput": true,
       "input": {
         "subjectKey": {
@@ -761,6 +809,14 @@
       "label": "List shares",
       "description": "List the consent grants and whether each still holds.",
       "agent": "List consent grants with their effective state, optionally filtered by subject / recipient / effectiveness. The audit + revoke surface.",
+      "when": "Auditing who may receive what: every consent grant, or those for one subject or recipient, with its expiry state",
+      "errors": [
+        {
+          "code": "unsupported",
+          "means": "The host built this server without a grant store, so it can't list grants; friends-mcp --dir always wires one.",
+          "fix": "Construct the server with a grant store (or run friends-mcp --dir <path>), then list grants again."
+        }
+      ],
       "openInput": true,
       "input": {
         "subjectKey": {

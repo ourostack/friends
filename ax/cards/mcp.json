@@ -22,6 +22,11 @@
       "assess_standing",
       "explain_standing",
       "unlink_identity"
+    ],
+    "friends-sharing": [
+      "share_profile",
+      "grant_share",
+      "list_shares"
     ]
   }
 }
