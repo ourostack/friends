@@ -13,6 +13,10 @@ export default defineActions(
       label: "Resolve party",
       description: "Find or create the friend record for an external identity.",
       agent: "Resolve an external identity (provider + externalId on a channel) into a friend record, creating one on first contact. Returns { friend, channel, created }.",
+      when: "First contact on any channel: turn whoever is talking into their friend record, made new when unseen",
+      errors: [
+        { code: "tool-failed", means: "The provider or external id is empty or invalid, a record file could not be read or written, or two records claim the same identity; the message says which.", fix: "Pass a non-empty provider and externalId; if they are set, check the file the message names in the friends directory and resolve the party again." },
+      ],
       openInput: true,
       input: {
         provider: field.string({ label: "Provider", description: "identity provider, e.g. aad, local, teams-conversation, imessage-handle, email-address, a2a-agent" }),
@@ -67,6 +71,11 @@ export default defineActions(
       label: "Get friend",
       description: "Look up one friend record.",
       agent: "Fetch a single friend record by uuid or by name.",
+      when: "Reading one person's or agent's whole record, with its notes and linked identities, before acting on it",
+      errors: [
+        { code: "not-found", means: "No record has that uuid, and none was found by that name; a friends directory that can't be scanned also reads as not found.", fix: "Call list_friends to find the record, then call get_friend with its id." },
+        { code: "tool-failed", means: "The record's file could not be read or parsed; the message says why.", fix: "Check the file the message names in the friends directory, then fetch the record again." },
+      ],
       openInput: true,
       input: {
         friendId: field.string({ label: "Friend", description: "friend uuid or name" }),
@@ -79,6 +88,10 @@ export default defineActions(
       label: "List friends",
       description: "List the friend records, optionally filtered.",
       agent: "List friend records, optionally filtered by trust level and kind, optionally limited.",
+      when: "Browsing everyone known, or narrowing to humans or agents at one trust level, before picking a record",
+      errors: [
+        { code: "tool-failed", means: "A record file could not be read; the message says why (a directory that can't be read lists as empty instead).", fix: "Check the file the message names in the friends directory, then list again." },
+      ],
       openInput: true,
       input: {
         trust: field.string({ label: "Trust", description: "filter by trust level: family/friend/acquaintance/stranger", optional: true }),
@@ -93,6 +106,13 @@ export default defineActions(
       label: "Save note",
       description: "Save a friend's name, a tool preference or a note.",
       agent: "Save a friend's name, a tool preference, or a general note. Use override='true' to overwrite an existing value.",
+      when: "Remembering something about someone: what to call them, which tool they prefer, or a keyed note",
+      errors: [
+        { code: "invalid", means: "The type is not name, tool_preference or note, the content is empty, or a tool_preference or note has no key.", fix: "Pass type name, tool_preference or note, a content value, and a key for tool_preference or note." },
+        { code: "not-found", means: "No friend record has that uuid or name, so nothing was saved.", fix: "Call resolve_party or list_friends to find the record, then save the note with its uuid." },
+        { code: "override-required", means: "A value is already saved under that key; the message shows it, and nothing changed.", fix: "Call again with override 'true' to replace it, or save it under another key." },
+        { code: "error", means: "The store could not write the record; it can't when friendId is a name rather than a uuid, and the message says why.", fix: "Call again with the friend's uuid from get_friend; if that fails too, check that the friends directory is writable." },
+      ],
       openInput: true,
       input: {
         friendId: field.string({ label: "Friend", description: "friend uuid or name" }),
@@ -126,6 +146,10 @@ export default defineActions(
       label: "Upsert group",
       description: "Link a group's participants to it and remember them.",
       agent: "Upsert shared-group participant context: link each participant to the group, promoting strangers to acquaintances.",
+      when: "Seeing several people in one group chat: tie each to the group, adding newcomers as acquaintances",
+      errors: [
+        { code: "tool-failed", means: "A participant has no externalId, or a record file could not be read or written; the message says why, and participants before it may already be saved.", fix: "Give every participant a provider and externalId, check the friends directory is writable, then upsert the same participants again." },
+      ],
       openInput: true,
       input: {
         groupExternalId: field.string({ label: "Group", description: "the group's external id" }),
@@ -215,6 +239,10 @@ export default defineActions(
       label: "Who am I",
       description: "Find out who the machine owner is.",
       agent: "Resolve who the machine owner is and which friend record represents the self.",
+      when: "Finding out which OS user owns this machine and which friend record is that owner, else the first family record",
+      errors: [
+        { code: "tool-failed", means: "A record file could not be read while looking for the owner's record; the message says why.", fix: "Check the file the message names in the friends directory, then call whoami again." },
+      ],
       openInput: true,
       input: {},
       output: {},
@@ -237,6 +265,10 @@ export default defineActions(
       label: "Resolve room",
       description: "List who is in a group and how each is known.",
       agent: "Resolve a room (a group's external id) into its members, each with their trust context and how they're known (direct/group_only). Pure read.",
+      when: "Before replying in a group chat: see who is in the room and how far each member is trusted",
+      errors: [
+        { code: "tool-failed", means: "A record file the room is built from could not be read; the message says why (a directory that can't be read gives an empty room instead).", fix: "Check the file the message names in the friends directory, then resolve the room again." },
+      ],
       openInput: true,
       input: {
         groupExternalId: field.string({ label: "Group", description: "the group's external id (e.g. group:project;+;g1)" }),
