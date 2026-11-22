@@ -1,0 +1,1 @@
+{ "actions": [ { "id": "get_friend", "consent": "read", "when": "Reading one friend record by its uuid or name before acting on it", "errors": [] }, { "id": "gone", "consent": "read", "when": "A tool the server no longer serves at all here" } ] }

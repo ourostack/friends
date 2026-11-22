@@ -1,0 +1,9 @@
+{
+  "generator": "ouro-actions 1.12.0",
+  "set": "fixture",
+  "tools": [
+    { "name": "get_friend", "description": "Fetch a friend.", "inputSchema": { "type": "object", "properties": {} }, "annotations": { "readOnlyHint": true } },
+    { "name": "save_note", "description": "Save a note.", "inputSchema": { "type": "object", "properties": {} }, "annotations": { "readOnlyHint": false } },
+    { "name": "whoami", "description": "Say who you are.", "inputSchema": { "type": "object", "properties": {} } }
+  ]
+}

@@ -1,0 +1,1 @@
+{ "declarations": "ax/walkers/fixtures/mcp/actions.json", "groups": { "friend-records": ["get_friend", "save_note"] } }

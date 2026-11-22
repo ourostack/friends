@@ -1,0 +1,5 @@
+{
+  "declarations": "ax/walkers/fixtures/mcp/actions.json",
+  "errors": [{ "code": "unknown-door", "means": "The server serves no tool by that name.", "fix": "Call one of the tools tools/list names." }],
+  "groups": { "friend-records": ["get_friend", "save_note"] }
+}
