@@ -10,7 +10,8 @@
   "groups": [
     { "id": "friends-people", "when": "Friends' MCP tools that find, list and annotate the people and agents this agent knows, and the rooms they share" },
     { "id": "friends-trust", "when": "Friends' MCP tools that explain how far someone is trusted, weigh a peer's record, and fix which ids name whom" },
-    { "id": "friends-sharing", "when": "Friends' MCP tools that hand what this agent knows about a person to another agent, and keep the owner's consent grants" }
+    { "id": "friends-sharing", "when": "Friends' MCP tools that hand what this agent knows about a person to another agent, and keep the owner's consent grants" },
+    { "id": "friends-missions", "when": "Friends' MCP tools that keep shared work records, pass them between agents, and settle who does the work" }
   ],
   "bookletWords": { "allow": [] }
 }

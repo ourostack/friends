@@ -906,6 +906,19 @@
       "label": "Get mission",
       "description": "Look up one mission record.",
       "agent": "Fetch a single mission record by its local uuid id.",
+      "when": "Reading one shared work record in full, with its learnings, outcomes and participants, by its local id",
+      "errors": [
+        {
+          "code": "unsupported",
+          "means": "The host built this server without a mission store, so it can't read a mission; friends-mcp --dir always wires one.",
+          "fix": "Construct the server with a mission store (or run friends-mcp --dir <path>), then read a mission again."
+        },
+        {
+          "code": "not-found",
+          "means": "No mission has that local id, or its file is unreadable or corrupt.",
+          "fix": "Call list_missions to find the mission's id, then fetch it."
+        }
+      ],
       "openInput": true,
       "input": {
         "missionId": {
@@ -922,6 +935,14 @@
       "label": "List missions",
       "description": "List the mission records.",
       "agent": "List mission records, optionally limited.",
+      "when": "Browsing every shared work record this agent keeps, to find one's local id or see what is open",
+      "errors": [
+        {
+          "code": "unsupported",
+          "means": "The host built this server without a mission store, so it can't list missions; friends-mcp --dir always wires one.",
+          "fix": "Construct the server with a mission store (or run friends-mcp --dir <path>), then list missions again."
+        }
+      ],
       "openInput": true,
       "input": {
         "limit": {
@@ -938,7 +959,36 @@
       "consent": "consequential",
       "label": "Share mission",
       "description": "Prepare a mission to send to another agent, within your consent.",
-      "agent": "Producer: prepare a consent-gated, scope-filtered, provenance-preserving mission-share envelope for another agent (names the mission by its missionKey, never the local uuid). Self identity comes from whoami. 'mission' carries the shareable learnings; 'outcomes' carries the mission's outcomes. Returns { ok, envelope } or { ok:false, status }.",
+      "agent": "Producer: prepare a consent-gated, scope-filtered, provenance-preserving mission-share envelope for another agent (names the mission by its missionKey, not the local uuid). Self identity comes from whoami. 'mission' carries the shareable learnings; 'outcomes' carries the mission's outcomes. Returns { ok, envelope } or { ok:false, status }.",
+      "when": "Passing what was learned on shared work, or how it turned out, to another agent that consent covers",
+      "errors": [
+        {
+          "code": "unsupported",
+          "means": "The host built this server without a mission store and grant store, so it can't share a mission; friends-mcp --dir always wires one.",
+          "fix": "Construct the server with a mission store and grant store (or run friends-mcp --dir <path>), then share a mission again."
+        },
+        {
+          "code": "invalid",
+          "means": "The scope is neither mission nor outcomes.",
+          "fix": "Pass scope mission for the shareable learnings, or outcomes for the outcomes."
+        },
+        {
+          "code": "not-found",
+          "means": "No mission has that local id, so there is nothing to share.",
+          "fix": "Call list_missions to find the mission's id, then share it."
+        },
+        {
+          "code": "no-consent",
+          "means": "No effective grant covers this scope of the mission for that recipient; trust alone never unlocks mission or outcomes.",
+          "fix": "Ask the owner to grant_share the same scope with the mission's missionKey as subjectKey and this toAgentId, then share again."
+        },
+        {
+          "code": "tool-failed",
+          "means": "A store could not read the mission, records or grants the share is built from; the message says why.",
+          "fix": "Check that the friends directory is readable, then share the mission again."
+        }
+      ],
+      "confirm": "Prepare this scope of the mission to send to that agent?",
       "openInput": true,
       "input": {
         "missionId": {
@@ -974,7 +1024,35 @@
       "consent": "write",
       "label": "Import mission",
       "description": "Take in a mission another agent shared, without changing your own record.",
-      "agent": "Consumer (non-clobbering merge): import a mission-share envelope. Resolves the mission by missionKey; lands learnings in the imported namespace WITHOUT touching first-party learnings; append-merges + dedupes outcomes; source trust caps acceptance; never recomputes status/participants. Returns { ok, status, record }.",
+      "agent": "Consumer (non-clobbering merge): import a mission-share envelope. Resolves the mission by missionKey; lands learnings in the imported namespace WITHOUT touching first-party learnings; append-merges + dedupes outcomes; source trust caps acceptance; leaves status/participants as they were. Returns { ok, status, record }.",
+      "when": "A peer agent sent a mission-share envelope: merge its learnings and outcomes in as that peer's claims",
+      "errors": [
+        {
+          "code": "unsupported",
+          "means": "The host built this server without a mission store, so it can't import a mission; friends-mcp --dir always wires one.",
+          "fix": "Construct the server with a mission store (or run friends-mcp --dir <path>), then import a mission again."
+        },
+        {
+          "code": "invalid",
+          "means": "No envelope object came with the call, so there is nothing to import.",
+          "fix": "Pass the MissionShareEnvelope the peer sent as envelope."
+        },
+        {
+          "code": "untrusted-source",
+          "means": "trustOfSource is below acquaintance, or not a trust level, so the envelope was refused and nothing changed.",
+          "fix": "Call describe_trust on the sending agent; import only from a source trusted at acquaintance or above."
+        },
+        {
+          "code": "untrusted-introduction",
+          "means": "The envelope names a mission this agent doesn't have, and only a friend or family source may start one here.",
+          "fix": "Record the mission first with record_mission, or accept new missions only from a friend or family agent."
+        },
+        {
+          "code": "tool-failed",
+          "means": "The envelope is malformed (no subject, or learnings that aren't a list), or the mission store could not write; the message says which.",
+          "fix": "Pass the envelope exactly as the peer sent it; if it is well formed, check that the friends directory's _missions folder is writable."
+        }
+      ],
       "openInput": true,
       "input": {
         "envelope": {
@@ -1007,7 +1085,41 @@
       "consent": "consequential",
       "label": "Coordinate",
       "description": "Offer, accept, decline or hand off a mission to another agent.",
-      "agent": "Producer (brick 5): prepare a coordination message that negotiates WHO does a mission — one of request/offer/accept/decline/handoff, named by the mission's missionKey (never the local uuid). Consent-gated via the identity-tier 'coordinate' scope (trust ≥ friend suffices). 'accept' claims the assignment for self; 'handoff' (you must hold the assignment) proposes a new assignee whose own accept confirms it (non-transitive). Self identity comes from whoami. Returns { ok, envelope } or { ok:false, status: not_found|no_consent|not_assignee }.",
+      "agent": "Producer (brick 5): prepare a coordination message that negotiates WHO does a mission — one of request/offer/accept/decline/handoff, named by the mission's missionKey (not the local uuid). Consent-gated via the identity-tier 'coordinate' scope (trust ≥ friend suffices). 'accept' claims the assignment for self; 'handoff' (only by the agent holding the assignment) proposes a new assignee whose own accept confirms it (non-transitive). Self identity comes from whoami. Returns { ok, envelope } or { ok:false, status: not_found|no_consent|not_assignee }.",
+      "when": "Settling which agent takes a piece of shared work: ask, offer, accept, decline or hand it off",
+      "errors": [
+        {
+          "code": "unsupported",
+          "means": "The host built this server without a mission store and grant store, so it can't coordinate; friends-mcp --dir always wires one.",
+          "fix": "Construct the server with a mission store and grant store (or run friends-mcp --dir <path>), then coordinate again."
+        },
+        {
+          "code": "invalid",
+          "means": "The intent is not request, offer, accept, decline or handoff.",
+          "fix": "Pass intent request, offer, accept, decline or handoff."
+        },
+        {
+          "code": "not-found",
+          "means": "No mission has that local id, so there is nothing to coordinate.",
+          "fix": "Call list_missions to find the mission's id, then coordinate on it."
+        },
+        {
+          "code": "no-consent",
+          "means": "The recipient is trusted below friend (an agent with no record counts as a stranger); a grant can't unlock the coordinate scope.",
+          "fix": "Coordinate with a friend or family agent, or ask the owner whether to raise that agent's trust to friend."
+        },
+        {
+          "code": "not-assignee",
+          "means": "A handoff came from an agent that doesn't hold the mission's assignment, so nothing was sent.",
+          "fix": "Call get_coordination to see who holds it; accept the mission first, or ask its holder to hand it off."
+        },
+        {
+          "code": "tool-failed",
+          "means": "A store could not read or write the mission, records or grants; the message says why.",
+          "fix": "Check that the friends directory is writable, then coordinate again."
+        }
+      ],
+      "confirm": "Prepare this coordination message about the mission for that agent?",
       "openInput": true,
       "input": {
         "missionId": {
@@ -1066,7 +1178,35 @@
       "consent": "write",
       "label": "Import coordination",
       "description": "Take in a coordination message from another agent.",
-      "agent": "Consumer (brick 5, non-clobbering merge): import a coordination message. Resolves the mission by missionKey; appends the intent to coordination.log stamped origin:imported WITHOUT touching first-party learnings/notes/status; only an 'accept' sets the assignee (last-writer-wins by issuedAt); a 'handoff' never forces an assignee onto you (only your own accept does); never recomputes status/trust/standing; source trust caps acceptance; a friend/family peer may seed an unknown mission. Returns { ok, status: logged|assigned|seeded, record } or { ok:false, status }.",
+      "agent": "Consumer (brick 5, non-clobbering merge): import a coordination message. Resolves the mission by missionKey; appends the intent to coordination.log stamped origin:imported WITHOUT touching first-party learnings/notes/status; only an 'accept' sets the assignee (last-writer-wins by issuedAt); a 'handoff' doesn't set the assignee on its own (only an accept does); status/trust/standing stay as they were; source trust caps acceptance; a friend/family peer may seed an unknown mission. Returns { ok, status: logged|assigned|seeded, record } or { ok:false, status }.",
+      "when": "A peer agent sent a coordination message about shared work: log it, and take a newer accept as the assignee",
+      "errors": [
+        {
+          "code": "unsupported",
+          "means": "The host built this server without a mission store, so it can't import coordination; friends-mcp --dir always wires one.",
+          "fix": "Construct the server with a mission store (or run friends-mcp --dir <path>), then import coordination again."
+        },
+        {
+          "code": "invalid",
+          "means": "No envelope object came with the call, so there is nothing to import.",
+          "fix": "Pass the CoordinationEnvelope the peer sent as envelope."
+        },
+        {
+          "code": "untrusted-source",
+          "means": "trustOfSource is below acquaintance, or not a trust level, so the message was refused and nothing changed.",
+          "fix": "Call describe_trust on the sending agent; import only from a source trusted at acquaintance or above."
+        },
+        {
+          "code": "untrusted-introduction",
+          "means": "The message names a mission this agent doesn't have, and only a friend or family source may start one here.",
+          "fix": "Record the mission first with record_mission, or accept new missions only from a friend or family agent."
+        },
+        {
+          "code": "tool-failed",
+          "means": "The envelope is malformed (no subject), or the mission store could not write; the message says which.",
+          "fix": "Pass the envelope exactly as the peer sent it; if it is well formed, check that the friends directory's _missions folder is writable."
+        }
+      ],
       "openInput": true,
       "input": {
         "envelope": {
@@ -1099,7 +1239,20 @@
       "consent": "read",
       "label": "Get coordination",
       "description": "See who holds a mission and its coordination log.",
-      "agent": "Read lens (brick 5): return a mission's coordination state — its current assignee (who holds it; absent ⇒ unclaimed) + the append-only log of every request/offer/accept/decline/handoff that flowed. Returns { assignee, assignedAt?, log } (the empty default { assignee: undefined, log: [] } when never coordinated), or { ok:false, status:'not_found' } when the mission is missing.",
+      "agent": "Read lens (brick 5): return a mission's coordination state — its current assignee (who holds it; absent ⇒ unclaimed) + the append-only log of every request/offer/accept/decline/handoff that flowed. Returns { assignee, assignedAt?, log } (the empty default { assignee: undefined, log: [] } when it has had no coordination), or { ok:false, status:'not_found' } when the mission is missing.",
+      "when": "Checking who currently holds a piece of shared work and every ask, offer and handoff so far",
+      "errors": [
+        {
+          "code": "unsupported",
+          "means": "The host built this server without a mission store, so it can't read coordination; friends-mcp --dir always wires one.",
+          "fix": "Construct the server with a mission store (or run friends-mcp --dir <path>), then read coordination again."
+        },
+        {
+          "code": "not-found",
+          "means": "No mission has that local id, or its file is unreadable or corrupt, so it has no coordination to show.",
+          "fix": "Call list_missions to find the mission's id, then read its coordination."
+        }
+      ],
       "openInput": true,
       "input": {
         "missionId": {
@@ -1115,7 +1268,31 @@
       "consent": "consequential",
       "label": "Send result",
       "description": "Return your finished work for a mission to the agent that delegated it.",
-      "agent": "Producer (gap-2 — the result-return): B returns its DELIVERABLE for a delegation, attributed to B (from whoami) + correlated to A's task-spec by requestId, named by the mission's missionKey (never the local uuid). Consent-gated via the identity-tier 'coordinate' scope (a result is B answering A's own delegation — trust ≥ friend suffices; NO new scope). Records the result first-party on B's own mission. Returns { ok, envelope } or { ok:false, status: not_found|no_consent }.",
+      "agent": "Producer (gap-2 — the result-return): B returns its DELIVERABLE for a delegation, attributed to B (from whoami) + correlated to A's task-spec by requestId, named by the mission's missionKey (not the local uuid). Consent-gated via the identity-tier 'coordinate' scope (a result is B answering A's own delegation — trust ≥ friend suffices; NO new scope). Records the result first-party on B's own mission. Returns { ok, envelope } or { ok:false, status: not_found|no_consent }.",
+      "when": "Delegated work is finished: hand the deliverable back to the agent that asked, tied to its request id",
+      "errors": [
+        {
+          "code": "unsupported",
+          "means": "The host built this server without a mission store and grant store, so it can't return a result; friends-mcp --dir always wires one.",
+          "fix": "Construct the server with a mission store and grant store (or run friends-mcp --dir <path>), then return a result again."
+        },
+        {
+          "code": "not-found",
+          "means": "No mission has that local id, so there is nothing to answer.",
+          "fix": "Call list_missions to find the mission's id, then send the result on it."
+        },
+        {
+          "code": "no-consent",
+          "means": "The requesting agent is trusted below friend; a grant can't unlock the coordinate scope a result travels under.",
+          "fix": "Send results only to a friend or family agent, or ask the owner whether to raise that agent's trust to friend."
+        },
+        {
+          "code": "tool-failed",
+          "means": "A store could not read or write the mission, records or grants; the message says why.",
+          "fix": "Check that the friends directory is writable, then send the result again."
+        }
+      ],
+      "confirm": "Record this result on the mission and prepare it for the agent that asked?",
       "openInput": true,
       "input": {
         "missionId": {

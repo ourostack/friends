@@ -27,6 +27,16 @@
       "share_profile",
       "grant_share",
       "list_shares"
+    ],
+    "friends-missions": [
+      "get_mission",
+      "list_missions",
+      "share_mission",
+      "import_mission",
+      "coordinate",
+      "import_coordination",
+      "get_coordination",
+      "send_result"
     ]
   }
 }
