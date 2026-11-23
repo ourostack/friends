@@ -527,6 +527,41 @@ describe("FileFriendStore", () => {
     expect((await b.get("rec-1"))?.name).toBe("Jordan")
   })
 
+  describe("ids that would leave the friends directory (#212)", () => {
+    function storeWithOutsider(): { store: FileFriendStore; dir: string; friendsPath: string } {
+      const dir = freshDir()
+      dirs.push(dir)
+      const friendsPath = join(dir, "friends")
+      const s = new FileFriendStore(friendsPath)
+      writeFileSync(join(dir, "outside.json"), JSON.stringify(makeRecord({ id: "outside", name: "Outsider" })))
+      mkdirSync(join(friendsPath, "sub"))
+      writeFileSync(join(friendsPath, "sub", "inner.json"), JSON.stringify(makeRecord({ id: "inner", name: "Inner" })))
+      return { store: s, dir, friendsPath }
+    }
+
+    it("get does not read a JSON file outside the friends directory", async () => {
+      const { store: s } = storeWithOutsider()
+      expect(await s.get("../outside")).toBeNull()
+    })
+
+    it("get does not read a JSON file in a folder under the friends directory", async () => {
+      const { store: s } = storeWithOutsider()
+      expect(await s.get("sub/inner")).toBeNull()
+    })
+
+    it("get still finds a record by a name that is not a record id", async () => {
+      const { store: s } = storeWithOutsider()
+      await s.put("rec-1", makeRecord({ name: "Ana Lu" }))
+      expect((await s.get("Ana Lu"))?.id).toBe("rec-1")
+    })
+
+    it("delete refuses an id that leaves the friends directory and removes nothing", async () => {
+      const { store: s, dir } = storeWithOutsider()
+      await expect(s.delete("../outside")).rejects.toThrow("friend record id is invalid")
+      expect(readFileSync(join(dir, "outside.json"), "utf-8")).toContain("Outsider")
+    })
+  })
+
   describe("when the friends directory becomes unreadable", () => {
     // Construct the store (which mkdir's the path), then swap the directory for a
     // regular file so directory reads/unlinks fail with ENOTDIR — exercising the

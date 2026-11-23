@@ -137,8 +137,9 @@ describe("FileMissionStore", () => {
   it("rethrows a non-ENOENT delete error", async () => {
     dir = mkdtempSync(join(tmpdir(), "friends-missions-"))
     const store = new FileMissionStore(missionsDirFor(dir))
-    await store.put("blocker", mission({ id: "blocker" }))
-    await expect(store.delete(join("blocker.json", "child"))).rejects.toThrow()
+    // A folder where the mission file would be: unlink fails with a code other than ENOENT.
+    await fsPromises.mkdir(join(missionsDirFor(dir), "blocker.json"))
+    await expect(store.delete("blocker")).rejects.toMatchObject({ code: expect.not.stringMatching(/^ENOENT$/) })
   })
 
   it("normalize: defaults a missing status to 'active' and a missing schemaVersion to 1", async () => {
@@ -251,5 +252,29 @@ describe("FileMissionStore", () => {
     const loaded = await store.get("m-1")
     expect(loaded?.importedResults?.["agent-b"]["req-1"].summary).toBe("their deliverable")
     expect(loaded?.importedResults?.["agent-b"]["req-1"].provenance?.origin).toBe("imported")
+  })
+
+  describe("ids that would leave the missions directory", () => {
+    it("get does not read a JSON file outside the missions directory", async () => {
+      dir = mkdtempSync(join(tmpdir(), "friends-missions-"))
+      const store = new FileMissionStore(missionsDirFor(dir))
+      await fsPromises.writeFile(join(dir, "friend-1.json"), JSON.stringify({ id: "friend-1", missionKey: "not-a-mission" }))
+      expect(await store.get("../friend-1")).toBeNull()
+    })
+
+    it("put refuses an id that leaves the missions directory and writes nothing there", async () => {
+      dir = mkdtempSync(join(tmpdir(), "friends-missions-"))
+      const store = new FileMissionStore(missionsDirFor(dir))
+      await expect(store.put("../escaped", mission({ id: "../escaped" }))).rejects.toThrow("mission id is invalid")
+      expect(existsSync(join(dir, "escaped.json"))).toBe(false)
+    })
+
+    it("delete refuses an id that leaves the missions directory and removes nothing", async () => {
+      dir = mkdtempSync(join(tmpdir(), "friends-missions-"))
+      const store = new FileMissionStore(missionsDirFor(dir))
+      await fsPromises.writeFile(join(dir, "friend-1.json"), "{}")
+      await expect(store.delete("../friend-1")).rejects.toThrow("mission id is invalid")
+      expect(existsSync(join(dir, "friend-1.json"))).toBe(true)
+    })
   })
 })

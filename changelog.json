@@ -1,6 +1,12 @@
 {
   "versions": [
     {
+      "version": "0.1.0-alpha.23",
+      "changes": [
+        "A friend or mission id can no longer reach a file outside its store's directory. get_friend, and every tool that looks a friend up, now reads a record file directly only for an id made of letters, digits, dots, underscores and hyphens that starts with a letter or digit; any other id, such as \"../x\" or \"a/b\", is matched only as a name, so it answers not_found unless a friend has that name. It used to read any .json file the process could reach. A mission id like that names no mission, and the stores refuse to write or delete a friend or mission by it."
+      ]
+    },
+    {
       "version": "0.1.0-alpha.22",
       "changes": [
         "friends-mcp now prints why it stopped, on stderr, before exiting 1: \"friends-mcp: missing-dir: ...\" when neither --dir nor FRIENDS_DIR names a directory (it used to exit silently), and \"friends-mcp: unknown-door: ...\" for any argument other than --dir <path>, which it used to ignore."

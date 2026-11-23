@@ -8,6 +8,7 @@ import { createHash, randomUUID } from "crypto"
 import { capStructuredRecordString } from "./util/cap-string"
 import { emitNervesEvent } from "./observability"
 import { isIdentityProvider } from "./types"
+import { isSafeRecordId } from "./util/safe-id"
 import type {
   ExternalIdClaimInput,
   ExternalIdClaimResult,
@@ -33,7 +34,6 @@ const DEFAULT_ADMISSION_STATE: AdmissionState = "unverified"
 const DEFAULT_INITIATIVE_POLICY: InitiativePolicy = "none"
 const CLAIMS_DIR_NAME = "_external-id-claims"
 const MAX_CLAIM_BYTES = 1_048_576
-const SAFE_RECORD_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
 interface ExternalIdClaimJournalBase {
   schemaVersion: 1
@@ -91,8 +91,8 @@ export class FileFriendStore implements ExternalIdClaimStore {
   }
 
   async get(id: string): Promise<FriendRecord | null> {
-    // Direct UUID lookup
-    const record = await this.readJson(path.join(this.friendsPath, `${id}.json`))
+    // Direct id lookup, only for an id that names a file in the friends directory (#212); any other id is a name.
+    const record = isSafeRecordId(id) ? await this.readJson(path.join(this.friendsPath, `${id}.json`)) : null
     if (record) return await this.normalizeWithClaims(record)
 
     // Fallback: if id is a name (not UUID), scan for matching friend
@@ -117,7 +117,7 @@ export class FileFriendStore implements ExternalIdClaimStore {
   }
 
   async put(id: string, record: FriendRecord): Promise<void> {
-    if (!SAFE_RECORD_ID.test(id) || record.id !== id) throw new Error("friend record id is invalid")
+    if (!isSafeRecordId(id) || record.id !== id) throw new Error("friend record id is invalid")
     const existing = await this.readJson(path.join(this.friendsPath, `${id}.json`))
     const existingIncarnation = typeof existing?.recordIncarnation === "string" && existing.recordIncarnation
       ? existing.recordIncarnation
@@ -137,6 +137,7 @@ export class FileFriendStore implements ExternalIdClaimStore {
   }
 
   async delete(id: string): Promise<void> {
+    if (!isSafeRecordId(id)) throw new Error("friend record id is invalid")
     await this.removeFile(path.join(this.friendsPath, `${id}.json`))
   }
 
@@ -210,7 +211,7 @@ export class FileFriendStore implements ExternalIdClaimStore {
   }
 
   async releaseExternalId(friendId: string, externalId: ExternalId): Promise<void> {
-    if (!SAFE_RECORD_ID.test(friendId)) throw new Error("external identity claim target id is invalid")
+    if (!isSafeRecordId(friendId)) throw new Error("external identity claim target id is invalid")
     const claimPath = this.pendingClaimPath(externalId)
     await this.ensureClaimsDirectory()
     const journal = await this.readClaimIfPresent(claimPath, externalId)
@@ -555,7 +556,7 @@ export class FileFriendStore implements ExternalIdClaimStore {
       !this.isSafeExternalId(parsed.externalId) ||
       this.externalIdentityDigest(parsed.externalId) !== identityDigest ||
       typeof parsed.friendId !== "string" ||
-      !SAFE_RECORD_ID.test(parsed.friendId) ||
+      !isSafeRecordId(parsed.friendId) ||
       !this.isSafeRecordIncarnation(parsed.recordIncarnation) ||
       (state === "pending" && targetKind === "create" && (
         !this.isSafeJournalCreateRecord(parsed.createRecord) ||
@@ -604,7 +605,7 @@ export class FileFriendStore implements ExternalIdClaimStore {
       throw new Error("external identity create candidate is invalid")
     }
     const id = input.target.kind === "link" ? input.target.friendId : input.target.record.id
-    if (!SAFE_RECORD_ID.test(id)) throw new Error("external identity claim target id is invalid")
+    if (!isSafeRecordId(id)) throw new Error("external identity claim target id is invalid")
     if (!this.isSafeExternalId(input.externalId)) throw new Error("external identity claim is invalid")
   }
 
@@ -638,7 +639,7 @@ export class FileFriendStore implements ExternalIdClaimStore {
     if (!record || typeof record !== "object" || Array.isArray(record)) return false
     const candidate = record as Partial<FriendRecord>
     return typeof candidate.id === "string" &&
-      SAFE_RECORD_ID.test(candidate.id) &&
+      isSafeRecordId(candidate.id) &&
       typeof candidate.name === "string" &&
       candidate.name.trim().length > 0 &&
       candidate.name.length <= 256 &&
@@ -667,7 +668,7 @@ export class FileFriendStore implements ExternalIdClaimStore {
     const expectedKeys = ["admissionState", "connections", "createdAt", "externalIds", "id", "initiativePolicy", "kind", "name", "notes", "recordGeneration", "recordIncarnation", "relationshipPolicy", "role", "schemaVersion", "tenantMemberships", "toolPreferences", "totalTokens", "trustLevel", "updatedAt"]
     return this.hasExactKeys(candidate, expectedKeys) &&
       typeof candidate.id === "string" &&
-      SAFE_RECORD_ID.test(candidate.id) &&
+      isSafeRecordId(candidate.id) &&
       typeof candidate.recordIncarnation === "string" &&
       this.isSafeRecordIncarnation(candidate.recordIncarnation) &&
       Number.isSafeInteger(candidate.recordGeneration) &&

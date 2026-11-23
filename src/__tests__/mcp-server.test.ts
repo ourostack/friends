@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import { PassThrough } from "node:stream"
-import { mkdtempSync, rmSync } from "fs"
+import { mkdtempSync, rmSync, writeFileSync } from "fs"
 import { tmpdir } from "os"
 import { join } from "path"
 
@@ -424,6 +424,21 @@ describe("tools/call dispatch", () => {
       start(store)
       const byName = await h.tool("get_friend", { friendId: "operator" })
       expect((byName.payload as FriendRecord).id).toBe(owner.id)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("get_friend: an id that climbs out of the friends directory is not found (#212)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "friends-mcp-escape-"))
+    try {
+      const store = new FileFriendStore(join(dir, "friends"))
+      const outsider = { ...ownerRecord(), id: "outside", name: "Outsider" }
+      writeFileSync(join(dir, "outside.json"), JSON.stringify(outsider))
+      start(store)
+      const escaped = await h.tool("get_friend", { friendId: "../outside" })
+      expect(escaped.isError).toBe(true)
+      expect((escaped.payload as { status: string }).status).toBe("not_found")
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

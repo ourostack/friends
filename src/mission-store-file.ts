@@ -8,6 +8,7 @@ import * as fs from "fs"
 import * as fsPromises from "fs/promises"
 import * as path from "path"
 import { emitNervesEvent } from "./observability"
+import { isSafeRecordId } from "./util/safe-id"
 import type { MissionStore } from "./mission-store"
 import type { MissionRecord } from "./types"
 
@@ -47,11 +48,14 @@ export class FileMissionStore implements MissionStore {
   }
 
   async get(id: string): Promise<MissionRecord | null> {
+    // An id that would leave the missions directory names no mission.
+    if (!isSafeRecordId(id)) return null
     const mission = await this.readJson(path.join(this.missionsPath, `${id}.json`))
     return mission ? this.normalize(mission) : null
   }
 
   async put(id: string, mission: MissionRecord): Promise<void> {
+    if (!isSafeRecordId(id)) throw new Error("mission id is invalid")
     await fsPromises.writeFile(
       path.join(this.missionsPath, `${id}.json`),
       JSON.stringify(this.normalize(mission), null, 2),
@@ -60,6 +64,7 @@ export class FileMissionStore implements MissionStore {
   }
 
   async delete(id: string): Promise<void> {
+    if (!isSafeRecordId(id)) throw new Error("mission id is invalid")
     try {
       await fsPromises.unlink(path.join(this.missionsPath, `${id}.json`))
     } catch (err: unknown) {
