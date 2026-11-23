@@ -16,6 +16,7 @@
       "record_interaction",
       "upsert_group",
       "resolve_room",
+      "channel_caps",
       "whoami"
     ],
     "friends-trust": [

@@ -14,7 +14,7 @@ import { isIdentityProvider, isShareScope } from "../types"
 import { FriendResolver } from "../resolver"
 import { describeTrustContext } from "../trust-explanation"
 import { assessStanding, explainStanding } from "../standing"
-import { getChannelCapabilities } from "../channel"
+import { getChannelCapabilities, isKnownChannel, knownChannels } from "../channel"
 import { upsertGroupContextParticipants } from "../group-context"
 import type { GroupContextParticipant } from "../group-context"
 import { accumulateFriendTokens } from "../tokens"
@@ -498,7 +498,15 @@ export async function dispatchTool(
     }
 
     case "channel_caps": {
-      return { result: getChannelCapabilities(coerceString(args.channel)), isError: false }
+      // A typo used to answer the defaults as if they were a real channel's (#225).
+      const channel = coerceString(args.channel)
+      if (!isKnownChannel(channel)) {
+        return {
+          result: { ok: false, status: "unknown_channel", message: `${channel === "" ? "channel is required" : `unknown channel '${channel}'`}: use one of ${knownChannels().join(", ")}` },
+          isError: true,
+        }
+      }
+      return { result: getChannelCapabilities(channel), isError: false }
     }
 
     case "resolve_room": {

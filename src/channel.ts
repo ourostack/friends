@@ -140,7 +140,18 @@ export function getChannelCapabilities(channel: string): ChannelCapabilities {
     message: "channel capabilities lookup",
     meta: { channel },
   })
-  return CHANNEL_CAPABILITIES[channel] ?? DEFAULT_CAPABILITIES
+  return isKnownChannel(channel) ? CHANNEL_CAPABILITIES[channel] : DEFAULT_CAPABILITIES
+}
+
+/** Whether friends has capabilities for this channel. Only the channel's own entry counts, so a name like "toString"
+ * isn't mistaken for one (#225). */
+export function isKnownChannel(channel: string): boolean {
+  return Object.hasOwn(CHANNEL_CAPABILITIES, channel)
+}
+
+/** The channels friends has capabilities for, in declaration order. */
+export function knownChannels(): string[] {
+  return Object.keys(CHANNEL_CAPABILITIES)
 }
 
 /** Whether the channel is remote (open or closed) vs local/internal. */

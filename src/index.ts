@@ -120,6 +120,8 @@ export {
 
 export {
   getChannelCapabilities,
+  isKnownChannel,
+  knownChannels,
   channelToFacing,
   isRemoteChannel,
   getAlwaysOnSenseNames,

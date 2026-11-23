@@ -830,6 +830,20 @@ describe("tools/call dispatch", () => {
     expect((r.payload as { supportsMarkdown: boolean }).supportsMarkdown).toBe(true)
   })
 
+  it("channel_caps: a channel friends doesn't know answers unknown_channel, not the defaults (#225)", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    start(store)
+    for (const channel of ["temas", "", "toString", "__proto__"]) {
+      const r = await h.tool("channel_caps", { channel })
+      expect(r.isError, channel).toBe(true)
+      expect((r.payload as { status: string }).status, channel).toBe("unknown_channel")
+      expect((r.payload as { message: string }).message).toContain("teams")
+    }
+    const missing = await h.tool("channel_caps", {})
+    expect((missing.payload as { message: string }).message).toMatch(/^channel is required: use one of cli, /)
+  })
+
   it("share_profile: reports unsupported when no grant store is wired", async () => {
     const store = makeStore()
     seedOwner(store)

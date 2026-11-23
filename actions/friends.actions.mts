@@ -306,6 +306,10 @@ export default defineActions(
       label: "Channel capabilities",
       description: "Look up what a channel can carry.",
       agent: "Return the capabilities of a channel (integrations, markdown, streaming, rich cards, max length).",
+      when: "Before writing for a channel: check whether it takes markdown, HTML, streaming or rich cards, and how long a message may be",
+      errors: [
+        { code: "unknown-channel", means: "The channel is missing, or friends has no capabilities for that name, so none were returned; the message lists the channels it knows.", fix: "Call again with one of the channels the message lists, such as cli, teams, mail, a2a or mcp." },
+      ],
       openInput: true,
       input: {
         channel: field.string({ label: "Channel", description: "the channel to look up" }),
