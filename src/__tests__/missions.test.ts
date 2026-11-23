@@ -191,3 +191,14 @@ describe("recordMission — upsert (existing missionKey resolved via findByMissi
     expect(record.updatedAt).not.toBe("2020-01-01T00:00:00.000Z")
   })
 })
+
+describe("recordMission participants without an agentId (#224 review)", () => {
+  it("tells them apart by agentName, and treats unnamed ones as one", async () => {
+    const missions = new MemoryMissionStore()
+    const record = await recordMission(missions, {
+      missionKey: "repo#7",
+      participants: [{ agentName: "Bot" }, { agentName: "Ada" }, { agentName: "Bot" }, {}, {}, { agentId: "a-1" }],
+    })
+    expect(record.participants).toEqual([{ agentName: "Bot" }, { agentName: "Ada" }, {}, { agentId: "a-1" }])
+  })
+})

@@ -427,7 +427,7 @@ describe("importMissionResult — consumer (the non-clobbering merge)", () => {
     expect(stored!.results!["req-1"]).toBeUndefined()
   })
 
-  it("is idempotent on replay — the same (agentId, requestId) does not double-land or re-stamp", async () => {
+  it("is idempotent on replay — the same (agentId, requestId) does not double-land or re-stamp, and says noop (#224)", async () => {
     const missions = new MemoryMissionStore([missionOnA("req-1")])
     await importMissionResult(missions, { envelope: resultEnvelope(), fromAgentId: "agent-b", trustOfSource: "friend" })
     const afterFirst = await missions.get("m-on-a")
@@ -435,7 +435,7 @@ describe("importMissionResult — consumer (the non-clobbering merge)", () => {
     // replay
     const replay = await importMissionResult(missions, { envelope: resultEnvelope(), fromAgentId: "agent-b", trustOfSource: "friend" })
     expect(replay.ok).toBe(true)
-    if (replay.ok) expect(replay.status).toBe("imported")
+    if (replay.ok) expect(replay.status).toBe("noop")
     const afterReplay = await missions.get("m-on-a")
     expect(Object.keys(afterReplay!.importedResults!["agent-b"])).toHaveLength(1)
     expect(afterReplay!.importedResults!["agent-b"]["req-1"].provenance!.importedAt).toBe(firstImportedAt)

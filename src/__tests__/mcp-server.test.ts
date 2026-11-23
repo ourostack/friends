@@ -1776,6 +1776,41 @@ describe("mission tools/call dispatch", () => {
     expect(rec.outcomes).toHaveLength(1)
   })
 
+  it("record_mission: a status, list or key it couldn't save is invalid and changes nothing (#224)", async () => {
+    const missions = makeMissionStore([missionOf({ status: "succeeded" })])
+    start(ownerStore(), undefined, missions)
+    for (const args of [
+      { missionKey: "PROJ-1234", status: "bogus" },
+      { missionKey: "" },
+      { missionKey: "  " },
+      { missionKey: "PROJ-1234", learnings: "{not json" },
+      { missionKey: "PROJ-1234", learnings: { key: "k", value: "v" } },
+      { missionKey: "PROJ-1234", learnings: [{ key: "k" }] },
+      { missionKey: "PROJ-1234", participants: [{ name: "no agent id" }] },
+      { missionKey: "PROJ-1234", participants: [{ agentId: 5 }] },
+      { missionKey: "PROJ-1234", participants: [{ agentId: "a", agentName: 5 }] },
+      { missionKey: "PROJ-1234", participants: [{ agentId: "" }] },
+      { missionKey: "PROJ-1234", learnings: [{ key: "k", value: "v", shareable: "yes" }] },
+      { missionKey: "PROJ-1234", status: 5 },
+      { missionKey: "PROJ-1234", learnings: [{ key: "__proto__", value: "v" }] },
+      { missionKey: "PROJ-1234", outcomes: [{ missionId: "x", result: "great" }] },
+      { missionKey: "PROJ-1234", outcomes: "[" },
+    ]) {
+      const r = await h.tool("record_mission", args)
+      expect(r.isError, JSON.stringify(args)).toBe(true)
+      expect((r.payload as { status: string }).status, JSON.stringify(args)).toBe("invalid")
+    }
+    const kept = await missions.get("m-1")
+    expect(kept?.status).toBe("succeeded")
+    expect(kept?.learnings).toEqual(missionOf().learnings)
+    expect(await missions.listAll()).toHaveLength(1)
+    const named = await h.tool("record_mission", { missionKey: "PROJ-1234", status: null, participants: [{ agentName: "Bot" }, { agentName: "Ada" }], learnings: [{ key: "k", value: "v", shareable: true }] })
+    expect(named.isError).toBe(false)
+    expect((named.payload as MissionRecord).status).toBe("succeeded")
+    expect((named.payload as MissionRecord).participants).toEqual([{ agentName: "Bot" }, { agentName: "Ada" }])
+    expect((await missions.get("m-1"))?.participants).toEqual([{ agentName: "Bot" }, { agentName: "Ada" }])
+  })
+
   // ── get_mission ──
 
   it("get_mission: reports unsupported with no mission store", async () => {
@@ -2069,6 +2104,75 @@ describe("mission tools/call dispatch", () => {
     expect(payload.ok).toBe(true)
     expect(payload.status).toBe("imported")
     expect(payload.record.importedResults!["agent-b"]["req-1"].summary).toBe("Auth audited - 2 findings")
+  })
+
+  it("import_result: a second, different result for the same request answers noop and keeps the first (#224)", async () => {
+    const missionWithDelegation = missionOf({ delegations: { "req-1": { task: { requestId: "req-1", summary: "Audit auth" }, assignee: { agentId: "agent-b" }, provenance: { origin: "first_party" } } } })
+    const missions = makeMissionStore([missionWithDelegation])
+    start(ownerStore(), undefined, missions)
+    const envelopeOf = (summary: string) => ({ subject: { missionKey: "PROJ-1234", title: "Ship it" }, fromAgentId: "agent-b", requestId: "req-1", result: { requestId: "req-1", summary }, issuedAt: NOW })
+    const first = await h.tool("import_result", { envelope: envelopeOf("first"), fromAgentId: "agent-b", trustOfSource: "friend" })
+    expect((first.payload as { status: string }).status).toBe("imported")
+    const second = await h.tool("import_result", { envelope: envelopeOf("second"), fromAgentId: "agent-b", trustOfSource: "friend" })
+    expect(second.isError).toBe(false)
+    expect(second.payload).toMatchObject({ ok: true, status: "noop" })
+    expect((await missions.get("m-1"))?.importedResults?.["agent-b"]?.["req-1"]?.summary).toBe("first")
+  })
+
+  it("import_result: an envelope it can't correlate or read is invalid and lands nothing (#224)", async () => {
+    const missionWithDelegation = missionOf({ delegations: { "req-1": { task: { requestId: "req-1", summary: "Audit auth" }, assignee: { agentId: "agent-b" }, provenance: { origin: "first_party" } } } })
+    const missions = makeMissionStore([missionWithDelegation])
+    start(ownerStore(), undefined, missions)
+    const good = { subject: { missionKey: "PROJ-1234", title: "Ship it" }, fromAgentId: "agent-b", requestId: "req-1", result: { requestId: "req-1", summary: "x" }, issuedAt: NOW }
+    for (const envelope of [
+      { ...good, result: { requestId: "req-other", summary: "x" } },
+      { ...good, subject: undefined },
+      { ...good, subject: { title: "no key" } },
+      { ...good, requestId: "" },
+      { ...good, result: undefined },
+      { ...good, result: { requestId: "req-1" } },
+    ]) {
+      const r = await h.tool("import_result", { envelope, fromAgentId: "agent-b", trustOfSource: "friend" })
+      expect(r.isError, JSON.stringify(envelope)).toBe(true)
+      expect((r.payload as { status: string }).status, JSON.stringify(envelope)).toBe("invalid")
+    }
+    expect((await missions.get("m-1"))?.importedResults).toBeUndefined()
+  })
+
+  it("import_mission and import_coordination: learnings, outcomes, an intent or a task they can't read are invalid (#224 review)", async () => {
+    const missions = makeMissionStore([missionOf()])
+    start(ownerStore(), undefined, missions)
+    const subject = { missionKey: "PROJ-1234", title: "T" }
+    for (const extra of [{ learnings: [null] }, { learnings: { length: 1 } }, { learnings: [{ key: "__proto__", value: "v" }] }, { outcomes: [null] }, { outcomes: "x" }]) {
+      const r = await h.tool("import_mission", { envelope: { subject, fromAgentId: "agent-b", issuedAt: NOW, ...extra }, fromAgentId: "agent-b", trustOfSource: "friend" })
+      expect((r.payload as { status: string }).status, JSON.stringify(extra)).toBe("invalid")
+    }
+    for (const extra of [{ intent: "request", task: null }, { intent: "request", task: { summary: "no id" } }, { intent: "seize" }]) {
+      const r = await h.tool("import_coordination", { envelope: { subject, fromAgentId: "agent-b", issuedAt: NOW, ...extra }, fromAgentId: "agent-b", trustOfSource: "friend" })
+      expect((r.payload as { status: string }).status, JSON.stringify(extra)).toBe("invalid")
+    }
+  })
+
+  it("import_result: a requestId named like an Object property is no delegation (#224 review)", async () => {
+    const missions = makeMissionStore([missionOf({ delegations: {} })])
+    start(ownerStore(), undefined, missions)
+    for (const requestId of ["constructor", "toString"]) {
+      const envelope = { subject: { missionKey: "PROJ-1234", title: "T" }, fromAgentId: "agent-b", requestId, result: { requestId, summary: "x" }, issuedAt: NOW }
+      const r = await h.tool("import_result", { envelope, fromAgentId: "agent-b", trustOfSource: "friend" })
+      expect((r.payload as { status: string }).status, requestId).toBe("no_delegation")
+    }
+  })
+
+  it("import_mission and import_coordination: an envelope with no mission subject is invalid (#224)", async () => {
+    const missions = makeMissionStore([missionOf()])
+    start(ownerStore(), undefined, missions)
+    for (const tool of ["import_mission", "import_coordination"]) {
+      for (const subject of [undefined, null, {}, { missionKey: 7 }]) {
+        const r = await h.tool(tool, { envelope: { subject, fromAgentId: "agent-b", issuedAt: NOW }, fromAgentId: "agent-b", trustOfSource: "friend" })
+        expect(r.isError, `${tool} ${JSON.stringify(subject)}`).toBe(true)
+        expect((r.payload as { status: string }).status, `${tool} ${JSON.stringify(subject)}`).toBe("invalid")
+      }
+    }
   })
 
   it("import_result: assignee_mismatch when a trusted NON-assignee submits a result for a real requestId (finding 1, isError true)", async () => {

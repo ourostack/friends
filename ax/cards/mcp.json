@@ -36,6 +36,7 @@
       "revoke_share"
     ],
     "friends-missions": [
+      "record_mission",
       "get_mission",
       "list_missions",
       "share_mission",
@@ -43,7 +44,8 @@
       "coordinate",
       "import_coordination",
       "get_coordination",
-      "send_result"
+      "send_result",
+      "import_result"
     ]
   }
 }

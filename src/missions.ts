@@ -29,15 +29,16 @@ export interface RecordMissionInput {
   outcomes?: Array<{ missionId: string; result: RelationshipOutcome["result"]; note?: string }>
 }
 
-/** Merge the input participants into the existing list, deduped by agentId. A
- * participant whose agentId already appears is skipped (idempotent). */
+/** Merge the input participants into the existing list, deduped by agentId, or by agentName for a participant with
+ * no agentId. A participant already listed is skipped (idempotent). */
 function mergeParticipants(existing: AgentAttribution[], incoming: AgentAttribution[]): AgentAttribution[] {
-  const seen = new Set(existing.map((p) => p.agentId))
+  const keyOf = (p: AgentAttribution) => (p.agentId !== undefined ? `id:${p.agentId}` : `name:${p.agentName ?? ""}`)
+  const seen = new Set(existing.map(keyOf))
   const merged = [...existing]
   for (const p of incoming) {
-    if (!seen.has(p.agentId)) {
+    if (!seen.has(keyOf(p))) {
       merged.push(p)
-      seen.add(p.agentId)
+      seen.add(keyOf(p))
     }
   }
   return merged
