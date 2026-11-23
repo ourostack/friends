@@ -718,6 +718,29 @@ describe("tools/call dispatch", () => {
     expect(all.payload).toEqual([])
   })
 
+  it("link_identity is marked destructive, since a merge deletes the orphan record (#218)", () => {
+    const byName = Object.fromEntries(getToolSchemas().map((s) => [s.name, s])) as Record<string, { annotations?: { destructiveHint?: boolean } }>
+    expect(byName.link_identity.annotations?.destructiveHint).toBe(true)
+  })
+
+  it("link_identity: an empty id or an unknown provider is invalid and links nothing (#218)", async () => {
+    const store = makeStore()
+    const owner = seedOwner(store)
+    start(store)
+    for (const args of [
+      { provider: "", externalId: "" },
+      { provider: "email-address", externalId: "" },
+      { provider: "email-address", externalId: "   " },
+      { provider: "", externalId: "x@example.com" },
+      { provider: "fax-number", externalId: "555" },
+    ]) {
+      const r = await h.tool("link_identity", { friendId: owner.id, ...args })
+      expect(r.isError, JSON.stringify(args)).toBe(true)
+      expect((r.payload as { status: string }).status, JSON.stringify(args)).toBe("invalid")
+    }
+    expect((await store.get(owner.id))?.externalIds).toEqual(owner.externalIds)
+  })
+
   it("link_identity: links and merges, then resolves to the same friend", async () => {
     const store = makeStore()
     seedOwner(store)
