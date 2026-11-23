@@ -354,6 +354,9 @@ export class FileFriendStore implements ExternalIdClaimStore {
         ? { importedNotes: raw.importedNotes }
         : {}),
       ...(importedExternalIds ? { importedExternalIds } : {}),
+      ...(raw.importedOutcomes && typeof raw.importedOutcomes === "object" && !Array.isArray(raw.importedOutcomes)
+        ? { importedOutcomes: Object.fromEntries(Object.entries(raw.importedOutcomes).filter(([, outcomes]) => Array.isArray(outcomes))) }
+        : {}),
       ...(trustReset ? { trustReset } : {}),
       totalTokens: typeof raw.totalTokens === "number" ? raw.totalTokens : 0,
       createdAt: typeof raw.createdAt === "string" ? raw.createdAt : new Date().toISOString(),
@@ -657,6 +660,7 @@ export class FileFriendStore implements ExternalIdClaimStore {
       (candidate.notes === undefined || this.isEmptyRecord(candidate.notes)) &&
       (candidate.connections === undefined || candidate.connections.length === 0) &&
       candidate.importedNotes === undefined &&
+      candidate.importedOutcomes === undefined &&
       candidate.agentMeta === undefined &&
       (candidate.kind === undefined || candidate.kind === "human") &&
       (candidate.totalTokens === undefined || candidate.totalTokens === 0)

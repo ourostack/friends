@@ -28,7 +28,7 @@ import { whoami } from "../whoami"
 import { resolveRoom } from "../room"
 import { prepareProfileShare, importProfileShare } from "../share"
 import type { ProfileShareEnvelope } from "../share"
-import { grantShare, revokeShare, listShares } from "../grants"
+import { grantShare, isIsoDate, revokeShare, listShares } from "../grants"
 import { recordMission } from "../missions"
 import type { RecordMissionInput } from "../missions"
 import { prepareMissionShare, importMissionShare } from "../mission-share"
@@ -112,6 +112,27 @@ function parseMaybeJson<T>(v: unknown): T | undefined {
     }
   }
   return v as T
+}
+
+/** Whether an envelope's subject has the shape the import reads: an object whose externalIds is a list of
+ * { provider, externalId } strings. Anything else answers invalid rather than throwing mid-import (#222). */
+function isProfileShareSubject(subject: unknown): boolean {
+  if (!subject || typeof subject !== "object") return false
+  const externalIds = (subject as { externalIds?: unknown }).externalIds
+  return Array.isArray(externalIds) && externalIds.every((ext) =>
+    !!ext && typeof ext === "object" &&
+    typeof (ext as { provider?: unknown }).provider === "string" &&
+    typeof (ext as { externalId?: unknown }).externalId === "string")
+}
+
+/** Whether an envelope's notes, when present, are a list of { key, value } strings, and its outcomes, when present, a
+ * list (an outcome that isn't well formed is skipped on import). */
+function isSharedPayload(envelope: { notes?: unknown; outcomes?: unknown }): boolean {
+  const notesOk = envelope.notes === undefined || (Array.isArray(envelope.notes) && envelope.notes.every((note) =>
+    !!note && typeof note === "object" &&
+    typeof (note as { key?: unknown }).key === "string" && (note as { key: string }).key !== "__proto__" &&
+    typeof (note as { value?: unknown }).value === "string"))
+  return notesOk && (envelope.outcomes === undefined || Array.isArray(envelope.outcomes))
 }
 
 /** A grant-backed tool was called without a GrantStore wired (a store-only
@@ -416,6 +437,21 @@ export async function dispatchTool(
       if (!envelope || typeof envelope !== "object") {
         return { result: { ok: false, status: "invalid", message: "an envelope object is required" }, isError: true }
       }
+      if (!isProfileShareSubject(envelope.subject)) {
+        return {
+          result: { ok: false, status: "invalid", message: "the envelope needs a subject whose externalIds is a list of { provider, externalId }" },
+          isError: true,
+        }
+      }
+      if (!isSharedPayload(envelope)) {
+        return {
+          result: { ok: false, status: "invalid", message: "the envelope's notes must be a list of { key, value } and its outcomes a list" },
+          isError: true,
+        }
+      }
+      if (coerceString(args.fromAgentId).trim() === "") {
+        return { result: { ok: false, status: "invalid", message: "fromAgentId must name the agent the envelope came from" }, isError: true }
+      }
       const result = await importProfileShare(store, {
         envelope,
         fromAgentId: coerceString(args.fromAgentId),
@@ -432,6 +468,10 @@ export async function dispatchTool(
           result: { ok: false, status: "invalid", message: `unrecognized scope '${scope}' — use name, identity, notes:safe, notes:all, or outcomes` },
           isError: true,
         }
+      }
+      // An expiry the grant can't honour would make a grant that consents to nothing, or one that never expires.
+      if (args.expiresAt !== undefined && (typeof args.expiresAt !== "string" || !isIsoDate(args.expiresAt))) {
+        return { result: { ok: false, status: "invalid", message: "expiresAt must be an ISO date, such as 2027-01-01 or 2027-01-01T00:00:00Z" }, isError: true }
       }
       // Fork D compat seam (b): accept the new `subjectKey` arg, falling back to
       // the legacy `subjectFriendId` so old-arg callers (incl. the unmodified

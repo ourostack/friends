@@ -10,6 +10,7 @@ import { emitNervesEvent } from "./observability"
 import type { GrantStore } from "./grant-store"
 import type { ShareGrant } from "./types"
 import { isShareScope } from "./types"
+import { isSafeRecordId } from "./util/safe-id"
 
 /** A grant as it may appear ON DISK: a current `ShareGrant` whose `subjectKey`
  * may instead be the legacy `subjectFriendId` (Fork D). `normalize` reads both
@@ -42,19 +43,24 @@ export class FileGrantStore implements GrantStore {
   }
 
   async get(id: string): Promise<ShareGrant | null> {
+    // An id that would leave the grants directory names no grant (#222).
+    if (!isSafeRecordId(id)) return null
     const grant = await this.readJson(path.join(this.grantsPath, `${id}.json`))
-    return grant ? this.normalize(grant) : null
+    return grant ? this.normalize(grant, id) : null
   }
 
   async put(id: string, grant: ShareGrant): Promise<void> {
+    if (!isSafeRecordId(id)) throw new Error("grant id is invalid")
+    if (!isShareScope(grant.scope)) throw new Error("grant scope is invalid")
     await fsPromises.writeFile(
       path.join(this.grantsPath, `${id}.json`),
-      JSON.stringify(this.normalize(grant), null, 2),
+      JSON.stringify(this.normalize(grant, id)!, null, 2),
       "utf-8",
     )
   }
 
   async delete(id: string): Promise<void> {
+    if (!isSafeRecordId(id)) throw new Error("grant id is invalid")
     try {
       await fsPromises.unlink(path.join(this.grantsPath, `${id}.json`))
     } catch (err: unknown) {
@@ -75,26 +81,35 @@ export class FileGrantStore implements GrantStore {
 
     const grants: ShareGrant[] = []
     for (const entry of entries) {
-      if (!entry.endsWith(".json")) continue
+      const id = entry.slice(0, -".json".length)
+      // A file whose name isn't a grant id is no grant: revoke_share could never reach it.
+      if (!entry.endsWith(".json") || !isSafeRecordId(id)) continue
       const raw = await this.readJson(path.join(this.grantsPath, entry))
       if (!raw) continue
-      grants.push(this.normalize(raw))
+      const grant = this.normalize(raw, id)
+      if (grant) grants.push(grant)
     }
     return grants
   }
 
-  private normalize(raw: LegacyShareGrant): ShareGrant {
+  /** A current ShareGrant from what is on disk, named by its file, or null when its scope isn't one friends knows.
+   * Damage reads as less consent, never more (#222): a corrupt scope is no grant, any revokedAt at all is a
+   * revocation, and an expiresAt is kept as text even when it isn't one, so isGrantEffective refuses it. */
+  private normalize(raw: LegacyShareGrant, id: string): ShareGrant | null {
+    if (!isShareScope(raw.scope)) return null
+    const revokedAt = raw.revokedAt as unknown
+    const expiresAt = raw.expiresAt as unknown
     return {
-      id: raw.id,
+      id,
       // Fork D compat seam (a): on-disk schemaVersion-1 grants carry the legacy
       // `subjectFriendId`; newer ones carry `subjectKey`. Read both, persist
       // forward as `subjectKey` so the legacy field migrates on the next write.
       subjectKey: raw.subjectKey ?? raw.subjectFriendId ?? "",
       recipientAgentId: raw.recipientAgentId,
-      scope: isShareScope(raw.scope) ? raw.scope : "identity",
+      scope: raw.scope,
       grantedAt: typeof raw.grantedAt === "string" ? raw.grantedAt : new Date().toISOString(),
-      ...(typeof raw.expiresAt === "string" ? { expiresAt: raw.expiresAt } : {}),
-      ...(typeof raw.revokedAt === "string" ? { revokedAt: raw.revokedAt } : {}),
+      ...(expiresAt !== undefined ? { expiresAt: typeof expiresAt === "string" ? expiresAt : JSON.stringify(expiresAt) } : {}),
+      ...(revokedAt !== undefined ? { revokedAt: String(revokedAt) } : {}),
     }
   }
 

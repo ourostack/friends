@@ -149,3 +149,51 @@ describe("listShares", () => {
     expect(await listShares(grants, { recipientAgentId: "nobody" })).toEqual([])
   })
 })
+
+describe("grant ids and expiries that can't be trusted (#222)", () => {
+  it("revokeShare refuses a grant id that isn't a plain record id, and writes nothing", async () => {
+    const store = new MemoryGrantStore([grant({ id: "g-1" })])
+    const result = await revokeShare(store, "../g-1")
+    expect(result).toMatchObject({ ok: false, status: "invalid" })
+    expect(store.putCalls).toBe(0)
+  })
+
+  it("a grant whose expiresAt isn't a date is not effective", () => {
+    expect(isGrantEffective(grant({ expiresAt: "not-a-date" }), NOW)).toBe(false)
+  })
+})
+
+describe("grants whose fields are damaged consent to nothing (#222 review)", () => {
+  it("an empty revokedAt still revokes, and an empty expiresAt still refuses", () => {
+    expect(isGrantEffective(grant({ revokedAt: "" }), NOW)).toBe(false)
+    expect(isGrantEffective(grant({ expiresAt: "" }), NOW)).toBe(false)
+  })
+
+  it("revokeShare writes the tombstone back under the id it was asked for", async () => {
+    const store = new MemoryGrantStore()
+    store.grants.set("a", grant({ id: "b" }))
+    const result = await revokeShare(store, "a")
+    expect(result).toMatchObject({ ok: true, status: "revoked" })
+    expect(store.grants.get("a")?.revokedAt).toBeDefined()
+    expect(store.grants.get("a")?.id).toBe("a")
+    expect(store.grants.has("b")).toBe(false)
+  })
+
+  it("an already revoked grant with an empty revokedAt is a noop", async () => {
+    const store = new MemoryGrantStore([grant({ id: "g-1", revokedAt: "" })])
+    expect(await revokeShare(store, "g-1")).toMatchObject({ ok: true, status: "noop" })
+    expect(store.putCalls).toBe(0)
+  })
+})
+
+describe("an expiry must be an ISO date to be honoured (#222 review)", () => {
+  it("text that only loosely parses as a date consents to nothing", () => {
+    for (const expiresAt of ["2099", "foo 2099", "1", "4102444800000", "2099-01-01 junk"]) {
+      expect(isGrantEffective(grant({ expiresAt }), NOW), expiresAt).toBe(false)
+    }
+    expect(isGrantEffective(grant({ expiresAt: "2099-01-01" }), NOW)).toBe(true)
+    expect(isGrantEffective(grant({ expiresAt: "2099-01-01T00:00:00Z" }), NOW)).toBe(true)
+    expect(isGrantEffective(grant({ expiresAt: "2099-01-01T00:00:00.000+02:00" }), NOW)).toBe(true)
+  })
+})
+

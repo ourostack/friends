@@ -34,6 +34,7 @@ function fullRecord(): FriendRecord {
     notes: { likes: { value: "tea", savedAt: T, shareable: true, provenance: { origin: "first_party" } } },
     importedNotes: { "peer-2": { mood: { value: "calm", importedAt: T, assertedBy: { agentId: "peer-2" } } } },
     importedExternalIds: [{ provider: "telegram-user", externalId: "555", assertedBy: { agentId: "peer-2" }, importedAt: T }],
+    importedOutcomes: { "peer-2": [{ missionId: "m9", result: "partial", timestamp: T, importedAt: T, assertedBy: { agentId: "peer-2" } }] },
     trustReset: { at: T, reason: "did_changed", previousDid: "did:key:OLD", previousTrust: "family" },
     totalTokens: 12,
     createdAt: T,
@@ -129,5 +130,19 @@ describe("FileFriendStore round trip", () => {
     expect(two?.trustReset).toBeUndefined()
     expect(two?.importedExternalIds).toBeUndefined()
     expect(two?.agentMeta?.identity).toBeUndefined()
+  })
+
+  it("drops importedOutcomes that isn't an object keyed by agent", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "friends-roundtrip-"))
+    dirs.push(dir)
+    const friendsPath = join(dir, "friends")
+    const store = new FileFriendStore(friendsPath)
+    const { importedOutcomes: _dropped, ...base } = fullRecord()
+    writeFileSync(join(friendsPath, "list-1.json"), JSON.stringify({ ...base, id: "list-1", importedOutcomes: [] }))
+    writeFileSync(join(friendsPath, "text-1.json"), JSON.stringify({ ...base, id: "text-1", importedOutcomes: "x" }))
+    writeFileSync(join(friendsPath, "slot-1.json"), JSON.stringify({ ...base, id: "slot-1", importedOutcomes: { bad: "x", good: [] } }))
+    expect((await store.get("list-1"))?.importedOutcomes).toBeUndefined()
+    expect((await store.get("text-1"))?.importedOutcomes).toBeUndefined()
+    expect((await store.get("slot-1"))?.importedOutcomes).toEqual({ good: [] })
   })
 })

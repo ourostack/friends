@@ -3,9 +3,9 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
 const root = fileURLToPath(new URL("../..", import.meta.url))
-const expectedVersion = "0.1.0-alpha.23"
+const expectedVersion = "0.1.0-alpha.24"
 const expectedChanges = [
-  "A friend or mission id can no longer reach a file outside its store's directory. get_friend, and every tool that looks a friend up, now reads a record file directly only for an id made of letters, digits, dots, underscores and hyphens that starts with a letter or digit; any other id, such as \"../x\" or \"a/b\", is matched only as a name, so it answers not_found unless a friend has that name. It used to read any .json file the process could reach. A mission id like that names no mission, and the stores refuse to write or delete a friend or mission by it."
+  "Sharing tells the truth about grants and imports. revoke_share answers invalid for a grant id that isn't letters, digits, dots, underscores and hyphens starting with a letter or digit; a grant id like \"../<friend id>\" used to read a friend record as a grant, answer revoked and write a bogus grant file. The grant store reads, writes and deletes only files named directly inside _grants, names each grant by its file, and writes a revocation back to that file. Damage reads as less consent, never more: a grant file whose scope friends doesn't know is skipped (it used to read as an identity grant), any revokedAt revokes, and an expiresAt that isn't an ISO date, empty included, consents to nothing (it used to last forever). grant_share answers invalid for an expiresAt that isn't an ISO date, such as 2027-01-01 or 2027-01-01T00:00:00Z. import_profile lands an outcomes share's outcomes in the record's new importedOutcomes, under the agent that shared them, newest 256 per agent, with first-party outcomes untouched and damaged entries already in that slot dropped, and answers importedOutcomes, the number that landed; before, it answered imported and kept none. It answers invalid, instead of failing partway, for an envelope without a subject whose externalIds is a list of { provider, externalId }, notes that aren't a list of { key, value } (a key of __proto__ included), outcomes that aren't a list, or an empty fromAgentId. import_profile and revoke_share now have Ouro AX cards."
 ]
 
 describe("release metadata", () => {
