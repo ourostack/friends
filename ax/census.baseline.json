@@ -2,8 +2,6 @@
   "census": "census/1",
   "gaps": [
     "cli:node dist/mcp/bin.js",
-    "mcp:channel_caps",
-    "mcp:import_result",
-    "mcp:record_mission"
+    "mcp:channel_caps"
   ]
 }

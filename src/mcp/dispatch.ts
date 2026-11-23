@@ -137,6 +137,39 @@ function isSharedPayload(envelope: { notes?: unknown; outcomes?: unknown }): boo
 
 const IDENTITY_PROVIDER_LIST = "aad, local, teams-conversation, imessage-handle, email-address, a2a-agent or telegram-user"
 
+const MISSION_STATUSES: ReadonlySet<string> = new Set(["active", "succeeded", "partial", "failed", "abandoned"])
+const INVALID_LIST = Symbol("invalid list")
+
+/** A list argument, given as a list or as its JSON text: undefined when absent, INVALID_LIST when it isn't a list of
+ * items that pass `ok`. */
+function listArg(v: unknown, ok: (item: unknown) => boolean): unknown[] | undefined | typeof INVALID_LIST {
+  if (v === undefined || v === null) return undefined
+  let list = v
+  if (typeof v === "string") {
+    try {
+      list = JSON.parse(v)
+    } catch {
+      return INVALID_LIST
+    }
+  }
+  return Array.isArray(list) && list.every(ok) ? list : INVALID_LIST
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v)
+const isParticipant = (v: unknown): boolean =>
+  isRecord(v) && (v.agentId === undefined || typeof v.agentId === "string") && (v.agentName === undefined || typeof v.agentName === "string") &&
+  (!!v.agentId || !!v.agentName)
+const isSharedLearning = (v: unknown): v is Record<string, unknown> =>
+  isRecord(v) && typeof v.key === "string" && v.key !== "" && v.key !== "__proto__" && typeof v.value === "string"
+const isLearningInput = (v: unknown): boolean =>
+  isSharedLearning(v) &&
+  (v.shareable === undefined || typeof v.shareable === "boolean")
+
+/** Whether a mission envelope names its mission: a subject whose missionKey is a non-empty string. */
+function hasMissionSubject(envelope: { subject?: unknown }): boolean {
+  return isRecord(envelope.subject) && typeof envelope.subject.missionKey === "string" && envelope.subject.missionKey !== ""
+}
+
 const TRUST_LEVELS: ReadonlySet<string> = new Set<TrustLevel>(["family", "friend", "acquaintance", "stranger"])
 
 /** The answer for a trust level friends doesn't know. The store would save such a level as its default, friend, so
@@ -576,13 +609,34 @@ export async function dispatchTool(
 
     case "record_mission": {
       if (!missions) return { result: NO_MISSION_STORE, isError: true }
+      // Everything is checked before anything is written, so the answer is what was saved (#224).
+      const participants = listArg(args.participants, isParticipant)
+      const learnings = listArg(args.learnings, isLearningInput)
+      const outcomes = listArg(args.outcomes, isOutcomeInput)
+      // null means unset, as it does for the lists.
+      const status = args.status === null ? undefined : args.status
+      if (
+        coerceString(args.missionKey).trim() === "" ||
+        (status !== undefined && !(typeof status === "string" && MISSION_STATUSES.has(status))) ||
+        participants === INVALID_LIST || learnings === INVALID_LIST || outcomes === INVALID_LIST
+      ) {
+        return {
+          result: {
+            ok: false,
+            status: "invalid",
+            message:
+              "record_mission needs a missionKey; status, when given, is active, succeeded, partial, failed or abandoned; participants is a list of { agentId?, agentName? } naming at least one, learnings a list of { key, value }, and outcomes a list of { missionId, result } with result success, partial or failed (each a list or its JSON text)",
+          },
+          isError: true,
+        }
+      }
       const input: RecordMissionInput = {
         missionKey: coerceString(args.missionKey),
         title: coerceOptionalString(args.title),
-        status: coerceOptionalString(args.status) as RecordMissionInput["status"],
-        participants: parseMaybeJson<AgentAttribution[]>(args.participants),
-        learnings: parseMaybeJson<RecordMissionInput["learnings"]>(args.learnings),
-        outcomes: parseMaybeJson<RecordMissionInput["outcomes"]>(args.outcomes),
+        status: status as RecordMissionInput["status"],
+        participants: participants as AgentAttribution[] | undefined,
+        learnings: learnings as RecordMissionInput["learnings"],
+        outcomes: outcomes as RecordMissionInput["outcomes"],
       }
       const record = await recordMission(missions, input)
       return { result: record, isError: false }
@@ -635,6 +689,17 @@ export async function dispatchTool(
       if (!envelope || typeof envelope !== "object") {
         return { result: { ok: false, status: "invalid", message: "an envelope object is required" }, isError: true }
       }
+      const shared = envelope as { learnings?: unknown; outcomes?: unknown }
+      if (
+        !hasMissionSubject(envelope) ||
+        (shared.learnings !== undefined && !(Array.isArray(shared.learnings) && shared.learnings.every(isSharedLearning))) ||
+        (shared.outcomes !== undefined && !(Array.isArray(shared.outcomes) && shared.outcomes.every(isRecord)))
+      ) {
+        return {
+          result: { ok: false, status: "invalid", message: "the envelope needs a subject with a missionKey; learnings, when given, a list of { key, value }, and outcomes a list" },
+          isError: true,
+        }
+      }
       const result = await importMissionShare(missions, {
         envelope,
         fromAgentId: coerceString(args.fromAgentId),
@@ -678,6 +743,17 @@ export async function dispatchTool(
       const envelope = parseMaybeJson<CoordinationEnvelope>(args.envelope)
       if (!envelope || typeof envelope !== "object") {
         return { result: { ok: false, status: "invalid", message: "an envelope object is required" }, isError: true }
+      }
+      const task = (envelope as { task?: unknown }).task
+      if (
+        !hasMissionSubject(envelope) ||
+        !isCoordinationIntent(envelope.intent) ||
+        (task !== undefined && !(isRecord(task) && typeof task.requestId === "string" && task.requestId !== ""))
+      ) {
+        return {
+          result: { ok: false, status: "invalid", message: "the envelope needs a subject with a missionKey, an intent, and a task, when given, with a requestId" },
+          isError: true,
+        }
       }
       const result = await importCoordination(missions, {
         envelope,
@@ -724,6 +800,20 @@ export async function dispatchTool(
       const envelope = parseMaybeJson<MissionResultEnvelope>(args.envelope)
       if (!envelope || typeof envelope !== "object") {
         return { result: { ok: false, status: "invalid", message: "an envelope object is required" }, isError: true }
+      }
+      // The import correlates on the envelope's requestId and lands the result under it, so the result must carry
+      // the same one (or none) and a summary (#224).
+      const deliverable = envelope.result as unknown as { requestId?: unknown; summary?: unknown } | undefined
+      if (
+        !hasMissionSubject(envelope) ||
+        typeof envelope.requestId !== "string" || envelope.requestId === "" ||
+        !deliverable || typeof deliverable !== "object" || typeof deliverable.summary !== "string" ||
+        (deliverable.requestId !== undefined && deliverable.requestId !== envelope.requestId)
+      ) {
+        return {
+          result: { ok: false, status: "invalid", message: "the envelope needs subject.missionKey, a requestId, and a result with a summary and the same requestId, as send_result produces" },
+          isError: true,
+        }
       }
       const result = await importMissionResult(missions, {
         envelope,

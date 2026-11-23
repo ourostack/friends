@@ -156,6 +156,8 @@ export type ImportMissionResultStatus =
 
 export type ImportMissionResultResult =
   | { ok: true; status: "imported"; record: MissionRecord }
+  /** A result for this request from this agent was already imported: the first one is kept, nothing is written. */
+  | { ok: true; status: "noop"; record: MissionRecord; message: string }
   | { ok: false; status: "no_mission" | "no_delegation" | "assignee_mismatch" | "untrusted_source" }
 
 export interface ImportMissionResultOptions {
@@ -173,19 +175,19 @@ export interface ImportMissionResultOptions {
  * is preserved unchanged (never re-stamped). */
 function mergeImportedResult(
   record: MissionRecord,
+  requestId: string,
   result: MissionResult,
   fromAgentId: string,
   now: string,
 ): NonNullable<MissionRecord["importedResults"]> {
   const existing = record.importedResults ?? {}
   const forAgent = existing[fromAgentId] ?? {}
-  if (forAgent[result.requestId]) return existing as NonNullable<MissionRecord["importedResults"]>
   return {
     ...existing,
     [fromAgentId]: {
       ...forAgent,
-      [result.requestId]: {
-        requestId: result.requestId,
+      [requestId]: {
+        requestId,
         summary: result.summary,
         ...(result.artifact !== undefined ? { artifact: result.artifact } : {}),
         ...(result.outputs !== undefined ? { outputs: result.outputs } : {}),
@@ -242,7 +244,10 @@ export async function importMissionResult(
 
   // (3) Correlation honesty — the requestId must name a delegation THIS agent issued
   // first-party (A only accepts results for work it actually delegated).
-  const delegation = existing.delegations?.[input.envelope.requestId]
+  // Only the mission's own entries count: "constructor" names no delegation.
+  const delegation = existing.delegations && Object.hasOwn(existing.delegations, input.envelope.requestId)
+    ? existing.delegations[input.envelope.requestId]
+    : undefined
   if (!delegation) {
     return { ok: false, status: "no_delegation" }
   }
@@ -269,8 +274,14 @@ export async function importMissionResult(
 
   // (4) Land the deliverable quarantined + attributed, never touching first-party, never
   // recomputing status/participants (non-transitive).
+  // A replay, or a second result for the same request, keeps the first and says so (#224). The result lands under the
+  // requestId it was correlated on.
+  const requestId = input.envelope.requestId
+  if (Object.hasOwn(existing.importedResults ?? {}, input.fromAgentId) && Object.hasOwn(existing.importedResults![input.fromAgentId], requestId)) {
+    return { ok: true, status: "noop", record: existing, message: "a result for this request from this agent is already imported; the first one is kept" }
+  }
   const now = new Date().toISOString()
-  const importedResults = mergeImportedResult(existing, input.envelope.result, input.fromAgentId, now)
+  const importedResults = mergeImportedResult(existing, requestId, input.envelope.result, input.fromAgentId, now)
   const updated: MissionRecord = { ...existing, importedResults, updatedAt: now }
   await missions.put(updated.id, updated)
 

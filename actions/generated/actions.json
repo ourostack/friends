@@ -1006,7 +1006,25 @@
       "consent": "write",
       "label": "Record mission",
       "description": "Create or update a shared mission by its cross-agent key.",
-      "agent": "Upsert a shared mission (brick 3) by its cross-agent missionKey: create one when the key is unknown, else merge into the existing record. Appends first-party learnings / participants / outcomes and sets status. The mission analogue of record_interaction's outcome writer.",
+      "agent": "Upsert a shared mission (brick 3) by its cross-agent missionKey: create one when the key is unknown, else merge into the existing record. Appends first-party learnings / participants / outcomes and sets status. The mission analogue of record_interaction's outcome writer. Returns the saved mission record.",
+      "when": "Work with other agents moved on: keep the mission's status, who took part, and what you learned under its shared key",
+      "errors": [
+        {
+          "code": "unsupported",
+          "means": "The host built this server without a mission store, so there is no mission to record; friends-mcp --dir always wires one.",
+          "fix": "Construct the server with a mission store (or run friends-mcp --dir <path>), then record again."
+        },
+        {
+          "code": "invalid",
+          "means": "The missionKey is empty, the status isn't one of the five, or participants, learnings or outcomes isn't a list of the shape it takes; nothing was saved.",
+          "fix": "Pass a missionKey and a status of active, succeeded, partial, failed or abandoned, with each list shaped as its input describes."
+        },
+        {
+          "code": "tool-failed",
+          "means": "The mission file could not be written; the message says why.",
+          "fix": "Check that the friends directory's _missions folder is writable, then record again."
+        }
+      ],
       "openInput": true,
       "input": {
         "missionKey": {
@@ -1035,7 +1053,7 @@
         },
         "participants": {
           "label": "Participants",
-          "description": "agent attributions [{ agentId?, agentName? }], merged deduped by agentId",
+          "description": "agent attributions [{ agentId?, agentName? }], each naming at least one, merged deduped by agentId",
           "optional": true,
           "protocolOnly": true,
           "kind": "list"
@@ -1487,7 +1505,45 @@
       "consent": "write",
       "label": "Import result",
       "description": "Take in a result another agent returned for work you delegated.",
-      "agent": "Consumer (gap-2, non-clobbering merge): A imports B's result-return. Resolves the mission by missionKey; lands B's deliverable QUARANTINED + attributed under importedResults WITHOUT touching first-party; source trust caps acceptance (checked before correlation); a result whose requestId matches no prior first-party delegation is REJECTED (no_delegation — A only accepts results for work it delegated); an unknown mission is no_mission (a result never seeds a mission); never recomputes status/participants. Returns { ok, status, record } or { ok:false, status: untrusted_source|no_mission|no_delegation|invalid }.",
+      "agent": "Consumer (gap-2, non-clobbering merge): A imports B's result-return. Resolves the mission by missionKey; lands B's deliverable QUARANTINED + attributed under importedResults WITHOUT touching first-party; source trust caps acceptance (checked before correlation); a result whose requestId matches no prior first-party delegation is REJECTED (no_delegation — A only accepts results for work it delegated); an unknown mission is no_mission (only record_mission creates a mission); status and participants stay as A recorded them. Returns { ok, status, record } or { ok:false, status: untrusted_source|no_mission|no_delegation|assignee_mismatch|invalid }. A second result for a request already imported from that agent answers ok with status noop and keeps the first.",
+      "when": "An agent you gave work to sent back its result: take it in beside the mission, kept apart from your own",
+      "errors": [
+        {
+          "code": "unsupported",
+          "means": "The host built this server without a mission store, so there is no mission to land a result on; friends-mcp --dir always wires one.",
+          "fix": "Construct the server with a mission store (or run friends-mcp --dir <path>), then import again."
+        },
+        {
+          "code": "invalid",
+          "means": "The envelope is missing, or lacks subject.missionKey, a requestId, or a result with a summary whose requestId, if any, is the same; nothing landed.",
+          "fix": "Pass the envelope send_result produced, as it arrived."
+        },
+        {
+          "code": "untrusted-source",
+          "means": "trustOfSource is below acquaintance, or not a trust level, so the result was refused and nothing landed.",
+          "fix": "Call describe_trust on the sending agent; import only from a source trusted at acquaintance or above."
+        },
+        {
+          "code": "no-mission",
+          "means": "No mission here has the envelope's missionKey, and a result never creates one; nothing landed.",
+          "fix": "Call list_missions to check the key; record_mission the mission first only if this agent really delegated work on it."
+        },
+        {
+          "code": "no-delegation",
+          "means": "The mission has no delegation with the envelope's requestId, so this agent never asked for this result; nothing landed.",
+          "fix": "Call get_mission to see the mission's delegations; accept only results for work this agent delegated."
+        },
+        {
+          "code": "assignee-mismatch",
+          "means": "The delegation went to a different agent than fromAgentId, or records no assignee, so the result is refused; nothing landed.",
+          "fix": "Call get_mission to see who the work was delegated to, and import only that agent's result."
+        },
+        {
+          "code": "tool-failed",
+          "means": "The mission file could not be read or written; the message says why.",
+          "fix": "Check that the friends directory's _missions folder is writable, then import again."
+        }
+      ],
       "openInput": true,
       "input": {
         "envelope": {
