@@ -561,7 +561,7 @@
     {
       "name": "import_profile",
       "title": "Import profile",
-      "description": "Consumer (non-clobbering merge): import a profile-share envelope. Resolves the party by join key; lands facts in the imported namespace WITHOUT touching first-party notes; source trust caps acceptance; never changes the party's trust. Returns { ok, status, record }.",
+      "description": "Consumer (non-clobbering merge): import a profile-share envelope. Resolves the party by join key; lands notes in importedNotes and an outcomes share's outcomes in importedOutcomes, both under the source agent, WITHOUT touching first-party notes or outcomes; source trust caps acceptance; the party's trust stays as it was. Returns { ok, status, record, importedOutcomes }.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -644,7 +644,7 @@
     {
       "name": "revoke_share",
       "title": "Revoke share",
-      "description": "Revoke a consent grant by id (tombstones it; the audit trail survives). The right-to-be-forgotten lever.",
+      "description": "Revoke a consent grant by id (tombstones it; the audit trail survives). The right-to-be-forgotten lever. Revoking a grant that is already revoked answers ok with status noop.",
       "inputSchema": {
         "type": "object",
         "properties": {

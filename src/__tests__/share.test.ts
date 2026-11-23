@@ -6,6 +6,7 @@ import {
   strictPolicy,
   tieredPolicy,
 } from "../index"
+import { MAX_IMPORTED_OUTCOMES_PER_PEER } from "../share"
 import type {
   FriendStore,
   GrantStore,
@@ -616,3 +617,109 @@ describe("importProfileShare — consumer (the non-clobbering merge)", () => {
     if (result.ok) expect(result.status).toBe("imported")
   })
 })
+
+describe("importProfileShare — outcomes (#222)", () => {
+  it("lands an outcomes envelope in importedOutcomes under the source agent, leaving first-party outcomes alone", async () => {
+    const first = { missionId: "m0", result: "failed" as const, timestamp: NOW }
+    const store = new MemoryStore([subject({ kind: "agent", agentMeta: { bundleName: "Jordan", familiarity: 1, sharedMissions: [], outcomes: [first] } })])
+    const result = await importProfileShare(store, {
+      envelope: envelope({
+        scope: "outcomes",
+        notes: undefined,
+        outcomes: [
+          { missionId: "m1", result: "success", timestamp: NOW, note: "shipped" },
+          { missionId: "m2", result: "bogus", timestamp: NOW } as never,
+          { missionId: "", result: "partial", timestamp: NOW },
+        ],
+      }),
+      fromAgentId: "source-agent",
+      trustOfSource: "friend",
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.status).toBe("imported")
+    expect(result.record.agentMeta?.outcomes).toEqual([first])
+    expect(result.record.importedOutcomes?.["source-agent"]).toEqual([
+      { missionId: "m1", result: "success", timestamp: NOW, note: "shipped", importedAt: expect.any(String), assertedBy: { agentId: "source-agent" } },
+    ])
+    expect(result.importedOutcomes).toBe(1)
+  })
+
+  it("a re-import of the same outcome replaces it rather than adding a copy", async () => {
+    const store = new MemoryStore([subject()])
+    const env = envelope({ scope: "outcomes", notes: undefined, outcomes: [{ missionId: "m1", result: "partial", timestamp: NOW }] })
+    await importProfileShare(store, { envelope: env, fromAgentId: "source-agent", trustOfSource: "friend" })
+    const again = await importProfileShare(store, {
+      envelope: { ...env, outcomes: [{ missionId: "m1", result: "success", timestamp: NOW }] },
+      fromAgentId: "source-agent",
+      trustOfSource: "friend",
+    })
+    expect(again.ok).toBe(true)
+    if (!again.ok) return
+    expect(again.record.importedOutcomes?.["source-agent"]).toHaveLength(1)
+    expect(again.record.importedOutcomes?.["source-agent"][0].result).toBe("success")
+  })
+
+  it("keeps the newest outcomes from one peer up to the cap", async () => {
+    const store = new MemoryStore([subject()])
+    const many = Array.from({ length: MAX_IMPORTED_OUTCOMES_PER_PEER + 3 }, (_, i) => ({ missionId: `m${i}`, result: "success" as const, timestamp: NOW }))
+    const result = await importProfileShare(store, {
+      envelope: envelope({ scope: "outcomes", notes: undefined, outcomes: many }),
+      fromAgentId: "source-agent",
+      trustOfSource: "friend",
+    })
+    if (!result.ok) throw new Error("expected ok")
+    const kept = result.record.importedOutcomes?.["source-agent"] ?? []
+    expect(kept).toHaveLength(MAX_IMPORTED_OUTCOMES_PER_PEER)
+    expect(kept[0].missionId).toBe("m3")
+  })
+
+  it("an envelope without outcomes reports importedOutcomes 0 and adds no namespace", async () => {
+    const store = new MemoryStore([subject()])
+    const result = await importProfileShare(store, { envelope: envelope(), fromAgentId: "source-agent", trustOfSource: "friend" })
+    if (!result.ok) throw new Error("expected ok")
+    expect(result.importedOutcomes).toBe(0)
+    expect(result.record.importedOutcomes).toBeUndefined()
+  })
+
+  it("counts only the outcomes that land when a share carries more than the cap", async () => {
+    const store = new MemoryStore([subject()])
+    const many = Array.from({ length: MAX_IMPORTED_OUTCOMES_PER_PEER + 3 }, (_, i) => ({ missionId: `m${i}`, result: "success" as const, timestamp: NOW }))
+    const result = await importProfileShare(store, { envelope: envelope({ scope: "outcomes", notes: undefined, outcomes: many }), fromAgentId: "source-agent", trustOfSource: "friend" })
+    if (!result.ok) throw new Error("expected ok")
+    expect(result.importedOutcomes).toBe(MAX_IMPORTED_OUTCOMES_PER_PEER)
+  })
+
+  it("lands outcomes only from an outcomes share", async () => {
+    const store = new MemoryStore([subject()])
+    const result = await importProfileShare(store, {
+      envelope: envelope({ scope: "identity", notes: undefined, outcomes: [{ missionId: "m1", result: "success", timestamp: NOW }] }),
+      fromAgentId: "source-agent",
+      trustOfSource: "friend",
+    })
+    if (!result.ok) throw new Error("expected ok")
+    expect(result.importedOutcomes).toBe(0)
+    expect(result.record.importedOutcomes).toBeUndefined()
+  })
+
+  it("a source agent named like an Object property, or a damaged slot, still imports cleanly", async () => {
+    const store = new MemoryStore([subject({ importedOutcomes: { peer: "notarray" as never } })])
+    const env = envelope({ scope: "outcomes", notes: [{ key: "k", value: "v" }], outcomes: [{ missionId: "m1", result: "success", timestamp: NOW }] })
+    for (const fromAgentId of ["constructor", "toString", "peer"]) {
+      const result = await importProfileShare(store, { envelope: env, fromAgentId, trustOfSource: "friend" })
+      if (!result.ok) throw new Error("expected ok")
+      expect(result.record.importedOutcomes?.[fromAgentId]).toHaveLength(1)
+      expect(result.record.importedNotes?.[fromAgentId]?.k?.value).toBe("v")
+    }
+  })
+
+  it("a stored slot holding junk entries, or notes that aren't an object, still imports cleanly (#222 review)", async () => {
+    const store = new MemoryStore([subject({ importedOutcomes: { src: [null, 5, {}] as never }, importedNotes: { src: "junk" as never } })])
+    const env = envelope({ scope: "outcomes", notes: [{ key: "k", value: "v" }], outcomes: [{ missionId: "m1", result: "success", timestamp: NOW }] })
+    const result = await importProfileShare(store, { envelope: env, fromAgentId: "src", trustOfSource: "friend" })
+    if (!result.ok) throw new Error("expected ok")
+    expect(result.record.importedOutcomes?.src).toHaveLength(1)
+    expect(Object.keys(result.record.importedNotes?.src ?? {})).toEqual(["k"])
+  })
+})
+

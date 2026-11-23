@@ -4,13 +4,11 @@
     "cli:node dist/mcp/bin.js",
     "mcp:channel_caps",
     "mcp:connect_to",
-    "mcp:import_profile",
     "mcp:import_result",
     "mcp:link_identity",
     "mcp:onboard_agent",
     "mcp:record_interaction",
     "mcp:record_mission",
-    "mcp:revoke_share",
     "mcp:set_trust"
   ]
 }

@@ -25,8 +25,10 @@
     ],
     "friends-sharing": [
       "share_profile",
+      "import_profile",
       "grant_share",
-      "list_shares"
+      "list_shares",
+      "revoke_share"
     ],
     "friends-missions": [
       "get_mission",

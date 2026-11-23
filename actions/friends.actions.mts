@@ -326,7 +326,14 @@ export default defineActions(
       consent: "write",
       label: "Import profile",
       description: "Take in a profile another agent shared, without overwriting your own notes.",
-      agent: "Consumer (non-clobbering merge): import a profile-share envelope. Resolves the party by join key; lands facts in the imported namespace WITHOUT touching first-party notes; source trust caps acceptance; never changes the party's trust. Returns { ok, status, record }.",
+      agent: "Consumer (non-clobbering merge): import a profile-share envelope. Resolves the party by join key; lands notes in importedNotes and an outcomes share's outcomes in importedOutcomes, both under the source agent, WITHOUT touching first-party notes or outcomes; source trust caps acceptance; the party's trust stays as it was. Returns { ok, status, record, importedOutcomes }.",
+      when: "Another agent sent what it knows about someone: take its notes and outcomes in, kept apart from your own",
+      errors: [
+        { code: "invalid", means: "The envelope lacks a subject with a list of { provider, externalId } ids, its notes aren't a list of { key, value }, its outcomes aren't a list, or fromAgentId is empty.", fix: "Pass the envelope share_profile produced, as it arrived, with the sending agent's id as fromAgentId." },
+        { code: "untrusted-source", means: "trustOfSource is below acquaintance, or not a trust level, so the envelope was refused and nothing was imported.", fix: "Call describe_trust on the sending agent; import only from a source trusted at acquaintance or above." },
+        { code: "untrusted-introduction", means: "The envelope names someone with no record here, and only a friend or family source may introduce a new person; nothing was imported.", fix: "Find or create the person's record with resolve_party first, or ask a friend or family agent to introduce them." },
+        { code: "tool-failed", means: "A friend record could not be read or written; the message says why.", fix: "Check the file the message names in the friends directory, then import again." },
+      ],
       openInput: true,
       input: {
         envelope: field.group({ label: "Envelope", description: "the ProfileShareEnvelope to import", protocolOnly: true }),
@@ -344,7 +351,7 @@ export default defineActions(
       when: "The owner agreed that one agent may receive one scope of a person's profile or of a mission",
       errors: [
         { code: "unsupported", means: "The host built this server without a grant store, so it can't keep a grant; friends-mcp --dir always wires one.", fix: "Construct the server with a grant store (or run friends-mcp --dir <path>), then keep a grant again." },
-        { code: "invalid", means: "The scope is not one friends knows, so no grant was made.", fix: "Pass scope identity, notes:safe, notes:all, outcomes or mission (the scopes a grant can unlock)." },
+        { code: "invalid", means: "The scope is not one friends knows, or expiresAt isn't a date, so no grant was made.", fix: "Pass scope identity, notes:safe, notes:all, outcomes or mission (the scopes a grant can unlock), and leave expiresAt out or pass an ISO date." },
         { code: "tool-failed", means: "The grant store could not write the grant; the message says why.", fix: "Check that the friends directory's _grants folder is writable, then grant again." },
       ],
       confirm: "Let that agent receive this scope from now on, until the grant expires or is revoked?",
@@ -363,7 +370,14 @@ export default defineActions(
       destructive: true,
       label: "Revoke share",
       description: "Withdraw a consent grant. The audit trail is kept.",
-      agent: "Revoke a consent grant by id (tombstones it; the audit trail survives). The right-to-be-forgotten lever.",
+      agent: "Revoke a consent grant by id (tombstones it; the audit trail survives). The right-to-be-forgotten lever. Revoking a grant that is already revoked answers ok with status noop.",
+      when: "The owner withdrew consent: stop one grant from letting an agent receive that scope any longer",
+      errors: [
+        { code: "unsupported", means: "The host built this server without a grant store, so there is no grant to revoke; friends-mcp --dir always wires one.", fix: "Construct the server with a grant store (or run friends-mcp --dir <path>), then revoke again." },
+        { code: "invalid", means: "The grant id isn't letters, digits, dots, underscores and hyphens starting with a letter or digit, so it can't name a grant; nothing changed.", fix: "Call list_shares and pass the id of the grant to revoke." },
+        { code: "not-found", means: "No grant has that id, or its file can't be read or holds a scope friends doesn't know; nothing changed.", fix: "Call list_shares to find the grant's id, then revoke it." },
+        { code: "tool-failed", means: "The grant store could not write the revocation; the message says why.", fix: "Check that the friends directory's _grants folder is writable, then revoke again." },
+      ],
       openInput: true,
       input: {
         grantId: field.string({ label: "Grant", description: "the grant id to revoke" }),

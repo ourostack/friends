@@ -90,19 +90,33 @@ describe("FileGrantStore", () => {
     await expect(store.delete("g-1")).resolves.toBeUndefined()
   })
 
-  it("normalizes an unknown scope to identity and fills a missing grantedAt", async () => {
+  it("reads a grant with an unknown scope as no grant, so it never unlocks identity (#222)", async () => {
     dir = mkdtempSync(join(tmpdir(), "friends-grants-"))
     const grantsPath = grantsDirFor(dir)
     new FileGrantStore(grantsPath)
-    // Hand-write a grant with a bogus scope and no grantedAt.
     await fsPromises.writeFile(
       join(grantsPath, "g-x.json"),
-      JSON.stringify({ id: "g-x", subjectFriendId: "f", recipientAgentId: "a", scope: "bogus" }),
+      JSON.stringify({ id: "g-x", subjectKey: "f", recipientAgentId: "a", scope: "everything", grantedAt: "2026-03-14T18:00:00.000Z" }),
+      "utf-8",
+    )
+    const store = new FileGrantStore(grantsPath)
+    expect(await store.get("g-x")).toBeNull()
+    expect(await store.listAll()).toEqual([])
+  })
+
+  it("fills a missing grantedAt", async () => {
+    dir = mkdtempSync(join(tmpdir(), "friends-grants-"))
+    const grantsPath = grantsDirFor(dir)
+    new FileGrantStore(grantsPath)
+    // Hand-write a grant with no grantedAt.
+    await fsPromises.writeFile(
+      join(grantsPath, "g-x.json"),
+      JSON.stringify({ id: "g-x", subjectFriendId: "f", recipientAgentId: "a", scope: "notes:safe" }),
       "utf-8",
     )
     const store = new FileGrantStore(grantsPath)
     const loaded = await store.get("g-x")
-    expect(loaded?.scope).toBe("identity")
+    expect(loaded?.scope).toBe("notes:safe")
     expect(typeof loaded?.grantedAt).toBe("string")
   })
 
@@ -182,12 +196,74 @@ describe("FileGrantStore", () => {
   it("rethrows a non-ENOENT delete error", async () => {
     dir = mkdtempSync(join(tmpdir(), "friends-grants-"))
     const store = new FileGrantStore(grantsDirFor(dir))
-    // Point delete at a path whose parent is a file → unlink yields ENOTDIR, not ENOENT.
-    const blocker = join(grantsDirFor(dir), "blocker.json")
-    await store.put("blocker", grant({ id: "blocker" }))
-    await expect(
-      // id with a path separator forces unlink under a non-dir segment
-      store.delete(join("blocker.json", "child")),
-    ).rejects.toThrow()
+    // A folder where the grant file would be: unlink fails with a code other than ENOENT.
+    await fsPromises.mkdir(join(grantsDirFor(dir), "blocker.json"))
+    await expect(store.delete("blocker")).rejects.toMatchObject({ code: expect.not.stringMatching(/^ENOENT$/) })
+  })
+
+  describe("ids that would leave the grants directory (#222)", () => {
+    it("get does not read a JSON file outside the grants directory", async () => {
+      dir = mkdtempSync(join(tmpdir(), "friends-grants-"))
+      const store = new FileGrantStore(grantsDirFor(dir))
+      await fsPromises.writeFile(join(dir, "friend-1.json"), JSON.stringify({ id: "friend-1", subjectKey: "s", recipientAgentId: "a", scope: "identity" }))
+      expect(await store.get("../friend-1")).toBeNull()
+    })
+
+    it("put refuses an id that leaves the grants directory and writes nothing", async () => {
+      dir = mkdtempSync(join(tmpdir(), "friends-grants-"))
+      const store = new FileGrantStore(grantsDirFor(dir))
+      await expect(store.put("../escaped", grant({ id: "../escaped" }))).rejects.toThrow("grant id is invalid")
+      expect(existsSync(join(dir, "escaped.json"))).toBe(false)
+    })
+
+    it("put refuses a grant whose scope friends doesn't know", async () => {
+      dir = mkdtempSync(join(tmpdir(), "friends-grants-"))
+      const store = new FileGrantStore(grantsDirFor(dir))
+      await expect(store.put("g-1", grant({ scope: "everything" as never }))).rejects.toThrow("grant scope is invalid")
+      expect(await store.get("g-1")).toBeNull()
+    })
+
+    it("delete refuses an id that leaves the grants directory and removes nothing", async () => {
+      dir = mkdtempSync(join(tmpdir(), "friends-grants-"))
+      const store = new FileGrantStore(grantsDirFor(dir))
+      await fsPromises.writeFile(join(dir, "friend-1.json"), "{}")
+      await expect(store.delete("../friend-1")).rejects.toThrow("grant id is invalid")
+      expect(existsSync(join(dir, "friend-1.json"))).toBe(true)
+    })
+  })
+
+  describe("damage reads as less consent, never more (#222 review)", () => {
+    async function storeWith(files: Record<string, unknown>): Promise<FileGrantStore> {
+      dir = mkdtempSync(join(tmpdir(), "friends-grants-"))
+      const grantsPath = grantsDirFor(dir)
+      const store = new FileGrantStore(grantsPath)
+      for (const [name, body] of Object.entries(files)) await fsPromises.writeFile(join(grantsPath, name), JSON.stringify(body))
+      return store
+    }
+    const base = { subjectKey: "s", recipientAgentId: "a", scope: "identity", grantedAt: "2026-03-14T18:00:00.000Z" }
+
+    it("names a grant by its file, whatever id its contents carry", async () => {
+      const store = await storeWith({ "a.json": { ...base, id: "b" } })
+      expect((await store.get("a"))?.id).toBe("a")
+      expect((await store.listAll()).map((g) => g.id)).toEqual(["a"])
+    })
+
+    it("reads any revokedAt as a revocation, and keeps a non-text expiresAt as text", async () => {
+      const store = await storeWith({
+        "r1.json": { ...base, revokedAt: true },
+        "r2.json": { ...base, revokedAt: null },
+        "e1.json": { ...base, expiresAt: 1 },
+        "e2.json": { ...base, expiresAt: ["2099-01-01"] },
+      })
+      expect((await store.get("r1"))?.revokedAt).toBe("true")
+      expect((await store.get("r2"))?.revokedAt).toBe("null")
+      expect((await store.get("e1"))?.expiresAt).toBe("1")
+      expect((await store.get("e2"))?.expiresAt).toBe('["2099-01-01"]')
+    })
+
+    it("lists no grant from a file whose name isn't a grant id", async () => {
+      const store = await storeWith({ ".hidden.json": { ...base, id: "h" }, "ok.json": { ...base, id: "ok" } })
+      expect((await store.listAll()).map((g) => g.id)).toEqual(["ok"])
+    })
   })
 })

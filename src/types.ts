@@ -130,6 +130,20 @@ export interface ImportedNote {
   originallyAssertedBy?: AgentAttribution
 }
 
+// -- Imported Outcome --
+// One relationship outcome another agent shared about a party (an `outcomes`
+// profile share). Lives in the SEPARATE `importedOutcomes` namespace, keyed by the
+// asserting agentId, never in first-party `agentMeta.outcomes`, so standing is
+// still judged from this agent's own outcomes alone.
+export interface ImportedOutcome {
+  missionId: string
+  result: "success" | "partial" | "failed"
+  timestamp: string
+  note?: string
+  importedAt: string
+  assertedBy: AgentAttribution
+}
+
 // -- Share Scope --
 // What a profile share is allowed to carry. Identity scopes (`name`/`identity`)
 // expose only the JOIN KEY (externalIds + display name) — never note content.
@@ -523,6 +537,10 @@ export interface FriendRecord {
    * unverified claims: never indexed, never claimed, never used to resolve a sender.
    * Absent on records that have never imported anything. */
   importedExternalIds?: ImportedExternalId[]
+  /** Relationship outcomes other agents shared about this party, keyed by the
+   * asserting agentId. Advisory claims, kept apart from first-party outcomes.
+   * Absent on records that have never imported any. */
+  importedOutcomes?: Record<string, ImportedOutcome[]>
   /** Set when the record's authority was reset because the peer's DID changed. */
   trustReset?: TrustReset
   totalTokens: number                     // cumulative token usage across all turns

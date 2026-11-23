@@ -26,6 +26,7 @@ import type {
   FriendRecord,
   ImportedExternalId,
   ImportedNote,
+  ImportedOutcome,
   RelationshipOutcome,
   ShareScope,
   TrustLevel,
@@ -206,7 +207,8 @@ export type ImportProfileShareStatus =
   | "untrusted_introduction"
 
 export type ImportProfileShareResult =
-  | { ok: true; status: "imported" | "seeded"; record: FriendRecord }
+  /** `importedOutcomes` counts the shared outcomes that landed in `record.importedOutcomes`. */
+  | { ok: true; status: "imported" | "seeded"; record: FriendRecord; importedOutcomes: number }
   | { ok: false; status: "no_party" | "untrusted_source" | "untrusted_introduction" }
 
 export interface ImportProfileShareOptions {
@@ -265,7 +267,8 @@ function mergeImportedNotes(
   now: string,
 ): FriendRecord["importedNotes"] {
   const existing = record.importedNotes ?? {}
-  const forAgent = { ...(existing[fromAgentId] ?? {}) }
+  const slot = Object.hasOwn(existing, fromAgentId) ? existing[fromAgentId] : undefined
+  const forAgent = { ...(slot && typeof slot === "object" && !Array.isArray(slot) ? slot : {}) }
   for (const note of notes) {
     forAgent[note.key] = importedNoteFrom(note, fromAgentId, now)
   }
@@ -339,6 +342,8 @@ export async function importProfileShare(
   }
 
   const now = new Date().toISOString()
+  // The number that lands: the newest MAX_IMPORTED_OUTCOMES_PER_PEER when the share carries more.
+  const sharedOutcomes = Math.min(importedOutcomesFrom(input.envelope, input.fromAgentId, now).length, MAX_IMPORTED_OUTCOMES_PER_PEER)
   const existing = await resolveSubject(store, input.envelope, input.fromAgentId)
 
   if (!existing) {
@@ -355,7 +360,7 @@ export async function importProfileShare(
       message: "seeded new party from profile share",
       meta: { friendId: withNotes.id, fromAgentId: input.fromAgentId },
     })
-    return { ok: true, status: "seeded", record: withNotes }
+    return { ok: true, status: "seeded", record: withNotes, importedOutcomes: sharedOutcomes }
   }
 
   const updated = applyEnvelopeToRecord(existing, input.envelope, input.fromAgentId, now)
@@ -366,7 +371,46 @@ export async function importProfileShare(
     message: "imported profile share into existing party",
     meta: { friendId: updated.id, fromAgentId: input.fromAgentId, scope: input.envelope.scope },
   })
-  return { ok: true, status: "imported", record: updated }
+  return { ok: true, status: "imported", record: updated, importedOutcomes: sharedOutcomes }
+}
+
+/** One peer may hold at most this many shared outcomes on a record; the oldest go first. */
+export const MAX_IMPORTED_OUTCOMES_PER_PEER = 256
+
+const OUTCOME_RESULTS: ReadonlySet<string> = new Set(["success", "partial", "failed"])
+
+/** The envelope's outcomes that are well formed, stamped with who asserted them. */
+function importedOutcomesFrom(envelope: ProfileShareEnvelope, fromAgentId: string, now: string): ImportedOutcome[] {
+  // Only an outcomes share carries outcomes; the producer sends them in no other scope.
+  if (envelope.scope !== "outcomes" || !Array.isArray(envelope.outcomes)) return []
+  return envelope.outcomes
+    .filter((outcome) => outcome && typeof outcome.missionId === "string" && outcome.missionId.length > 0 &&
+      OUTCOME_RESULTS.has(outcome.result) && typeof outcome.timestamp === "string")
+    .map((outcome) => ({
+      missionId: outcome.missionId,
+      result: outcome.result,
+      timestamp: outcome.timestamp,
+      ...(typeof outcome.note === "string" ? { note: outcome.note } : {}),
+      importedAt: now,
+      assertedBy: { agentId: fromAgentId },
+    }))
+}
+
+/** Merge shared outcomes into the peer's slot: one re-shared (same mission and timestamp) replaces its earlier copy. */
+function mergeImportedOutcomes(
+  record: FriendRecord,
+  incoming: ImportedOutcome[],
+  fromAgentId: string,
+): FriendRecord["importedOutcomes"] {
+  if (incoming.length === 0) return record.importedOutcomes
+  const existing = record.importedOutcomes ?? {}
+  const sameOutcome = (a: ImportedOutcome, b: ImportedOutcome) => a.missionId === b.missionId && a.timestamp === b.timestamp
+  const slot = Object.hasOwn(existing, fromAgentId) ? existing[fromAgentId] : []
+  const kept = (Array.isArray(slot) ? slot : []).filter(
+    (have) => !!have && typeof have === "object" && typeof have.missionId === "string" && !incoming.some((next) => sameOutcome(have, next)),
+  )
+  const merged = [...kept, ...incoming].slice(-MAX_IMPORTED_OUTCOMES_PER_PEER)
+  return { ...existing, [fromAgentId]: merged }
 }
 
 /** One peer may hold at most this many unverified id claims on a record. */
@@ -408,6 +452,7 @@ function applyEnvelopeToRecord(
     assertedBy: { agentId: fromAgentId },
     importedAt: now,
   }))
+  const importedOutcomes = mergeImportedOutcomes(record, importedOutcomesFrom(envelope, fromAgentId, now), fromAgentId)
   const importedExternalIds = newClaims.length > 0
     ? capClaimsPerPeer([...(record.importedExternalIds ?? []), ...newClaims], fromAgentId)
     : record.importedExternalIds
@@ -418,6 +463,7 @@ function applyEnvelopeToRecord(
     // trustLevel / role are intentionally NOT recomputed — an import must never
     // change the party's trust (the single most important safety invariant).
     ...(importedNotes ? { importedNotes } : {}),
+    ...(importedOutcomes ? { importedOutcomes } : {}),
     updatedAt: now,
   }
 }

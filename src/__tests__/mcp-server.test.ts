@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import { PassThrough } from "node:stream"
-import { mkdtempSync, rmSync, writeFileSync } from "fs"
+import { mkdtempSync, rmSync, writeFileSync, readdirSync } from "fs"
 import { tmpdir } from "os"
 import { join } from "path"
 
 import { createFriendsMcpServer, getToolSchemas } from "../mcp"
 import { coerceBool, coerceInt, coerceString, coerceOptionalString } from "../mcp/dispatch"
-import { FileFriendStore, MemoryAuditSink } from "../index"
+import { FileFriendStore, FileGrantStore, grantsDirFor, MemoryAuditSink } from "../index"
 import type { FriendStore, FriendRecord, IdentityProvider, GrantStore, ShareGrant, MissionStore, MissionRecord, ControlPlaneAuditRecord } from "../index"
 
 // ── In-memory JSON-RPC/stdio harness ──
@@ -1279,6 +1279,61 @@ describe("moat tools/call dispatch", () => {
     const malformed = await h.tool("import_profile", { envelope: "{bad json", fromAgentId: "source", trustOfSource: "friend" })
     expect(malformed.isError).toBe(true)
     expect((malformed.payload as { status: string }).status).toBe("invalid")
+  })
+
+  it("import_profile: an envelope with no subject ids, or no source agent, is invalid (#222)", async () => {
+    const store = makeStore([friendOf({ trustLevel: "acquaintance" })])
+    start(store)
+    for (const envelope of [{}, { subject: {} }, { subject: { externalIds: "aad" } }, { subject: { externalIds: [{}] } }]) {
+      const r = await h.tool("import_profile", { envelope, fromAgentId: "source", trustOfSource: "friend" })
+      expect(r.isError).toBe(true)
+      expect((r.payload as { status: string }).status).toBe("invalid")
+    }
+    const good = {
+      subject: { externalIds: [{ provider: "aad", externalId: "jordan-aad", linkedAt: NOW }], displayName: "Jordan" },
+      fromAgentId: "source",
+      scope: "identity",
+      issuedAt: NOW,
+    }
+    for (const fromAgentId of ["", "  "]) {
+      const anonymous = await h.tool("import_profile", { envelope: good, fromAgentId, trustOfSource: "friend" })
+      expect(anonymous.isError).toBe(true)
+      expect((anonymous.payload as { status: string }).status).toBe("invalid")
+    }
+    for (const payload of [{ notes: [{ key: "__proto__", value: "v" }] }, { notes: { length: 1 } }, { notes: [null] }, { notes: "abc" }, { notes: [{ key: "k" }] }, { outcomes: {} }]) {
+      const r = await h.tool("import_profile", { envelope: { ...good, scope: "notes:safe", ...payload }, fromAgentId: "source", trustOfSource: "friend" })
+      expect(r.isError, JSON.stringify(payload)).toBe(true)
+      expect((r.payload as { status: string }).status, JSON.stringify(payload)).toBe("invalid")
+    }
+  })
+
+  it("grant_share: an expiresAt that isn't a date is invalid and mints nothing (#222)", async () => {
+    const grants = makeGrantStore()
+    start(makeStore([friendOf()]), grants)
+    for (const expiresAt of ["", "never", 1, "1", "2001", "foo 2099", "2027-13-01"]) {
+      const r = await h.tool("grant_share", { subjectKey: "subj-1", recipientAgentId: "agent-2", scope: "identity", expiresAt })
+      expect(r.isError, String(expiresAt)).toBe(true)
+      expect((r.payload as { status: string }).status, String(expiresAt)).toBe("invalid")
+    }
+    expect(await grants.listAll()).toEqual([])
+  })
+
+  it("revoke_share: a grant id that climbs out of _grants is invalid and writes no grant (#222)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "friends-mcp-revoke-"))
+    try {
+      const friendsDir = join(dir, "friends")
+      const store = new FileFriendStore(friendsDir)
+      const owner = ownerRecord()
+      await store.put(owner.id, owner)
+      const grants = new FileGrantStore(grantsDirFor(friendsDir))
+      start(store, grants)
+      const r = await h.tool("revoke_share", { grantId: `../${owner.id}` })
+      expect(r.isError).toBe(true)
+      expect((r.payload as { status: string }).status).toBe("invalid")
+      expect(readdirSync(grantsDirFor(friendsDir))).toEqual([])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it("import_profile: surfaces an untrusted_source refusal as isError", async () => {
