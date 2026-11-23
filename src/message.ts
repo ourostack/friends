@@ -23,8 +23,9 @@ export const MAX_MESSAGE_TEXT_CHARS = 16_000
 /** A sender-chosen thread id (e.g. an A2A contextId) is an opaque short token. */
 export const MAX_CONVERSATION_ID_CHARS = 256
 
-/** A sender's signed answer to an approval its peer routed to it (see `ApprovalAnswer`). */
-export type ApprovalDecision = "approve" | "deny"
+/** A sender's signed answer to an approval its peer routed to it (see `ApprovalAnswer`). Deny only in this
+ * version: a receiver refuses any other decision as malformed, so allowing approve takes a new release. */
+export type ApprovalDecision = "deny"
 /** The relay token is a base64url MAC the approving agent computed; 16 to 128 characters. */
 const RELAY_TOKEN = /^[A-Za-z0-9_-]{16,128}$/
 
@@ -42,7 +43,7 @@ export function isApprovalAnswer(value: unknown): value is ApprovalAnswer {
   const v = value as Record<string, unknown>
   return Object.keys(v).sort().join(",") === "decision,relayToken"
     && typeof v.relayToken === "string" && RELAY_TOKEN.test(v.relayToken)
-    && (v.decision === "approve" || v.decision === "deny")
+    && v.decision === "deny"
 }
 
 const TRUST_RANK: Record<TrustLevel, number> = { family: 4, friend: 3, acquaintance: 2, stranger: 1 }
@@ -147,6 +148,16 @@ export function receiveMessage(input: ReceiveMessageInput, options: ReceiveMessa
   const issuedAt = envelope.issuedAt
   const onBehalfOf = envelope.onBehalfOf
   const approvalAnswer = envelope.approvalAnswer
+  // The default verifier trusts on first use and checks nothing, so an approval answer needs a real one.
+  if (approvalAnswer !== undefined && options.verifier === undefined) {
+    emitNervesEvent({
+      component: "friends",
+      event: "friends.message_refused",
+      message: "refused an approval answer received without a signature verifier",
+      meta: { fromAgentId: input.fromAgentId, trustOfSource: input.trustOfSource, authenticated: false },
+    })
+    return { ok: false, status: "untrusted_source" }
+  }
   if (
     envelope.fromAgentId !== input.fromAgentId
     || typeof text !== "string" || text.trim() === "" || text.length > MAX_MESSAGE_TEXT_CHARS

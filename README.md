@@ -132,12 +132,15 @@ older sender) is accepted with `bound: false` unless it is a delegated command
 `rejectUnboundEnvelopes` (`unbound_envelope`).
 
 **Approval answers.** A message may carry a signed `approvalAnswer: { relayToken, decision }`, where
-`decision` is `approve` or `deny` and `relayToken` is 16 to 128 base64url characters. It is signed
-with the text, so a relay can neither add, strip nor change it, and it claims nothing on its own:
-the recipient matches the token against an approval it routed to that sender, and decides which
-decisions it honours. `prepareMessage` refuses a malformed answer, or one combined with
-`onBehalfOf`, as `invalid_approval_answer`; `receiveMessage` refuses the same as
-`malformed_message`. Only harness code should set it, never a model-facing tool.
+`relayToken` is 16 to 128 base64url characters and `decision` is `deny`, the only decision this
+version accepts: a receiver refuses any other as malformed, so allowing `approve` takes a new
+release. It is signed with the text, so a relay can neither add, strip nor change it, and it claims
+nothing on its own: the recipient matches the token against an approval it routed to that sender.
+`prepareMessage` refuses a malformed answer, or one combined with `onBehalfOf`, as
+`invalid_approval_answer`; `receiveMessage` refuses the same as `malformed_message`, and refuses
+any answer as `untrusted_source` when it is given no verifier (the default checks no signature).
+`checkEnvelopeBinding` refuses an answer on any kind but `message` as `malformed_binding`. Only
+harness code should set it, never a model-facing tool.
 A completed result carries the signed `bindingId`. `checkEnvelopeBinding` is check-only: a host
 with its own receive path must hold an in-memory claim across its own awaits, and mark the returned
 `seenKey` (and its blob key) in the ledger only after the signature verifies. `receiveShare` does
