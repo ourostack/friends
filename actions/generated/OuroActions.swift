@@ -1203,12 +1203,26 @@ extension UnlinkIdentityButton where Label == Text {
 
 // MARK: onboard_agent (write)
 
+public enum OnboardAgentTrustLevelValue: String, Codable, Sendable, Hashable, CaseIterable, AppEnum {
+    case family = "family"
+    case friend = "friend"
+    case acquaintance = "acquaintance"
+    case stranger = "stranger"
+    public static let typeDisplayRepresentation: TypeDisplayRepresentation = "Trust level"
+    public static let caseDisplayRepresentations: [OnboardAgentTrustLevelValue: DisplayRepresentation] = [
+        .family: "family",
+        .friend: "friend",
+        .acquaintance: "acquaintance",
+        .stranger: "stranger",
+    ]
+}
+
 public struct OnboardAgentInput: Codable, Sendable, Hashable {
     public var name: String
     public var agentId: String
-    public var trustLevel: String?
+    public var trustLevel: OnboardAgentTrustLevelValue?
     public var bundleName: String?
-    public init(name: String, agentId: String, trustLevel: String? = nil, bundleName: String? = nil) {
+    public init(name: String, agentId: String, trustLevel: OnboardAgentTrustLevelValue? = nil, bundleName: String? = nil) {
         self.name = name
         self.agentId = agentId
         self.trustLevel = trustLevel
@@ -1246,7 +1260,7 @@ public struct OnboardAgentIntent: AppIntent {
     @Parameter(title: "Agent id", description: "the a2a agent id")
     public var agentId: String
     @Parameter(title: "Trust level", description: "trust level (default stranger (cold contact))")
-    public var trustLevel: String?
+    public var trustLevel: OnboardAgentTrustLevelValue?
     @Parameter(title: "Bundle", description: "optional bundle name")
     public var bundleName: String?
 

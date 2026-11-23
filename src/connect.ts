@@ -111,21 +111,22 @@ async function resolvePeer(store: FriendStore, peer: ConnectPeer): Promise<Resol
   if (peer.name) {
     const existing = await findByName(store, peer.name)
     if (!existing) return null
-    const agentId = agentIdOf(existing)
-    if (!agentId) return null
-    return { agentId, existing, name: peer.name }
+    return { agentId: agentIdOf(existing)!, existing, name: peer.name }
   }
   return null
 }
 
-/** Case-insensitive name match over the store's records (the §3.3 name-fallback scan,
- * made store-agnostic by using listAll). Returns the first match, or null. A store with
- * no listAll yields null (best-effort, never a throw). */
+/** Case-insensitive name match over the store's agent records (the §3.3 name-fallback
+ * scan, made store-agnostic by using listAll). Returns the one record of that name that
+ * carries an agent handle, or null when none does or more than one does: two agents of
+ * the same name are ambiguous, so the caller must pass a handle (#217). A store with no
+ * listAll yields null (best-effort, never a throw). */
 async function findByName(store: FriendStore, name: string): Promise<FriendRecord | null> {
   if (typeof store.listAll !== "function") return null
   const all = await store.listAll()
   const lower = name.toLowerCase()
-  return all.find((f) => f.name.toLowerCase() === lower) ?? null
+  const agents = all.filter((f) => f.name.toLowerCase() === lower && agentIdOf(f) !== undefined)
+  return agents.length === 1 ? agents[0] : null
 }
 
 /**

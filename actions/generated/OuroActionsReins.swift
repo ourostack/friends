@@ -53,7 +53,7 @@ extension UnlinkIdentityInput: ReinsInput {
 }
 
 extension OnboardAgentInput: ReinsInput {
-    public static var reinsSchema: ReinsSchema { .object(properties: ["name": .string, "agentId": .string, "trustLevel": .string, "bundleName": .string], required: ["name", "agentId"]) }
+    public static var reinsSchema: ReinsSchema { .object(properties: ["name": .string, "agentId": .string, "trustLevel": .oneOf(["family", "friend", "acquaintance", "stranger"]), "bundleName": .string], required: ["name", "agentId"]) }
 }
 
 extension ConnectToInput: ReinsInput {

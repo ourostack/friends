@@ -685,6 +685,39 @@ describe("tools/call dispatch", () => {
     expect((r.payload as { record: FriendRecord }).record.trustLevel).toBe("friend")
   })
 
+  it("set_trust: a level that isn't family, friend, acquaintance or stranger is invalid and changes nothing (#217)", async () => {
+    const store = makeStore()
+    const owner = seedOwner(store)
+    start(store)
+    for (const trustLevel of [undefined, "", "admin", "Friend"]) {
+      const r = await h.tool("set_trust", { friendId: owner.id, ...(trustLevel === undefined ? {} : { trustLevel }) })
+      expect(r.isError, String(trustLevel)).toBe(true)
+      expect((r.payload as { status: string }).status, String(trustLevel)).toBe("invalid")
+    }
+    const after = await h.tool("get_friend", { friendId: owner.id })
+    expect((after.payload as FriendRecord).trustLevel).toBe("family")
+  })
+
+  it("onboard_agent: an unknown trust level, or an empty name or agentId, is invalid and saves nothing (#217)", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    start(store)
+    for (const args of [
+      { name: "Bot", agentId: "peer-x", trustLevel: "admin" },
+      { name: "Bot", agentId: "peer-x", trustLevel: "" },
+      {},
+      { name: "Bot" },
+      { agentId: "peer-x" },
+      { name: "  ", agentId: "peer-x" },
+    ]) {
+      const r = await h.tool("onboard_agent", args)
+      expect(r.isError, JSON.stringify(args)).toBe(true)
+      expect((r.payload as { status: string }).status, JSON.stringify(args)).toBe("invalid")
+    }
+    const all = await h.tool("list_friends", { kind: "agent" })
+    expect(all.payload).toEqual([])
+  })
+
   it("link_identity: links and merges, then resolves to the same friend", async () => {
     const store = makeStore()
     seedOwner(store)
@@ -1107,6 +1140,20 @@ describe("tools/call dispatch — connect_to (p11 inc2)", () => {
     return server
   }
 
+  it("an unknown trust level is invalid and links nothing (#217)", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    const audit = new MemoryAuditSink()
+    start(store, audit)
+    for (const trustLevel of ["bogus", ""]) {
+      const r = await h.tool("connect_to", { agentId: "peer-bogus", trustLevel })
+      expect(r.isError).toBe(true)
+      expect((r.payload as { status: string }).status).toBe("invalid")
+    }
+    expect(await store.findByExternalId("a2a-agent", "peer-bogus")).toBeNull()
+    expect(audit.list()).toEqual([])
+  })
+
   it("default stdio path (no controlContext) gets a LOCAL management sense → COMMITS, links + audits action:'connect'", async () => {
     const store = makeStore()
     seedOwner(store)
@@ -1184,6 +1231,42 @@ describe("tools/call dispatch — connect_to (p11 inc2)", () => {
     const payload = r.payload as { ok: boolean; status: string }
     expect(payload.ok).toBe(false)
     expect(payload.status).toBe("needs_handle_or_introduction")
+    expect(audit.list()).toHaveLength(0)
+  })
+
+  it("a trust level that isn't text is invalid on onboard_agent and connect_to, and saves nothing (#217 review)", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    start(store)
+    const onboard = await h.tool("onboard_agent", { name: "Bot", agentId: "peer-1", trustLevel: 5 })
+    expect((onboard.payload as { status: string }).status).toBe("invalid")
+    const connect = await h.tool("connect_to", { agentId: "peer-2", trustLevel: 5 })
+    expect((connect.payload as { status: string }).status).toBe("invalid")
+    expect(await store.findByExternalId("a2a-agent", "peer-1")).toBeNull()
+    expect(await store.findByExternalId("a2a-agent", "peer-2")).toBeNull()
+  })
+
+  it("onboard_agent saves the name and agentId without surrounding spaces (#217 review)", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    start(store)
+    await h.tool("onboard_agent", { name: " Bot ", agentId: " peer-ws " })
+    const saved = await store.findByExternalId("a2a-agent", "peer-ws")
+    expect(saved?.name).toBe("Bot")
+  })
+
+  it("a bare name that two agents share → needs_handle_or_introduction, links neither (#217)", async () => {
+    const store = makeStore()
+    seedOwner(store)
+    const audit = new MemoryAuditSink()
+    start(store, audit)
+    await h.tool("onboard_agent", { name: "Twin", agentId: "twin-a" })
+    await h.tool("onboard_agent", { name: "Twin", agentId: "twin-b" })
+    const r = await h.tool("connect_to", { name: "twin" })
+    expect(r.isError).toBe(true)
+    expect((r.payload as { status: string }).status).toBe("needs_handle_or_introduction")
+    expect((await store.findByExternalId("a2a-agent", "twin-a"))?.trustLevel).toBe("stranger")
+    expect((await store.findByExternalId("a2a-agent", "twin-b"))?.trustLevel).toBe("stranger")
     expect(audit.list()).toHaveLength(0)
   })
 

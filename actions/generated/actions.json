@@ -388,6 +388,24 @@
       "label": "Set trust",
       "description": "Set how much a friend is trusted.",
       "agent": "Set a friend's trust level (also mirrors it onto the record's role).",
+      "when": "The owner decided how far someone is trusted: set their level, which their role then follows",
+      "errors": [
+        {
+          "code": "invalid",
+          "means": "The trust level is missing or isn't family, friend, acquaintance or stranger, so nothing changed.",
+          "fix": "Pass trustLevel family, friend, acquaintance or stranger."
+        },
+        {
+          "code": "not-found",
+          "means": "No friend record has that uuid or name, so no trust changed.",
+          "fix": "Call list_friends to find the record, then set its trust by uuid or name."
+        },
+        {
+          "code": "tool-failed",
+          "means": "The record could not be written, or the audit line could not be appended after the new level was saved; the message says why.",
+          "fix": "Call get_friend to see which level the record holds, check that the friends directory and its _audit folder are writable, then set the trust again."
+        }
+      ],
       "openInput": true,
       "input": {
         "friendId": {
@@ -492,6 +510,19 @@
       "label": "Onboard agent",
       "description": "Record another agent you can reach, from its coordinates.",
       "agent": "Upsert an agent-peer friend record from already-resolved coordinates (no HTTP card fetch).",
+      "when": "Meeting another agent whose coordinates you already hold: keep its record, at stranger unless the owner names a level",
+      "errors": [
+        {
+          "code": "invalid",
+          "means": "The name or agentId is empty, or the trust level isn't family, friend, acquaintance or stranger, so nothing was saved.",
+          "fix": "Pass the peer's name and a2a agentId, and leave trustLevel out or pass one of the four levels."
+        },
+        {
+          "code": "tool-failed",
+          "means": "The record could not be written, or the audit line for an explicit trust level could not be appended after the record was saved; the message says why.",
+          "fix": "Call list_friends with kind agent to see what was saved, check that the friends directory is writable, then onboard the agent again."
+        }
+      ],
       "openInput": true,
       "input": {
         "name": {
@@ -507,8 +538,14 @@
         "trustLevel": {
           "label": "Trust level",
           "description": "trust level (default stranger (cold contact))",
+          "values": [
+            "family",
+            "friend",
+            "acquaintance",
+            "stranger"
+          ],
           "optional": true,
-          "kind": "string"
+          "kind": "enum"
         },
         "a2a": {
           "label": "A2A",
@@ -538,7 +575,30 @@
       "consent": "write",
       "label": "Connect to",
       "description": "Link one of your own agents into this agent's fleet.",
-      "agent": "Management-sense control plane (brick 8): the owner links one of their OWN agents into this agent's fleet — introduce a peer by agentId/did/name at a trust level (default family for own-fleet). Authority-gated: commits inline ONLY from a local (owner-only stdio) or roster-verified same-account closed sense; an open sense never commits inline (it downgrades to a confirm-prompt); a bare name with no resolvable handle/DID and no record hit returns needs_handle_or_introduction (never fabricates a target). Writes one control-plane audit record (action:'connect') through the wired sink. Returns { ok:true, status:'connected', record } or { ok:false, status:'downgraded'|'needs_handle_or_introduction', downgrade? }.",
+      "agent": "Management-sense control plane (brick 8): the owner links one of their OWN agents into this agent's fleet — introduce a peer by agentId/did/name at a trust level (default family for own-fleet). Authority-gated: commits inline ONLY from a local (owner-only stdio) or roster-verified same-account closed sense; from an open sense it downgrades to a confirm-prompt instead; a bare name with no resolvable handle/DID, no record hit, or more than one agent of that name returns needs_handle_or_introduction (it links only a target it can find). Writes one control-plane audit record (action:'connect') through the wired sink. Returns { ok:true, status:'connected', record } or { ok:false, status:'downgraded'|'needs_handle_or_introduction', downgrade? }.",
+      "when": "The owner, on this machine, links one of their own agents into this agent's fleet, by handle, DID or a name already known",
+      "errors": [
+        {
+          "code": "invalid",
+          "means": "The trust level isn't family, friend, acquaintance or stranger, so nothing was linked.",
+          "fix": "Leave trustLevel out (family) or pass one of the four levels."
+        },
+        {
+          "code": "downgraded",
+          "means": "The calling sense can't commit a link inline (an open or internal sense, or a closed one whose account membership wasn't verified); nothing was linked or audited.",
+          "fix": "Ask the owner to confirm the link from a local session, then connect again."
+        },
+        {
+          "code": "needs-handle-or-introduction",
+          "means": "No agentId was given and the DID or name matches no agent record, or the name matches more than one; nothing was linked.",
+          "fix": "Pass the peer's agentId, or onboard_agent it first, then connect again."
+        },
+        {
+          "code": "tool-failed",
+          "means": "The record could not be written, or the connect audit line could not be appended after the link was saved; the message says why.",
+          "fix": "Call list_friends with kind agent to see what was saved, check that the friends directory is writable, then connect again."
+        }
+      ],
       "openInput": true,
       "input": {
         "agentId": {
