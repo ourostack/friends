@@ -118,7 +118,7 @@ export function checkEnvelopeBinding(opened: OpenedEnvelope, input: CheckEnvelop
   if (b.to !== input.recipientDid) return { ok: false, reason: "signed_recipient_mismatch" }
   if (b.kind !== opened.friendsKind) return { ok: false, reason: "signed_kind_mismatch" }
   // Only a direct message may carry an approval answer; on any other kind the importers would drop it unseen.
-  if (marker === "approval_answer" && opened.friendsKind !== "message") return { ok: false, reason: "malformed_binding" }
+  if (envelope.approvalAnswer !== undefined && opened.friendsKind !== "message") return { ok: false, reason: "malformed_binding" }
 
   const stale = checkFreshness(envelope, marker, input)
   if (stale) return stale

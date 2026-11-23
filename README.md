@@ -138,7 +138,7 @@ release. It is signed with the text, so a relay can neither add, strip nor chang
 nothing on its own: the recipient matches the token against an approval it routed to that sender.
 `prepareMessage` refuses a malformed answer, or one combined with `onBehalfOf`, as
 `invalid_approval_answer`; `receiveMessage` refuses the same as `malformed_message`, and refuses
-any answer as `untrusted_source` when it is given no verifier (the default checks no signature).
+any answer as `untrusted_source` when it is given no verifier or `tofuVerifier` (neither checks a signature).
 `checkEnvelopeBinding` refuses an answer on any kind but `message` as `malformed_binding`. Only
 harness code should set it, never a model-facing tool.
 A completed result carries the signed `bindingId`. `checkEnvelopeBinding` is check-only: a host

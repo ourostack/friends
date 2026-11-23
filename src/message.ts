@@ -16,7 +16,7 @@
 import { emitNervesEvent } from "./observability"
 import type { TrustLevel } from "./types"
 import type { AgentVerifier } from "./verifier"
-import { DEFAULT_AGENT_VERIFIER } from "./verifier"
+import { DEFAULT_AGENT_VERIFIER, tofuVerifier } from "./verifier"
 
 /** Matches the ouro harness A2A server's inbound text cap. */
 export const MAX_MESSAGE_TEXT_CHARS = 16_000
@@ -148,8 +148,9 @@ export function receiveMessage(input: ReceiveMessageInput, options: ReceiveMessa
   const issuedAt = envelope.issuedAt
   const onBehalfOf = envelope.onBehalfOf
   const approvalAnswer = envelope.approvalAnswer
-  // The default verifier trusts on first use and checks nothing, so an approval answer needs a real one.
-  if (approvalAnswer !== undefined && options.verifier === undefined) {
+  // The default verifier trusts on first use and checks nothing, so an approval answer needs a real one,
+  // whether the TOFU verifier is defaulted or passed in.
+  if (approvalAnswer !== undefined && (options.verifier === undefined || options.verifier === tofuVerifier)) {
     emitNervesEvent({
       component: "friends",
       event: "friends.message_refused",

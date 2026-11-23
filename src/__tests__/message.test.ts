@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import { MAX_CONVERSATION_ID_CHARS, MAX_MESSAGE_TEXT_CHARS, prepareMessage, receiveMessage } from "../message"
-import type { AgentVerifier } from "../verifier"
+import { tofuVerifier, type AgentVerifier } from "../verifier"
 
 const NOW = "2026-09-24T05:00:00.000Z"
 const A = "did:key:z6MkSender"
@@ -122,9 +122,11 @@ describe("receiveMessage", () => {
       .toEqual({ ok: false, status: "malformed_message" })
   })
 
-  it("refuses an approval answer when no verifier is given, since the default checks no signature", () => {
+  it("refuses an approval answer with no verifier or the TOFU one, since neither checks a signature", () => {
     const approvalAnswer = { relayToken: "q2Vx9mF0bS1yZWxheS10b2tlbi1mb3ItdGVzdHMtMDE", decision: "deny" }
     expect(receiveMessage({ envelope: envelope({ approvalAnswer }), fromAgentId: A, trustOfSource: "family" }))
+      .toEqual({ ok: false, status: "untrusted_source" })
+    expect(receiveMessage({ envelope: envelope({ approvalAnswer }), fromAgentId: A, trustOfSource: "family" }, { verifier: tofuVerifier }))
       .toEqual({ ok: false, status: "untrusted_source" })
     expect(receiveMessage({ envelope: envelope(), fromAgentId: A, trustOfSource: "family" }).ok).toBe(true)
   })

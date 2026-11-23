@@ -338,6 +338,7 @@ describe("checkEnvelopeBinding", () => {
   it("refuses an approval answer on any kind other than message", () => {
     const approvalAnswer = { relayToken: "q2Vx9mF0bS1yZWxheS10b2tlbi1mb3ItdGVzdHMtMDE", decision: "deny" }
     expect(check(opened(bound({ approvalAnswer }, { kind: "coordination" }), "coordination"))).toEqual({ ok: false, reason: "malformed_binding" })
+    expect(check(opened(bound({ approvalAnswer, onBehalfOf: "principal" }, { kind: "coordination" }), "coordination"))).toEqual({ ok: false, reason: "malformed_binding" })
   })
 
   it("rejects a binding with extra keys", () => {
