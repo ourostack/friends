@@ -7,7 +7,6 @@
     "mcp:import_result",
     "mcp:link_identity",
     "mcp:onboard_agent",
-    "mcp:record_interaction",
     "mcp:record_mission",
     "mcp:set_trust"
   ]

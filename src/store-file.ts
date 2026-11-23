@@ -91,11 +91,15 @@ export class FileFriendStore implements ExternalIdClaimStore {
   }
 
   async get(id: string): Promise<FriendRecord | null> {
+    // An empty id names nobody: without this it would match a record whose name is empty.
+    if (id === "") return null
     // Direct id lookup, only for an id that names a file in the friends directory (#212); any other id is a name.
     const record = isSafeRecordId(id) ? await this.readJson(path.join(this.friendsPath, `${id}.json`)) : null
     if (record) return await this.normalizeWithClaims(record)
 
-    // Fallback: if id is a name (not UUID), scan for matching friend
+    // Fallback: if id is a name (not UUID), scan for the one friend of that name. Two of the same name are ambiguous,
+    // and a write by name must not land on whichever file is read first, so the name then finds nobody.
+    let match: FriendRecord | null = null
     /* v8 ignore start -- name fallback: exercised by live proactive sends @preserve */
     try {
       this.assertFriendsDirectoryIdentity()
@@ -106,14 +110,15 @@ export class FileFriendStore implements ExternalIdClaimStore {
         if (!raw) continue
         const normalized = await this.normalizeWithClaims(raw)
         if (normalized.name?.toLowerCase() === id.toLowerCase()) {
-          return normalized
+          if (match) return null
+          match = normalized
         }
       }
       this.assertFriendsDirectoryIdentity()
-    } catch { /* directory unreadable — return null */ }
+    } catch { return null /* directory unreadable */ }
     /* v8 ignore stop */
 
-    return null
+    return match
   }
 
   async put(id: string, record: FriendRecord): Promise<void> {

@@ -59,7 +59,7 @@ export async function setFriendTrust(
     role: level,
     updatedAt,
   }
-  await store.put(friendId, updated)
+  await store.put(updated.id, updated)
 
   // Bug B — append one control-plane audit record on the successful mutation. The
   // `targetDid` is the record's durable identity DID (identity.did, falling back to
@@ -76,7 +76,7 @@ export async function setFriendTrust(
     const targetDid = resolveAgentIdentity(current.agentMeta).did
     const record: ControlPlaneAuditRecord = {
       action: "set_trust",
-      targetId: friendId,
+      targetId: current.id,
       ...(targetDid !== undefined ? { targetDid } : {}),
       level,
       ...(ctx.basis !== undefined ? { basis: ctx.basis } : {}),
