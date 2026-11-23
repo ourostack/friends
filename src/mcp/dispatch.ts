@@ -135,6 +135,22 @@ function isSharedPayload(envelope: { notes?: unknown; outcomes?: unknown }): boo
   return notesOk && (envelope.outcomes === undefined || Array.isArray(envelope.outcomes))
 }
 
+/** Usage record_interaction can count: an object whose output_tokens is a whole number of 0 or more. */
+function isUsage(usage: unknown): usage is UsageData {
+  if (!usage || typeof usage !== "object" || Array.isArray(usage)) return false
+  const tokens = (usage as { output_tokens?: unknown }).output_tokens
+  return typeof tokens === "number" && Number.isSafeInteger(tokens) && tokens >= 0
+}
+
+/** An outcome record_interaction can save: a non-empty missionId, a result of success, partial or failed, and a note
+ * that is text when given. */
+function isOutcomeInput(outcome: unknown): outcome is { missionId: string; result: "success" | "partial" | "failed" } {
+  if (!outcome || typeof outcome !== "object" || Array.isArray(outcome)) return false
+  const { missionId, result, note } = outcome as { missionId?: unknown; result?: unknown; note?: unknown }
+  return typeof missionId === "string" && missionId.length > 0 && (result === "success" || result === "partial" || result === "failed") &&
+    (note === undefined || typeof note === "string")
+}
+
 /** A grant-backed tool was called without a GrantStore wired (a store-only
  * embedding). The consent surface needs grant persistence, so report it cleanly
  * rather than guessing. */
@@ -255,25 +271,48 @@ export async function dispatchTool(
     }
 
     case "record_interaction": {
-      const friendId = coerceString(args.friendId)
       const usage = parseMaybeJson<UsageData>(args.usage)
       const outcome = parseMaybeJson<{ missionId: string; result: "success" | "partial" | "failed"; note?: string; provenance?: NoteProvenance }>(args.outcome)
       const familiarityDelta = coerceInt(args.familiarityDelta)
       const provenance = parseMaybeJson<NoteProvenance>(args.provenance)
 
-      if (usage === undefined && outcome === undefined) {
+      if (args.usage === undefined && args.outcome === undefined) {
         return { result: { ok: true, status: "noop", message: "no usage or outcome provided" }, isError: false }
       }
+      // Bad input answers invalid before anything is saved, rather than reading as success (#214).
+      if (args.usage !== undefined && !isUsage(usage)) {
+        return {
+          result: { ok: false, status: "invalid", message: "usage must be an object whose output_tokens is a whole number of 0 or more" },
+          isError: true,
+        }
+      }
+      if (args.outcome !== undefined && !isOutcomeInput(outcome)) {
+        return {
+          result: { ok: false, status: "invalid", message: "outcome must be an object with a missionId and a result of success, partial or failed" },
+          isError: true,
+        }
+      }
+      const friend = await store.get(coerceString(args.friendId))
+      if (!friend) {
+        return { result: { ok: false, status: "not_found", message: "friend record not found" }, isError: true }
+      }
+      // Only an agent record keeps outcomes; on anyone else the store would drop the outcome it was told to save.
+      if (outcome !== undefined && friend.kind !== "agent") {
+        return {
+          result: { ok: false, status: "invalid", message: "outcomes are kept only on agent records; record this one's usage without an outcome" },
+          isError: true,
+        }
+      }
 
-      const combined: { tokensAccumulated?: boolean; outcome?: unknown } = {}
+      // Writes go by the record's own id, so a friend named rather than given by uuid is saved too (#213).
+      const combined: { ok: true; status: "recorded"; tokensAccumulated?: boolean; outcome?: unknown } = { ok: true, status: "recorded" }
       if (usage !== undefined) {
-        await accumulateFriendTokens(store, friendId, usage)
-        combined.tokensAccumulated = true
+        combined.tokensAccumulated = await accumulateFriendTokens(store, friend.id, usage)
       }
       if (outcome !== undefined) {
         combined.outcome = await recordRelationshipOutcome(
           store,
-          friendId,
+          friend.id,
           { missionId: outcome.missionId, result: outcome.result, note: outcome.note, provenance: outcome.provenance ?? provenance },
           familiarityDelta,
         )

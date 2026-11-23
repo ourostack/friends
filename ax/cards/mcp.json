@@ -13,6 +13,7 @@
       "get_friend",
       "list_friends",
       "save_note",
+      "record_interaction",
       "upsert_group",
       "resolve_room",
       "whoami"

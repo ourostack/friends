@@ -489,7 +489,7 @@ describe("tools/call dispatch", () => {
     const owner = seedOwner(store)
     start(store)
     const r = await h.tool("record_interaction", { friendId: owner.id, usage: { output_tokens: 42 } })
-    expect((r.payload as { tokensAccumulated: boolean }).tokensAccumulated).toBe(true)
+    expect(r.payload).toMatchObject({ ok: true, status: "recorded", tokensAccumulated: true })
     const after = await h.tool("get_friend", { friendId: owner.id })
     expect((after.payload as FriendRecord).totalTokens).toBe(42)
   })
@@ -526,20 +526,134 @@ describe("tools/call dispatch", () => {
     expect(payload.outcome.agentMeta?.outcomes).toHaveLength(1)
   })
 
-  it("record_interaction: outcome present but not found returns an outcome:null", async () => {
+  it("record_interaction: a friend that doesn't exist is not_found, with usage or an outcome (#214)", async () => {
     const store = makeStore()
     seedOwner(store)
     start(store)
-    const r = await h.tool("record_interaction", { friendId: "ghost", outcome: { missionId: "m1", result: "success" } })
-    expect((r.payload as { outcome: unknown }).outcome).toBeNull()
+    for (const args of [{ outcome: { missionId: "m1", result: "success" } }, { usage: { output_tokens: 5 } }]) {
+      const r = await h.tool("record_interaction", { friendId: "ghost", ...args })
+      expect(r.isError).toBe(true)
+      expect((r.payload as { status: string }).status).toBe("not_found")
+    }
   })
 
-  it("record_interaction: a malformed outcome string is treated as absent", async () => {
+  it("record_interaction: usage or an outcome that can't be read is invalid and saves nothing (#214)", async () => {
     const store = makeStore()
     const owner = seedOwner(store)
     start(store)
-    const r = await h.tool("record_interaction", { friendId: owner.id, outcome: "{bad json" })
-    expect((r.payload as { status: string }).status).toBe("noop")
+    const bad = [
+      { outcome: "{bad json" },
+      { usage: "{bad json" },
+      { usage: { output_tokens: -3 } },
+      { usage: { output_tokens: "10" } },
+      { usage: { input_tokens: 10 } },
+      { outcome: { missionId: "", result: "success" } },
+      { outcome: { missionId: "m1", result: "great" } },
+      { outcome: ["m1"] },
+    ]
+    for (const args of bad) {
+      const r = await h.tool("record_interaction", { friendId: owner.id, ...args })
+      expect(r.isError, JSON.stringify(args)).toBe(true)
+      expect((r.payload as { status: string }).status, JSON.stringify(args)).toBe("invalid")
+    }
+    const after = await h.tool("get_friend", { friendId: owner.id })
+    expect((after.payload as FriendRecord).totalTokens).toBe(0)
+    expect((after.payload as FriendRecord).agentMeta?.outcomes ?? []).toEqual([])
+  })
+
+  it("record_interaction: zero output tokens says nothing was accumulated (#214)", async () => {
+    const store = makeStore()
+    const owner = seedOwner(store)
+    start(store)
+    const r = await h.tool("record_interaction", { friendId: owner.id, usage: { output_tokens: 0 } })
+    expect(r.isError).toBe(false)
+    expect(r.payload).toMatchObject({ ok: true, status: "recorded", tokensAccumulated: false })
+  })
+
+  it("record_interaction: a friend named rather than given by uuid is recorded (#213)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "friends-mcp-byname-"))
+    try {
+      const store = new FileFriendStore(join(dir, "friends"))
+      const owner = ownerRecord()
+      await store.put(owner.id, owner)
+      start(store)
+      const r = await h.tool("record_interaction", { friendId: owner.name, usage: { output_tokens: 7 } })
+      expect(r.isError).toBe(false)
+      expect(r.payload).toMatchObject({ ok: true, status: "recorded", tokensAccumulated: true })
+      expect((await store.get(owner.id))?.totalTokens).toBe(7)
+      const note = await h.tool("save_note", { friendId: owner.name, type: "note", key: "k", content: "v" })
+      expect(note.isError).toBe(false)
+      expect((await store.get(owner.id))?.notes.k?.value).toBe("v")
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("record_interaction: an outcome for someone who isn't an agent is invalid and saves nothing, since only agent records keep outcomes (#214)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "friends-mcp-outcome-human-"))
+    try {
+      const store = new FileFriendStore(join(dir, "friends"))
+      const owner = ownerRecord()
+      await store.put(owner.id, owner)
+      const agent = { ...ownerRecord(), id: "agent-1", name: "Bot", kind: "agent" as const, role: "stranger", trustLevel: "stranger" as const, externalIds: [] }
+      await store.put(agent.id, agent)
+      start(store)
+      const human = await h.tool("record_interaction", { friendId: owner.id, usage: { output_tokens: 7 }, outcome: { missionId: "m1", result: "success" } })
+      expect(human.isError).toBe(true)
+      expect((human.payload as { status: string }).status).toBe("invalid")
+      expect((await store.get(owner.id))?.totalTokens ?? 0).toBe(owner.totalTokens ?? 0)
+      const bot = await h.tool("record_interaction", { friendId: "Bot", outcome: { missionId: "m1", result: "success" } })
+      expect(bot.isError).toBe(false)
+      expect((await store.get("agent-1"))?.agentMeta?.outcomes?.map((o) => o.missionId)).toEqual(["m1"])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("a name two records share, or no friendId at all, finds no friend and changes nothing (#213 review)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "friends-mcp-byname-twins-"))
+    try {
+      const store = new FileFriendStore(join(dir, "friends"))
+      const carol = (id: string, trustLevel: "stranger" | "family") => ({ ...ownerRecord(), id, name: "Carol", role: trustLevel, trustLevel, externalIds: [] })
+      await store.put("a-carol", carol("a-carol", "stranger"))
+      await store.put("b-carol", carol("b-carol", "family"))
+      await store.put("nameless", { ...ownerRecord(), id: "nameless", name: "", role: "stranger", trustLevel: "stranger", externalIds: [] })
+      start(store)
+      const twin = await h.tool("set_trust", { friendId: "carol", trustLevel: "family" })
+      expect(twin.isError).toBe(true)
+      expect((twin.payload as { status: string }).status).toBe("not_found")
+      const none = await h.tool("set_trust", { trustLevel: "family" })
+      expect((none.payload as { status: string }).status).toBe("not_found")
+      expect((await store.get("a-carol"))?.trustLevel).toBe("stranger")
+      expect((await store.get("nameless"))?.trustLevel).toBe("stranger")
+      expect(await store.get("")).toBeNull()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("set_trust, link_identity and unlink_identity work on a friend named rather than given by uuid, and keep the record (#213)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "friends-mcp-byname-trust-"))
+    try {
+      const store = new FileFriendStore(join(dir, "friends"))
+      const friend = { ...ownerRecord(), id: "carol-1", name: "Carol", role: "acquaintance", trustLevel: "acquaintance" as const, externalIds: [] }
+      await store.put(friend.id, friend)
+      start(store)
+      const trust = await h.tool("set_trust", { friendId: "Carol", trustLevel: "friend" })
+      expect(trust.isError).toBe(false)
+      expect((await store.get("carol-1"))?.trustLevel).toBe("friend")
+      const link = await h.tool("link_identity", { friendId: "Carol", provider: "email-address", externalId: "carol@example.com" })
+      expect(link.isError).toBe(false)
+      // Linking again by name finds no other holder: the record itself is never treated as a duplicate.
+      const again = await h.tool("link_identity", { friendId: "Carol", provider: "email-address", externalId: "carol@example.com" })
+      expect((again.payload as { status: string }).status).toBe("noop")
+      expect(await store.get("carol-1")).not.toBeNull()
+      const unlink = await h.tool("unlink_identity", { friendId: "Carol", provider: "email-address", externalId: "carol@example.com" })
+      expect(unlink.isError).toBe(false)
+      expect((await store.get("carol-1"))?.externalIds).toEqual([])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it("record_interaction: neither usage nor outcome is a noop", async () => {

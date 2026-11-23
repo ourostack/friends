@@ -16,15 +16,17 @@ export interface UsageData {
   total_tokens: number
 }
 
+/** Add a turn's output tokens to the friend's total. Returns whether any were added: false for no output tokens or a
+ * missing friend. */
 export async function accumulateFriendTokens(
   store: FriendStore,
   friendId: string,
   usage?: UsageData,
-): Promise<void> {
-  if (!usage?.output_tokens) return
+): Promise<boolean> {
+  if (!usage?.output_tokens) return false
 
   const record = await store.get(friendId)
-  if (!record) return
+  if (!record) return false
 
   // Only count output tokens (what the model generated for this friend).
   // Input tokens are mostly system prompt re-sent every turn -- counting them
@@ -38,4 +40,5 @@ export async function accumulateFriendTokens(
     message: "tokens accumulated for friend",
     meta: { friendId, outputTokens: usage.output_tokens },
   })
+  return true
 }

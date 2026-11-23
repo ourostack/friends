@@ -55,7 +55,7 @@ export async function recordRelationshipOutcome(
     agentMeta: { ...meta, outcomes, sharedMissions, familiarity },
     updatedAt: now,
   }
-  await store.put(friendId, updated)
+  await store.put(updated.id, updated)
 
   emitNervesEvent({
     component: "friends",

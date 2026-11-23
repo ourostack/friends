@@ -65,7 +65,7 @@ export async function linkExternalId(
       record.externalIds.some(
         (ext) => ext.provider === input.provider && ext.externalId === input.externalId && (ext.tenantId === targetTenant || ext.tenantId === undefined),
       )
-    orphans = (await store.listAll()).filter((record) => record.id !== friendId && sameTenantHolds(record))
+    orphans = (await store.listAll()).filter((record) => record.id !== current.id && sameTenantHolds(record))
     if (orphans.length === 0) {
       return { ok: true, status: "noop", message: "identity already linked", record: current }
     }
@@ -80,7 +80,7 @@ export async function linkExternalId(
       (input.tenantId !== undefined
         ? heldIn(await store.findByExternalId(input.provider, input.externalId, input.tenantId), input.tenantId)
         : null) ?? heldIn(await store.findByExternalId(input.provider, input.externalId), undefined)
-    orphans = orphan && orphan.id !== friendId ? [orphan] : []
+    orphans = orphan && orphan.id !== current.id ? [orphan] : []
   }
 
   // A link never moves authority or identity between different standings. An orphan
@@ -104,12 +104,12 @@ export async function linkExternalId(
         component: "friends",
         event: "friends.identity_link_refused",
         message: "refused to fold an orphan's other ids onto a record that holds authority",
-        meta: { orphanId: orphan.id, targetId: friendId },
+        meta: { orphanId: orphan.id, targetId: current.id },
       })
       return {
         ok: false,
         status: "conflict_requires_operator",
-        message: `external id is held by "${orphan.name}" (${orphan.id}), which carries other external ids; "${current.name}" (${friendId}) holds authority, so those ids cannot be folded onto it without an operator decision`,
+        message: `external id is held by "${orphan.name}" (${orphan.id}), which carries other external ids; "${current.name}" (${current.id}) holds authority, so those ids cannot be folded onto it without an operator decision`,
       }
     }
     if (
@@ -124,12 +124,12 @@ export async function linkExternalId(
         component: "friends",
         event: "friends.identity_link_refused",
         message: "refused to merge a record with a different standing into another record",
-        meta: { orphanId: orphan.id, targetId: friendId },
+        meta: { orphanId: orphan.id, targetId: current.id },
       })
       return {
         ok: false,
         status: "conflict_requires_operator",
-        message: `external id is held by "${orphan.name}" (${orphan.id}), which has a capability profile, delegation grant, active or revoked admission, or a different trust level than "${current.name}" (${friendId}); it cannot be merged without an operator decision`,
+        message: `external id is held by "${orphan.name}" (${orphan.id}), which has a capability profile, delegation grant, active or revoked admission, or a different trust level than "${current.name}" (${current.id}); it cannot be merged without an operator decision`,
       }
     }
   }
@@ -155,7 +155,7 @@ export async function linkExternalId(
   // The target keeps its own trust. Write the merged target BEFORE deleting the
   // orphans, so a failure between the two steps leaves both records, not neither.
   const updated: FriendRecord = { ...current, externalIds: mergedIds, notes: mergedNotes, updatedAt: now }
-  await store.put(friendId, updated)
+  await store.put(updated.id, updated)
   for (const orphan of orphans) await store.delete(orphan.id)
 
   return { ok: true, status: orphans.length > 0 ? "merged" : "linked", record: updated }
@@ -194,9 +194,9 @@ export async function unlinkExternalId(
   // Drop the claim-journal entry first: if the record write then fails, the id is
   // still on the record and a retry works; the reverse order lets the journal
   // bring the id back on the next read.
-  await store.releaseExternalId?.(friendId, current.externalIds[idx])
+  await store.releaseExternalId?.(current.id, current.externalIds[idx])
   const updated: FriendRecord = { ...current, externalIds: filtered, updatedAt: new Date().toISOString() }
-  await store.put(friendId, updated)
+  await store.put(updated.id, updated)
 
   return { ok: true, status: "unlinked", record: updated }
 }

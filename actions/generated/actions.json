@@ -60,7 +60,7 @@
       "errors": [
         {
           "code": "not-found",
-          "means": "No friend record has that uuid or name, so there is no trust to explain.",
+          "means": "No friend record has that uuid or name, or two share the name, so there is no trust to explain.",
           "fix": "Call list_friends to find the record, then describe its trust by uuid or name."
         },
         {
@@ -100,7 +100,7 @@
       "errors": [
         {
           "code": "not-found",
-          "means": "No friend record has that uuid or name, so there is no track record to tally.",
+          "means": "No friend record has that uuid or name, or two share the name, so there is no track record to tally.",
           "fix": "Call list_friends with kind agent to find the peer, then assess it by id."
         },
         {
@@ -129,7 +129,7 @@
       "errors": [
         {
           "code": "not-found",
-          "means": "No friend record has that uuid or name, so there is no standing to explain.",
+          "means": "No friend record has that uuid or name, or two share the name, so there is no standing to explain.",
           "fix": "Call list_friends with kind agent to find the peer, then explain its standing by id."
         },
         {
@@ -229,7 +229,7 @@
         },
         {
           "code": "not-found",
-          "means": "No friend record has that uuid or name, so nothing was saved.",
+          "means": "No friend record has that uuid or name, or two share the name, so nothing was saved.",
           "fix": "Call resolve_party or list_friends to find the record, then save the note with its uuid."
         },
         {
@@ -239,8 +239,8 @@
         },
         {
           "code": "error",
-          "means": "The store could not write the record; it can't when friendId is a name rather than a uuid, and the message says why.",
-          "fix": "Call again with the friend's uuid from get_friend; if that fails too, check that the friends directory is writable."
+          "means": "The store could not write the record; the message says why.",
+          "fix": "Check that the friends directory is writable, then save the note again."
         }
       ],
       "openInput": true,
@@ -297,6 +297,24 @@
       "label": "Record interaction",
       "description": "Record a turn with a friend: token usage and any shared-mission outcome.",
       "agent": "Record a turn with a friend: accumulate token usage and/or append a shared-mission outcome (bumping familiarity).",
+      "when": "After a turn with someone: add the tokens it took to their total, or note how a mission you shared with them went",
+      "errors": [
+        {
+          "code": "invalid",
+          "means": "Usage lacks a whole output_tokens of 0 or more, the outcome lacks a missionId or a result of success, partial or failed, or isn't for an agent; nothing saved.",
+          "fix": "Pass usage as { output_tokens: <whole number> }, and an outcome { missionId, result: success, partial or failed } only for an agent record."
+        },
+        {
+          "code": "not-found",
+          "means": "No friend record has that uuid or name, or two share the name, so nothing was saved.",
+          "fix": "Call resolve_party or list_friends to find the record, then record the turn with its uuid or name."
+        },
+        {
+          "code": "tool-failed",
+          "means": "The friend's record could not be read or written; the message says why, and usage may already be counted when the outcome write failed.",
+          "fix": "Call get_friend to see what was saved, check that the friends directory is writable, then record only what is missing."
+        }
+      ],
       "openInput": true,
       "input": {
         "friendId": {
@@ -434,7 +452,7 @@
       "errors": [
         {
           "code": "not-found",
-          "means": "No friend record has that uuid or name, so nothing was unlinked.",
+          "means": "No friend record has that uuid or name, or two share the name, so nothing was unlinked.",
           "fix": "Call list_friends to find the record, then unlink the identity from it by uuid."
         },
         {
@@ -444,8 +462,8 @@
         },
         {
           "code": "tool-failed",
-          "means": "The record could not be written; it can't when friendId is a name rather than a uuid, and the message says why.",
-          "fix": "Call again with the friend's uuid from list_friends; if that fails too, check that the friends directory is writable."
+          "means": "The record could not be written; the message says why.",
+          "fix": "Check that the friends directory is writable, then unlink again."
         }
       ],
       "openInput": true,
@@ -646,7 +664,7 @@
         },
         {
           "code": "not-found",
-          "means": "No friend record has that uuid or name, or its file can't be read, so there is nothing to share.",
+          "means": "No friend record has that uuid or name, or two share the name, or its file can't be read, so there is nothing to share.",
           "fix": "Call list_friends to find the record, then share it by uuid."
         },
         {

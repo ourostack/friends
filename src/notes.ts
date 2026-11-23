@@ -50,7 +50,7 @@ export async function applyFriendNote(
 
     if (type === "name") {
       const updated: FriendRecord = { ...record, name: content, updatedAt: now }
-      await store.put(friendId, updated)
+      await store.put(updated.id, updated)
       return { ok: true, status: "saved", record: updated }
     }
 
@@ -68,7 +68,7 @@ export async function applyFriendNote(
         toolPreferences: { ...record.toolPreferences, [key!]: content },
         updatedAt: now,
       }
-      await store.put(friendId, updated)
+      await store.put(updated.id, updated)
       return { ok: true, status: "saved", record: updated }
     }
 
@@ -76,7 +76,7 @@ export async function applyFriendNote(
     // Redirect a "name" key to the name field rather than storing it as a note.
     if (key === "name") {
       const updated: FriendRecord = { ...record, name: content, updatedAt: now }
-      await store.put(friendId, updated)
+      await store.put(updated.id, updated)
       return { ok: true, status: "redirected_to_name", record: updated }
     }
 
@@ -96,7 +96,7 @@ export async function applyFriendNote(
       },
       updatedAt: now,
     }
-    await store.put(friendId, updated)
+    await store.put(updated.id, updated)
     return { ok: true, status: "saved", record: updated }
   } catch (err) {
     return {

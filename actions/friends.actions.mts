@@ -35,7 +35,7 @@ export default defineActions(
       agent: "Explain the trust context for a friend: level, basis (direct/shared_group/unknown), what it permits and constrains.",
       when: "Deciding how openly to talk with someone: their trust level, its basis, and what that level permits",
       errors: [
-        { code: "not-found", means: "No friend record has that uuid or name, so there is no trust to explain.", fix: "Call list_friends to find the record, then describe its trust by uuid or name." },
+        { code: "not-found", means: "No friend record has that uuid or name, or two share the name, so there is no trust to explain.", fix: "Call list_friends to find the record, then describe its trust by uuid or name." },
         { code: "tool-failed", means: "The record's file could not be read or parsed when looked up by uuid; the message says why.", fix: "Check the file the message names in the friends directory, then describe the trust again." },
       ],
       openInput: true,
@@ -54,7 +54,7 @@ export default defineActions(
       agent: "Assess a peer's earned standing from your FIRST-PARTY outcomes with them: a tier (proven/reliable/mixed/untested/troubled), the basis count, and the tally. Advisory only: it changes no trust and is not shared. Returns a Standing, or { ok:false, status:'not_found' } when the friend is missing.",
       when: "Weighing a peer's track record as data: a tier and tally from this agent's own past outcomes with them",
       errors: [
-        { code: "not-found", means: "No friend record has that uuid or name, so there is no track record to tally.", fix: "Call list_friends with kind agent to find the peer, then assess it by id." },
+        { code: "not-found", means: "No friend record has that uuid or name, or two share the name, so there is no track record to tally.", fix: "Call list_friends with kind agent to find the peer, then assess it by id." },
         { code: "tool-failed", means: "The peer's record file could not be read or parsed when looked up by uuid; the message says why.", fix: "Check the file the message names in the friends directory, then assess the standing again." },
       ],
       openInput: true,
@@ -71,7 +71,7 @@ export default defineActions(
       agent: "Explain a peer's earned standing in words: the tier with a human summary, why, and advisory notes that frame it as input to a MANUAL trust decision (not an instruction to change trust). Returns a StandingExplanation, or { ok:false, status:'not_found' } when the friend is missing.",
       when: "Putting a peer's track record to a person in words, as input to their own manual call on trust",
       errors: [
-        { code: "not-found", means: "No friend record has that uuid or name, so there is no standing to explain.", fix: "Call list_friends with kind agent to find the peer, then explain its standing by id." },
+        { code: "not-found", means: "No friend record has that uuid or name, or two share the name, so there is no standing to explain.", fix: "Call list_friends with kind agent to find the peer, then explain its standing by id." },
         { code: "tool-failed", means: "The peer's record file, or its outcomes, could not be read when looked up by uuid; the message says why.", fix: "Check the file the message names in the friends directory, then explain the standing again." },
       ],
       openInput: true,
@@ -124,9 +124,9 @@ export default defineActions(
       when: "Remembering something about someone: what to call them, which tool they prefer, or a keyed note",
       errors: [
         { code: "invalid", means: "The type is not name, tool_preference or note, the content is empty, or a tool_preference or note has no key.", fix: "Pass type name, tool_preference or note, a content value, and a key for tool_preference or note." },
-        { code: "not-found", means: "No friend record has that uuid or name, so nothing was saved.", fix: "Call resolve_party or list_friends to find the record, then save the note with its uuid." },
+        { code: "not-found", means: "No friend record has that uuid or name, or two share the name, so nothing was saved.", fix: "Call resolve_party or list_friends to find the record, then save the note with its uuid." },
         { code: "override-required", means: "A value is already saved under that key; the message shows it, and nothing changed.", fix: "Call again with override 'true' to replace it, or save it under another key." },
-        { code: "error", means: "The store could not write the record; it can't when friendId is a name rather than a uuid, and the message says why.", fix: "Call again with the friend's uuid from get_friend; if that fails too, check that the friends directory is writable." },
+        { code: "error", means: "The store could not write the record; the message says why.", fix: "Check that the friends directory is writable, then save the note again." },
       ],
       openInput: true,
       input: {
@@ -145,6 +145,12 @@ export default defineActions(
       label: "Record interaction",
       description: "Record a turn with a friend: token usage and any shared-mission outcome.",
       agent: "Record a turn with a friend: accumulate token usage and/or append a shared-mission outcome (bumping familiarity).",
+      when: "After a turn with someone: add the tokens it took to their total, or note how a mission you shared with them went",
+      errors: [
+        { code: "invalid", means: "Usage lacks a whole output_tokens of 0 or more, the outcome lacks a missionId or a result of success, partial or failed, or isn't for an agent; nothing saved.", fix: "Pass usage as { output_tokens: <whole number> }, and an outcome { missionId, result: success, partial or failed } only for an agent record." },
+        { code: "not-found", means: "No friend record has that uuid or name, or two share the name, so nothing was saved.", fix: "Call resolve_party or list_friends to find the record, then record the turn with its uuid or name." },
+        { code: "tool-failed", means: "The friend's record could not be read or written; the message says why, and usage may already be counted when the outcome write failed.", fix: "Call get_friend to see what was saved, check that the friends directory is writable, then record only what is missing." },
+      ],
       openInput: true,
       input: {
         friendId: field.string({ label: "Friend", description: "friend uuid or name" }),
@@ -209,9 +215,9 @@ export default defineActions(
       agent: "Remove an external identity from a friend.",
       when: "An external id was attached to the wrong person: detach that one provider id from their record",
       errors: [
-        { code: "not-found", means: "No friend record has that uuid or name, so nothing was unlinked.", fix: "Call list_friends to find the record, then unlink the identity from it by uuid." },
+        { code: "not-found", means: "No friend record has that uuid or name, or two share the name, so nothing was unlinked.", fix: "Call list_friends to find the record, then unlink the identity from it by uuid." },
         { code: "noop", means: "The record has no identity with that provider and external id, so nothing changed.", fix: "Call get_friend to see the record's linked identities, then unlink one of those." },
-        { code: "tool-failed", means: "The record could not be written; it can't when friendId is a name rather than a uuid, and the message says why.", fix: "Call again with the friend's uuid from list_friends; if that fails too, check that the friends directory is writable." },
+        { code: "tool-failed", means: "The record could not be written; the message says why.", fix: "Check that the friends directory is writable, then unlink again." },
       ],
       openInput: true,
       input: {
@@ -307,7 +313,7 @@ export default defineActions(
       errors: [
         { code: "unsupported", means: "The host built this server without a grant store, so it can't check consent and share; friends-mcp --dir always wires one.", fix: "Construct the server with a grant store (or run friends-mcp --dir <path>), then check consent and share again." },
         { code: "invalid", means: "The scope is not a share scope friends knows, so nothing was prepared.", fix: "Pass scope name, identity, notes:safe, notes:all or outcomes." },
-        { code: "not-found", means: "No friend record has that uuid or name, or its file can't be read, so there is nothing to share.", fix: "Call list_friends to find the record, then share it by uuid." },
+        { code: "not-found", means: "No friend record has that uuid or name, or two share the name, or its file can't be read, so there is nothing to share.", fix: "Call list_friends to find the record, then share it by uuid." },
         { code: "no-consent", means: "The consent policy refuses this scope to that recipient: name needs trust of friend or above, identity needs family or a grant, and the notes and outcomes scopes need a grant.", fix: "Ask the owner to grant_share the scope with the friend's uuid as subjectKey and this toAgentId; a grant can't unlock name, which needs a friend." },
         { code: "tool-failed", means: "A friend record or the grant store threw while the share was built; the message says why.", fix: "Check the file or folder the message names in the friends directory, then share the profile again." },
       ],
