@@ -137,8 +137,8 @@ export { upsertGroupContextParticipants } from "./group-context"
 export { accumulateFriendTokens } from "./tokens"
 
 export { applyFriendNote } from "./notes"
-export { prepareMessage, receiveMessage, MAX_MESSAGE_TEXT_CHARS, MAX_CONVERSATION_ID_CHARS } from "./message"
-export type { MessageEnvelope, ReceivedMessage, PrepareMessageInput, PrepareMessageResult, ReceiveMessageInput, ReceiveMessageOptions, ReceiveMessageResult } from "./message"
+export { prepareMessage, receiveMessage, isApprovalAnswer, MAX_MESSAGE_TEXT_CHARS, MAX_CONVERSATION_ID_CHARS } from "./message"
+export type { ApprovalAnswer, ApprovalDecision, MessageEnvelope, ReceivedMessage, PrepareMessageInput, PrepareMessageResult, ReceiveMessageInput, ReceiveMessageOptions, ReceiveMessageResult } from "./message"
 
 export { checkPinnedDelegationGrant } from "./delegation-grant"
 export type { PinnedDelegationGrant, PinnedDelegationGrantCheck } from "./delegation-grant"

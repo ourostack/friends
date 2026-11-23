@@ -111,6 +111,8 @@ export type ReceiveShareResult =
         | "stale_envelope"
         | "stale_delegation"
         | "unbound_delegation"
+        | "stale_approval_answer"
+        | "unbound_approval_answer"
         | "unbound_envelope"
         | "import_failed"
     }

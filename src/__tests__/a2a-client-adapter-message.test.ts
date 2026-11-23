@@ -106,6 +106,20 @@ describe("receiveShare — direct agent messages", () => {
     })
   })
 
+  it("carries a signed approval answer through the seal, out of sight of the wire", async () => {
+    const { sodium, a, b } = await twoAgents()
+    const approvalAnswer = { relayToken: "q2Vx9mF0bS1yZWxheS10b2tlbi1mb3ItdGVzdHMtMDE", decision: "deny" as const }
+    const prepared = prepareMessage({ fromAgentId: a.did, text: "approval answer", approvalAnswer, now: () => NOW })
+    if (!prepared.ok) throw new Error(prepared.status)
+    const wire = await sendFromA(sodium, a, b, prepared.envelope as unknown as Record<string, unknown>)
+    expect(JSON.stringify(wire)).not.toContain(approvalAnswer.relayToken)
+    const r = await receiveAt(sodium, b, wire, "family")
+    expect(r).toEqual({
+      state: "completed", friendsKind: "message", status: "received", bound: true, bindingId: expect.any(String),
+      message: { fromAgentId: a.did, text: "approval answer", approvalAnswer, issuedAt: NOW },
+    })
+  })
+
   it("rejects a replay of the same sealed message", async () => {
     const { sodium, a, b } = await twoAgents()
     const wire = await sendFromA(sodium, a, b, messageFrom(a))

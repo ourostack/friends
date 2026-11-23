@@ -3,9 +3,9 @@ import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
 const root = fileURLToPath(new URL("../..", import.meta.url))
-const expectedVersion = "0.1.0-alpha.29"
+const expectedVersion = "0.1.0-alpha.30"
 const expectedChanges = [
-  "channel_caps answers unknown_channel, listing the channels friends knows, for a channel it has no capabilities for; a typo used to answer the defaults as if they were a real channel's, and a name like toString answered something that wasn't capabilities at all. The library exports isKnownChannel and knownChannels, and getChannelCapabilities gives the defaults for such a name. channel_caps now has an Ouro AX card."
+  "A message can carry a signed approval answer, approvalAnswer { relayToken, decision }, where the only decision this version accepts is deny; a receiver refuses any other as malformed. It is held to the delegated rules (bound, at most 10 minutes old), refused alongside onBehalfOf, refused on any kind but message, and refused by receiveMessage when no verifier, or the TOFU one, is given."
 ]
 
 describe("release metadata", () => {

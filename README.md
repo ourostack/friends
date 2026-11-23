@@ -124,10 +124,23 @@ Because it is signed, a recipient who opens a message cannot re-seal the same si
 third party, and a relabelled kind fails. `receiveShare` (and `checkEnvelopeBinding`, for hosts with
 their own receive path) rejects with `signed_recipient_mismatch`, `signed_kind_mismatch`,
 `malformed_binding` or `replayed` (same `mid:<sender>:<id>`). Every envelope must also be fresh:
-`issuedAt` (ISO-8601 with a zone) at most 7 days old, and an envelope carrying `onBehalfOf` at most
-10 minutes old (`stale_envelope` / `stale_delegation`), with 2 minutes of clock skew allowed. An
-envelope with no `binding` (an older sender) is accepted with `bound: false` unless it is a
-delegated command (`unbound_delegation`) or the host sets `rejectUnboundEnvelopes` (`unbound_envelope`).
+`issuedAt` (ISO-8601 with a zone) at most 7 days old, and an envelope carrying `onBehalfOf` or
+`approvalAnswer` at most 10 minutes old (`stale_envelope` / `stale_delegation` /
+`stale_approval_answer`), with 2 minutes of clock skew allowed. An envelope with no `binding` (an
+older sender) is accepted with `bound: false` unless it is a delegated command
+(`unbound_delegation`), an approval answer (`unbound_approval_answer`) or the host sets
+`rejectUnboundEnvelopes` (`unbound_envelope`).
+
+**Approval answers.** A message may carry a signed `approvalAnswer: { relayToken, decision }`, where
+`relayToken` is 16 to 128 base64url characters and `decision` is `deny`, the only decision this
+version accepts: a receiver refuses any other as malformed, so allowing `approve` takes a new
+release. It is signed with the text, so a relay can neither add, strip nor change it, and it claims
+nothing on its own: the recipient matches the token against an approval it routed to that sender.
+`prepareMessage` refuses a malformed answer, or one combined with `onBehalfOf`, as
+`invalid_approval_answer`; `receiveMessage` refuses the same as `malformed_message`, and refuses
+any answer as `untrusted_source` when it is given no verifier or `tofuVerifier` (neither checks a signature).
+`checkEnvelopeBinding` refuses an answer on any kind but `message` as `malformed_binding`. Only
+harness code should set it, never a model-facing tool.
 A completed result carries the signed `bindingId`. `checkEnvelopeBinding` is check-only: a host
 with its own receive path must hold an in-memory claim across its own awaits, and mark the returned
 `seenKey` (and its blob key) in the ledger only after the signature verifies. `receiveShare` does

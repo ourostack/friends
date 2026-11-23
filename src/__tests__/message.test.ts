@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import { MAX_CONVERSATION_ID_CHARS, MAX_MESSAGE_TEXT_CHARS, prepareMessage, receiveMessage } from "../message"
-import type { AgentVerifier } from "../verifier"
+import { tofuVerifier, type AgentVerifier } from "../verifier"
 
 const NOW = "2026-09-24T05:00:00.000Z"
 const A = "did:key:z6MkSender"
@@ -30,6 +30,34 @@ describe("prepareMessage", () => {
 
   it("rejects an unknown delegation marker", () => {
     expect(prepareMessage({ fromAgentId: A, text: "hi", onBehalfOf: "someone" as unknown as "principal" })).toEqual({ ok: false, status: "invalid_delegation" })
+  })
+
+  const TOKEN = "q2Vx9mF0bS1yZWxheS10b2tlbi1mb3ItdGVzdHMtMDE"
+
+  it("carries a signed approval answer only when asked", () => {
+    const r = prepareMessage({ fromAgentId: A, text: "approval answer", approvalAnswer: { relayToken: TOKEN, decision: "deny" }, now: () => NOW })
+    expect(r).toEqual({ ok: true, envelope: { fromAgentId: A, text: "approval answer", approvalAnswer: { relayToken: TOKEN, decision: "deny" }, issuedAt: NOW } })
+    const plain = prepareMessage({ fromAgentId: A, text: "hi", now: () => NOW })
+    expect(plain.ok && Object.hasOwn(plain.envelope, "approvalAnswer")).toBe(false)
+  })
+
+  it.each([
+    [{ relayToken: TOKEN, decision: "maybe" }],
+    [{ relayToken: TOKEN, decision: "approve" }],
+    [{ relayToken: "short", decision: "deny" }],
+    [{ relayToken: `${TOKEN}+/`, decision: "deny" }],
+    [{ relayToken: "a".repeat(129), decision: "deny" }],
+    [{ relayToken: TOKEN, decision: "deny", extra: 1 }],
+    [{ decision: "deny" }],
+    [null],
+    ["deny"],
+  ])("rejects approval answer %j", (approvalAnswer) => {
+    expect(prepareMessage({ fromAgentId: A, text: "hi", approvalAnswer: approvalAnswer as never })).toEqual({ ok: false, status: "invalid_approval_answer" })
+  })
+
+  it("refuses an approval answer that is also a delegated command", () => {
+    expect(prepareMessage({ fromAgentId: A, text: "hi", onBehalfOf: "principal", approvalAnswer: { relayToken: TOKEN, decision: "deny" } }))
+      .toEqual({ ok: false, status: "invalid_approval_answer" })
   })
 
   it("defaults issuedAt to the current time", () => {
@@ -73,6 +101,39 @@ describe("receiveMessage", () => {
 
   it.each([["someone"], [true], [null], [""]])("treats delegation marker %j as malformed", (marker) => {
     expect(receiveMessage({ envelope: envelope({ onBehalfOf: marker }), fromAgentId: A, trustOfSource: "family" }, { verifier: accept }))
+      .toEqual({ ok: false, status: "malformed_message" })
+  })
+
+  it("returns a signed approval answer", () => {
+    const answer = { relayToken: "q2Vx9mF0bS1yZWxheS10b2tlbi1mb3ItdGVzdHMtMDE", decision: "deny" }
+    const r = receiveMessage({ envelope: envelope({ approvalAnswer: answer }), fromAgentId: A, trustOfSource: "family" }, { verifier: accept })
+    expect(r).toEqual({ ok: true, status: "received", message: { fromAgentId: A, text: "status?", approvalAnswer: answer, issuedAt: NOW } })
+  })
+
+  it.each([
+    [{ relayToken: "q2Vx9mF0bS1yZWxheS10b2tlbi1mb3ItdGVzdHMtMDE", decision: "maybe" }],
+    [{ relayToken: "q2Vx9mF0bS1yZWxheS10b2tlbi1mb3ItdGVzdHMtMDE", decision: "approve" }],
+    [{ relayToken: "x", decision: "deny" }],
+    [{ relayToken: "q2Vx9mF0bS1yZWxheS10b2tlbi1mb3ItdGVzdHMtMDE", decision: "deny", more: true }],
+    [[]],
+    [null],
+  ])("treats approval answer %j as malformed", (approvalAnswer) => {
+    expect(receiveMessage({ envelope: envelope({ approvalAnswer }), fromAgentId: A, trustOfSource: "family" }, { verifier: accept }))
+      .toEqual({ ok: false, status: "malformed_message" })
+  })
+
+  it("refuses an approval answer with no verifier or the TOFU one, since neither checks a signature", () => {
+    const approvalAnswer = { relayToken: "q2Vx9mF0bS1yZWxheS10b2tlbi1mb3ItdGVzdHMtMDE", decision: "deny" }
+    expect(receiveMessage({ envelope: envelope({ approvalAnswer }), fromAgentId: A, trustOfSource: "family" }))
+      .toEqual({ ok: false, status: "untrusted_source" })
+    expect(receiveMessage({ envelope: envelope({ approvalAnswer }), fromAgentId: A, trustOfSource: "family" }, { verifier: tofuVerifier }))
+      .toEqual({ ok: false, status: "untrusted_source" })
+    expect(receiveMessage({ envelope: envelope(), fromAgentId: A, trustOfSource: "family" }).ok).toBe(true)
+  })
+
+  it("treats an envelope carrying both markers as malformed", () => {
+    const approvalAnswer = { relayToken: "q2Vx9mF0bS1yZWxheS10b2tlbi1mb3ItdGVzdHMtMDE", decision: "deny" }
+    expect(receiveMessage({ envelope: envelope({ approvalAnswer, onBehalfOf: "principal" }), fromAgentId: A, trustOfSource: "family" }, { verifier: accept }))
       .toEqual({ ok: false, status: "malformed_message" })
   })
 
