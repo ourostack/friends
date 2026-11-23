@@ -326,6 +326,15 @@ describe("checkEnvelopeBinding", () => {
     expect(check(delegated(11 * 60_000))).toEqual({ ok: false, reason: "stale_delegation" })
   })
 
+  it("uses the short window for any kind carrying an approval answer", () => {
+    const approvalAnswer = { relayToken: "q2Vx9mF0bS1yZWxheS10b2tlbi1mb3ItdGVzdHMtMDE", decision: "deny" }
+    const answer = (ms: number) => opened(bound({ approvalAnswer, issuedAt: new Date(NOW_MS - ms).toISOString() }))
+    expect(check(answer(5 * 60_000))).toEqual({ ok: true, bound: true, bindingId: ID, seenKey: `mid:did:key:sender:${ID}` })
+    expect(check(answer(11 * 60_000))).toEqual({ ok: false, reason: "stale_approval_answer" })
+    expect(check(answer(11 * 60_000), { delegatedMaxAgeMs: 20 * 60_000 })).toEqual({ ok: true, bound: true, bindingId: ID, seenKey: `mid:did:key:sender:${ID}` })
+    expect(check(opened({ approvalAnswer, issuedAt: new Date(NOW_MS).toISOString() }))).toEqual({ ok: false, reason: "unbound_approval_answer" })
+  })
+
   it("rejects a binding with extra keys", () => {
     expect(check(opened(bound({}, { extra: "x" })))).toEqual({ ok: false, reason: "malformed_binding" })
   })

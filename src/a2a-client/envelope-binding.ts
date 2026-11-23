@@ -37,7 +37,7 @@ export interface EnvelopeBindingOptions {
   rejectUnboundEnvelopes?: boolean
   /** Max envelope age for any kind. Default 7 days. */
   maxAgeMs?: number
-  /** Max envelope age when the envelope carries `onBehalfOf`. Default 10 minutes. */
+  /** Max envelope age when the envelope carries `onBehalfOf` or `approvalAnswer`. Default 10 minutes. */
   delegatedMaxAgeMs?: number
   /** Max time an envelope's `issuedAt` may be ahead of the clock. Default 2 minutes. */
   maxFutureSkewMs?: number
@@ -60,6 +60,8 @@ export type EnvelopeBindingRejection =
   | "stale_envelope"
   | "stale_delegation"
   | "unbound_delegation"
+  | "stale_approval_answer"
+  | "unbound_approval_answer"
   | "unbound_envelope"
   | "replayed"
 
@@ -95,13 +97,14 @@ export function assertValidBindingOptions(options: EnvelopeBindingOptions): void
 export function checkEnvelopeBinding(opened: OpenedEnvelope, input: CheckEnvelopeBindingInput): EnvelopeBindingResult {
   assertValidBindingOptions(input)
   const envelope = opened.envelope
-  const delegated = envelope.onBehalfOf !== undefined
+  // An approval answer is held to the delegated rules: it must be bound, and fresh within the short window.
+  const marker: Marker = envelope.onBehalfOf !== undefined ? "delegation" : envelope.approvalAnswer !== undefined ? "approval_answer" : null
   const binding = envelope.binding
 
   if (binding === undefined) {
-    if (delegated) return { ok: false, reason: "unbound_delegation" }
+    if (marker) return { ok: false, reason: `unbound_${marker}` }
     if (input.rejectUnboundEnvelopes === true) return { ok: false, reason: "unbound_envelope" }
-    const fresh = checkFreshness(envelope, delegated, input)
+    const fresh = checkFreshness(envelope, marker, input)
     return fresh ?? { ok: true, bound: false }
   }
 
@@ -115,7 +118,7 @@ export function checkEnvelopeBinding(opened: OpenedEnvelope, input: CheckEnvelop
   if (b.to !== input.recipientDid) return { ok: false, reason: "signed_recipient_mismatch" }
   if (b.kind !== opened.friendsKind) return { ok: false, reason: "signed_kind_mismatch" }
 
-  const stale = checkFreshness(envelope, delegated, input)
+  const stale = checkFreshness(envelope, marker, input)
   if (stale) return stale
 
   const key = `mid:${opened.fromAgentId}:${b.id}`
@@ -123,16 +126,19 @@ export function checkEnvelopeBinding(opened: OpenedEnvelope, input: CheckEnvelop
   return { ok: true, bound: true, bindingId: b.id, seenKey: key }
 }
 
+/** Which short-window marker a signed envelope carries, if any. */
+type Marker = "delegation" | "approval_answer" | null
+
 function checkFreshness(
   envelope: Record<string, unknown>,
-  delegated: boolean,
+  marker: Marker,
   input: CheckEnvelopeBindingInput,
-): { ok: false; reason: "stale_envelope" | "stale_delegation" } | null {
-  const reason = delegated ? "stale_delegation" : "stale_envelope"
+): { ok: false; reason: "stale_envelope" | "stale_delegation" | "stale_approval_answer" } | null {
+  const reason = marker ? (`stale_${marker}` as const) : "stale_envelope"
   const issuedAt = typeof envelope.issuedAt === "string" && ISO_WITH_ZONE.test(envelope.issuedAt) ? Date.parse(envelope.issuedAt) : Number.NaN
   if (!Number.isFinite(issuedAt)) return { ok: false, reason }
   const now = input.now === undefined ? Date.now() : typeof input.now === "number" ? input.now : input.now.getTime()
-  const maxAge = delegated ? (input.delegatedMaxAgeMs ?? DEFAULT_DELEGATED_MAX_AGE_MS) : (input.maxAgeMs ?? DEFAULT_MAX_AGE_MS)
+  const maxAge = marker ? (input.delegatedMaxAgeMs ?? DEFAULT_DELEGATED_MAX_AGE_MS) : (input.maxAgeMs ?? DEFAULT_MAX_AGE_MS)
   const maxFuture = input.maxFutureSkewMs ?? DEFAULT_MAX_FUTURE_SKEW_MS
   if (now - issuedAt > maxAge || issuedAt - now > maxFuture) return { ok: false, reason }
   return null

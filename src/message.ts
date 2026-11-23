@@ -23,6 +23,28 @@ export const MAX_MESSAGE_TEXT_CHARS = 16_000
 /** A sender-chosen thread id (e.g. an A2A contextId) is an opaque short token. */
 export const MAX_CONVERSATION_ID_CHARS = 256
 
+/** A sender's signed answer to an approval its peer routed to it (see `ApprovalAnswer`). */
+export type ApprovalDecision = "approve" | "deny"
+/** The relay token is a base64url MAC the approving agent computed; 16 to 128 characters. */
+const RELAY_TOKEN = /^[A-Za-z0-9_-]{16,128}$/
+
+/** Signed with the text, so a relay can neither add, strip nor change it. It claims nothing
+ * on its own: the recipient matches `relayToken` against an approval it routed to this
+ * sender, and decides whether it honours `decision` at all. Never set from model input. */
+export interface ApprovalAnswer {
+  relayToken: string
+  decision: ApprovalDecision
+}
+
+/** True only for exactly `{ relayToken, decision }` with a well-formed token and a known decision. */
+export function isApprovalAnswer(value: unknown): value is ApprovalAnswer {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
+  const v = value as Record<string, unknown>
+  return Object.keys(v).sort().join(",") === "decision,relayToken"
+    && typeof v.relayToken === "string" && RELAY_TOKEN.test(v.relayToken)
+    && (v.decision === "approve" || v.decision === "deny")
+}
+
 const TRUST_RANK: Record<TrustLevel, number> = { family: 4, friend: 3, acquaintance: 2, stranger: 1 }
 
 /** The cross-agent message envelope. Names the sender by its join-key agentId (DID). */
@@ -38,6 +60,8 @@ export interface MessageEnvelope {
    * It claims nothing on its own: the recipient honours it only for a sender its own
    * friend record explicitly grants delegation to. */
   onBehalfOf?: "principal"
+  /** A signed answer to an approval the recipient routed to this sender. Never set with `onBehalfOf`. */
+  approvalAnswer?: ApprovalAnswer
   /** Opaque, verifier-specific proof slot (stamped by `sealEnvelope`). */
   proof?: string
   issuedAt: string
@@ -50,6 +74,8 @@ export interface ReceivedMessage {
   conversationId?: string
   /** Present only when the signed envelope carried the delegation marker. */
   onBehalfOf?: "principal"
+  /** Present only when the signed envelope carried an approval answer. */
+  approvalAnswer?: ApprovalAnswer
   issuedAt: string
 }
 
@@ -60,12 +86,14 @@ export interface PrepareMessageInput {
   conversationId?: string
   /** Mark the message as a command relayed from this agent's principal. */
   onBehalfOf?: "principal"
+  /** Answer an approval the recipient routed to this agent. Set only by harness code, never from model input. */
+  approvalAnswer?: ApprovalAnswer
   now?: () => string
 }
 
 export type PrepareMessageResult =
   | { ok: true; envelope: MessageEnvelope }
-  | { ok: false; status: "empty_text" | "text_too_long" | "invalid_conversation_id" | "invalid_sender" | "invalid_delegation" }
+  | { ok: false; status: "empty_text" | "text_too_long" | "invalid_conversation_id" | "invalid_sender" | "invalid_delegation" | "invalid_approval_answer" }
 
 /** Producer half: build an unsigned message envelope (sealing signs it). */
 export function prepareMessage(input: PrepareMessageInput): PrepareMessageResult {
@@ -76,11 +104,15 @@ export function prepareMessage(input: PrepareMessageInput): PrepareMessageResult
     return { ok: false, status: "invalid_conversation_id" }
   }
   if (input.onBehalfOf !== undefined && input.onBehalfOf !== "principal") return { ok: false, status: "invalid_delegation" }
+  if (input.approvalAnswer !== undefined && (!isApprovalAnswer(input.approvalAnswer) || input.onBehalfOf !== undefined)) {
+    return { ok: false, status: "invalid_approval_answer" }
+  }
   const envelope: MessageEnvelope = {
     fromAgentId: input.fromAgentId,
     text: input.text,
     ...(input.conversationId !== undefined ? { conversationId: input.conversationId } : {}),
     ...(input.onBehalfOf !== undefined ? { onBehalfOf: input.onBehalfOf } : {}),
+    ...(input.approvalAnswer !== undefined ? { approvalAnswer: { relayToken: input.approvalAnswer.relayToken, decision: input.approvalAnswer.decision } } : {}),
     issuedAt: (input.now ?? (() => new Date().toISOString()))(),
   }
   return { ok: true, envelope }
@@ -114,12 +146,14 @@ export function receiveMessage(input: ReceiveMessageInput, options: ReceiveMessa
   const conversationId = envelope.conversationId
   const issuedAt = envelope.issuedAt
   const onBehalfOf = envelope.onBehalfOf
+  const approvalAnswer = envelope.approvalAnswer
   if (
     envelope.fromAgentId !== input.fromAgentId
     || typeof text !== "string" || text.trim() === "" || text.length > MAX_MESSAGE_TEXT_CHARS
     || typeof issuedAt !== "string" || Number.isNaN(Date.parse(issuedAt))
     || (conversationId !== undefined && !validConversationId(conversationId))
     || (onBehalfOf !== undefined && onBehalfOf !== "principal")
+    || (approvalAnswer !== undefined && (!isApprovalAnswer(approvalAnswer) || onBehalfOf !== undefined))
   ) {
     return { ok: false, status: "malformed_message" }
   }
@@ -153,6 +187,7 @@ export function receiveMessage(input: ReceiveMessageInput, options: ReceiveMessa
       text,
       ...(conversationId !== undefined ? { conversationId: conversationId as string } : {}),
       ...(onBehalfOf !== undefined ? { onBehalfOf } : {}),
+      ...(approvalAnswer !== undefined ? { approvalAnswer: { relayToken: (approvalAnswer as ApprovalAnswer).relayToken, decision: (approvalAnswer as ApprovalAnswer).decision } } : {}),
       issuedAt,
     },
   }
