@@ -3,11 +3,8 @@
   "gaps": [
     "cli:node dist/mcp/bin.js",
     "mcp:channel_caps",
-    "mcp:connect_to",
     "mcp:import_result",
     "mcp:link_identity",
-    "mcp:onboard_agent",
-    "mcp:record_mission",
-    "mcp:set_trust"
+    "mcp:record_mission"
   ]
 }

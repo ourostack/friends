@@ -401,7 +401,13 @@
           },
           "trustLevel": {
             "type": "string",
-            "description": "trust level (default stranger (cold contact))"
+            "description": "trust level (default stranger (cold contact))",
+            "enum": [
+              "family",
+              "friend",
+              "acquaintance",
+              "stranger"
+            ]
           },
           "a2a": {
             "type": "object",
@@ -430,7 +436,7 @@
     {
       "name": "connect_to",
       "title": "Connect to",
-      "description": "Management-sense control plane (brick 8): the owner links one of their OWN agents into this agent's fleet — introduce a peer by agentId/did/name at a trust level (default family for own-fleet). Authority-gated: commits inline ONLY from a local (owner-only stdio) or roster-verified same-account closed sense; an open sense never commits inline (it downgrades to a confirm-prompt); a bare name with no resolvable handle/DID and no record hit returns needs_handle_or_introduction (never fabricates a target). Writes one control-plane audit record (action:'connect') through the wired sink. Returns { ok:true, status:'connected', record } or { ok:false, status:'downgraded'|'needs_handle_or_introduction', downgrade? }.",
+      "description": "Management-sense control plane (brick 8): the owner links one of their OWN agents into this agent's fleet — introduce a peer by agentId/did/name at a trust level (default family for own-fleet). Authority-gated: commits inline ONLY from a local (owner-only stdio) or roster-verified same-account closed sense; from an open sense it downgrades to a confirm-prompt instead; a bare name with no resolvable handle/DID, no record hit, or more than one agent of that name returns needs_handle_or_introduction (it links only a target it can find). Writes one control-plane audit record (action:'connect') through the wired sink. Returns { ok:true, status:'connected', record } or { ok:false, status:'downgraded'|'needs_handle_or_introduction', downgrade? }.",
       "inputSchema": {
         "type": "object",
         "properties": {

@@ -22,7 +22,10 @@
       "describe_trust",
       "assess_standing",
       "explain_standing",
-      "unlink_identity"
+      "set_trust",
+      "unlink_identity",
+      "onboard_agent",
+      "connect_to"
     ],
     "friends-sharing": [
       "share_profile",

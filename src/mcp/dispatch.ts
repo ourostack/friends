@@ -135,6 +135,17 @@ function isSharedPayload(envelope: { notes?: unknown; outcomes?: unknown }): boo
   return notesOk && (envelope.outcomes === undefined || Array.isArray(envelope.outcomes))
 }
 
+const TRUST_LEVELS: ReadonlySet<string> = new Set<TrustLevel>(["family", "friend", "acquaintance", "stranger"])
+
+/** The answer for a trust level friends doesn't know. The store would save such a level as its default, friend, so
+ * the tools refuse it rather than report one level and keep another (#217). */
+function invalidTrustLevel(level: string): DispatchResult {
+  return {
+    result: { ok: false, status: "invalid", message: `unrecognized trust level '${level}': use family, friend, acquaintance or stranger` },
+    isError: true,
+  }
+}
+
 /** Usage record_interaction can count: an object whose output_tokens is a whole number of 0 or more. */
 function isUsage(usage: unknown): usage is UsageData {
   if (!usage || typeof usage !== "object" || Array.isArray(usage)) return false
@@ -331,10 +342,12 @@ export async function dispatchTool(
     }
 
     case "set_trust": {
+      const trustLevel = coerceString(args.trustLevel)
+      if (!TRUST_LEVELS.has(trustLevel)) return invalidTrustLevel(trustLevel)
       // SECURITY (finding 3): thread the audit sink + owner/sense context so the LIVE
       // trust mutation actually writes a control-plane record. With no sink wired,
       // setFriendTrust treats the ctx as a no-op (back-compat).
-      const result = await setFriendTrust(store, coerceString(args.friendId), coerceString(args.trustLevel) as TrustLevel, {
+      const result = await setFriendTrust(store, coerceString(args.friendId), trustLevel as TrustLevel, {
         ...(audit ? { sink: audit } : {}),
         actor: auditActor,
         originSense: auditOriginSense,
@@ -360,10 +373,16 @@ export async function dispatchTool(
     }
 
     case "onboard_agent": {
+      if (args.trustLevel !== undefined && !TRUST_LEVELS.has(coerceString(args.trustLevel))) return invalidTrustLevel(String(args.trustLevel))
       const explicitTrustLevel = coerceOptionalString(args.trustLevel) as TrustLevel | undefined
+      const name = coerceString(args.name).trim()
+      const agentId = coerceString(args.agentId).trim()
+      if (name === "" || agentId === "") {
+        return { result: { ok: false, status: "invalid", message: "onboard_agent needs a name and an agentId" }, isError: true }
+      }
       const record = await upsertAgentPeer(store, {
-        name: coerceString(args.name),
-        agentId: coerceString(args.agentId),
+        name,
+        agentId,
         trustLevel: explicitTrustLevel,
         a2a: parseMaybeJson<AgentMeta["a2a"]>(args.a2a),
         mailbox: parseMaybeJson<{ repo: string; selfOutboxAgentId: string }>(args.mailbox),
@@ -400,6 +419,8 @@ export async function dispatchTool(
     }
 
     case "connect_to": {
+      if (args.trustLevel !== undefined && !TRUST_LEVELS.has(coerceString(args.trustLevel))) return invalidTrustLevel(String(args.trustLevel))
+      const connectTrust = coerceOptionalString(args.trustLevel)
       // The management-sense control plane (p11 inc2, brick 8). The boundary stays
       // thin — coerce the peer handles + level, resolve the gate's management sense
       // (the stdio path is owner-only ⇒ `local`), and forward to the library, which
@@ -418,7 +439,7 @@ export async function dispatchTool(
           // real senseType via controlContext. The proof's stdio path commits.
           senseType: controlContext?.senseType ?? "local",
           ...(controlContext?.membership ? { membership: controlContext.membership } : {}),
-          trustLevel: coerceOptionalString(args.trustLevel) as TrustLevel | undefined,
+          trustLevel: connectTrust as TrustLevel | undefined,
         },
         {
           ...(audit ? { audit } : {}),
