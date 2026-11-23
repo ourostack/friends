@@ -200,13 +200,21 @@ export default defineActions(
     defineAction({
       id: "link_identity",
       consent: "write",
+      destructive: true,
       label: "Link identity",
       description: "Attach an external identity to a friend.",
-      agent: "Link an external identity to a friend, merging any orphan record that already holds it (cross-channel unification).",
+      agent: "Link an external identity to a friend, merging any orphan record that already holds it (cross-channel unification): the orphan's notes and other ids move onto the friend and the orphan record is deleted. An id the friend already holds answers ok with status noop, or retry_unsupported when the store can't list records to finish an interrupted merge.",
+      when: "One person reached you on another channel: attach that channel's id to their record, folding in any duplicate",
+      errors: [
+        { code: "invalid", means: "The externalId is empty or the provider isn't one friends knows, so nothing was linked.", fix: "Pass provider aad, local, teams-conversation, imessage-handle, email-address, a2a-agent or telegram-user, with a non-empty externalId." },
+        { code: "not-found", means: "No friend record has that uuid or name, or two share the name, so nothing was linked.", fix: "Call list_friends to find the record, then link the identity to it by uuid." },
+        { code: "conflict-requires-operator", means: "Another record holds the id, and merging it would move standing, authority or other ids between records, so it's the owner's call; nothing changed.", fix: "Show the owner both records with get_friend and let them decide; set_trust or unlink_identity can line the records up first." },
+        { code: "tool-failed", means: "A record could not be read, written or deleted, or more than one record holds the id; the message says why, and a merge cut short leaves both.", fix: "If the message says the id is bound to several friends, unlink it from all but one; otherwise check the directory is writable and retry." },
+      ],
       openInput: true,
       input: {
         friendId: field.string({ label: "Friend", description: "friend uuid or name" }),
-        provider: field.string({ label: "Provider", description: "identity provider, e.g. aad, local, teams-conversation, imessage-handle, email-address, a2a-agent" }),
+        provider: field.enum({ label: "Provider", description: "identity provider", values: ["aad", "local", "teams-conversation", "imessage-handle", "email-address", "a2a-agent", "telegram-user"] }),
         externalId: field.string({ label: "External id", description: "the external identity within the provider" }),
         tenantId: field.string({ label: "Tenant", description: "optional tenant id", optional: true }),
       },

@@ -226,7 +226,7 @@
     },
     {
       "name": "link-identity",
-      "summary": "Link an external identity to a friend, merging any orphan record that already holds it (cross-channel unification).",
+      "summary": "Link an external identity to a friend, merging any orphan record that already holds it (cross-channel unification): the orphan's notes and other ids move onto the friend and the orphan record is deleted. An id the friend already holds answers ok with status noop, or retry_unsupported when the store can't list records to finish an interrupted merge.",
       "effect": "private",
       "flags": {
         "friend-id": {
@@ -235,8 +235,17 @@
           "required": true
         },
         "provider": {
-          "type": "string",
-          "description": "identity provider, e.g. aad, local, teams-conversation, imessage-handle, email-address, a2a-agent",
+          "type": "enum",
+          "description": "identity provider",
+          "values": [
+            "aad",
+            "local",
+            "teams-conversation",
+            "imessage-handle",
+            "email-address",
+            "a2a-agent",
+            "telegram-user"
+          ],
           "required": true
         },
         "external-id": {

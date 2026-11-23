@@ -23,6 +23,7 @@
       "assess_standing",
       "explain_standing",
       "set_trust",
+      "link_identity",
       "unlink_identity",
       "onboard_agent",
       "connect_to"

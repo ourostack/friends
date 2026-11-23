@@ -10,7 +10,7 @@ import type { MissionStore } from "../mission-store"
 import type { AuditSink, ControlPlaneAuditRecord } from "../audit"
 import { resolveAgentIdentity } from "../identity"
 import type { IdentityProvider, TrustLevel, NoteProvenance, AgentMeta, ShareScope, AgentAttribution } from "../types"
-import { isShareScope } from "../types"
+import { isIdentityProvider, isShareScope } from "../types"
 import { FriendResolver } from "../resolver"
 import { describeTrustContext } from "../trust-explanation"
 import { assessStanding, explainStanding } from "../standing"
@@ -134,6 +134,8 @@ function isSharedPayload(envelope: { notes?: unknown; outcomes?: unknown }): boo
     typeof (note as { value?: unknown }).value === "string"))
   return notesOk && (envelope.outcomes === undefined || Array.isArray(envelope.outcomes))
 }
+
+const IDENTITY_PROVIDER_LIST = "aad, local, teams-conversation, imessage-handle, email-address, a2a-agent or telegram-user"
 
 const TRUST_LEVELS: ReadonlySet<string> = new Set<TrustLevel>(["family", "friend", "acquaintance", "stranger"])
 
@@ -356,6 +358,14 @@ export async function dispatchTool(
     }
 
     case "link_identity": {
+      // An empty id would be saved as ["", ""], and one under a provider friends doesn't know is outside the closed
+      // provider set the rest of friends checks, yet both answered linked (#218).
+      if (!isIdentityProvider(args.provider) || coerceString(args.externalId).trim() === "") {
+        return {
+          result: { ok: false, status: "invalid", message: `link_identity needs an externalId and a provider: one of ${IDENTITY_PROVIDER_LIST}` },
+          isError: true,
+        }
+      }
       const result = await linkExternalId(store, coerceString(args.friendId), {
         provider: coerceString(args.provider) as IdentityProvider,
         externalId: coerceString(args.externalId),

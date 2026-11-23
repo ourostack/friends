@@ -4,7 +4,6 @@
     "cli:node dist/mcp/bin.js",
     "mcp:channel_caps",
     "mcp:import_result",
-    "mcp:link_identity",
     "mcp:record_mission"
   ]
 }

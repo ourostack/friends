@@ -45,7 +45,7 @@ extension SetTrustInput: ReinsInput {
 }
 
 extension LinkIdentityInput: ReinsInput {
-    public static var reinsSchema: ReinsSchema { .object(properties: ["friendId": .string, "provider": .string, "externalId": .string, "tenantId": .string], required: ["friendId", "provider", "externalId"]) }
+    public static var reinsSchema: ReinsSchema { .object(properties: ["friendId": .string, "provider": .oneOf(["aad", "local", "teams-conversation", "imessage-handle", "email-address", "a2a-agent", "telegram-user"]), "externalId": .string, "tenantId": .string], required: ["friendId", "provider", "externalId"]) }
 }
 
 extension UnlinkIdentityInput: ReinsInput {

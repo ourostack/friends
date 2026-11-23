@@ -1012,12 +1012,32 @@ extension SetTrustButton where Label == Text {
 
 // MARK: link_identity (write)
 
+public enum LinkIdentityProviderValue: String, Codable, Sendable, Hashable, CaseIterable, AppEnum {
+    case aad = "aad"
+    case local = "local"
+    case teamsConversation = "teams-conversation"
+    case imessageHandle = "imessage-handle"
+    case emailAddress = "email-address"
+    case a2aAgent = "a2a-agent"
+    case telegramUser = "telegram-user"
+    public static let typeDisplayRepresentation: TypeDisplayRepresentation = "Provider"
+    public static let caseDisplayRepresentations: [LinkIdentityProviderValue: DisplayRepresentation] = [
+        .aad: "aad",
+        .local: "local",
+        .teamsConversation: "teams-conversation",
+        .imessageHandle: "imessage-handle",
+        .emailAddress: "email-address",
+        .a2aAgent: "a2a-agent",
+        .telegramUser: "telegram-user",
+    ]
+}
+
 public struct LinkIdentityInput: Codable, Sendable, Hashable {
     public var friendId: String
-    public var provider: String
+    public var provider: LinkIdentityProviderValue
     public var externalId: String
     public var tenantId: String?
-    public init(friendId: String, provider: String, externalId: String, tenantId: String? = nil) {
+    public init(friendId: String, provider: LinkIdentityProviderValue, externalId: String, tenantId: String? = nil) {
         self.friendId = friendId
         self.provider = provider
         self.externalId = externalId
@@ -1052,8 +1072,8 @@ public struct LinkIdentityIntent: AppIntent {
 
     @Parameter(title: "Friend", description: "friend uuid or name")
     public var friendId: String
-    @Parameter(title: "Provider", description: "identity provider, e.g. aad, local, teams-conversation, imessage-handle, email-address, a2a-agent")
-    public var provider: String
+    @Parameter(title: "Provider", description: "identity provider")
+    public var provider: LinkIdentityProviderValue
     @Parameter(title: "External id", description: "the external identity within the provider")
     public var externalId: String
     @Parameter(title: "Tenant", description: "optional tenant id")
